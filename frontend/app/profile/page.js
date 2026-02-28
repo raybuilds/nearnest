@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { apiRequest } from "@/lib/api";
 
 function formatDate(date) {
@@ -35,11 +36,146 @@ function OccupantIdStat({ label, displayValue, rawValue }) {
   );
 }
 
+function boolLabel(value) {
+  if (value === undefined || value === null) return "N/A";
+  return value ? "Yes" : "No";
+}
+
+function trustBandTone(trustBand) {
+  if (trustBand === "priority") return "text-emerald-700 bg-emerald-50 border-emerald-200";
+  if (trustBand === "hidden") return "text-red-700 bg-red-50 border-red-200";
+  return "text-amber-700 bg-amber-50 border-amber-200";
+}
+
+function DensityBadge({ count }) {
+  let tone = "border-slate-300 bg-slate-50 text-slate-700";
+  if (count >= 5) tone = "border-red-300 bg-red-50 text-red-700";
+  else if (count >= 3) tone = "border-amber-300 bg-amber-50 text-amber-700";
+  return <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${tone}`}>Density: {count}/30d</span>;
+}
+
+function MediaGrid({ title, items }) {
+  const list = Array.isArray(items) ? items : [];
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500">{title}</p>
+      {list.length === 0 ? (
+        <p className="mt-2 text-sm text-slate-600">No items</p>
+      ) : (
+        <div className="mt-2 grid gap-2 sm:grid-cols-2">
+          {list.slice(0, 4).map((item) => (
+            <a
+              key={`media-${item.id}`}
+              href={item.publicUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="truncate rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
+            >
+              {item.publicUrl}
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function CurrentAccommodationCard({ data }) {
+  if (!data) return null;
+
+  const identity = data.identity || {};
+  const trust = data.trust || {};
+  const properties = data.properties || {};
+  const availability = data.availability || {};
+  const complaintHealth = data.complaintHealth || {};
+  const trend = complaintHealth.trend || {};
+
+  return (
+    <section className="rounded-xl border bg-white p-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-xl font-semibold">Current Accommodation</h2>
+        <div className="flex gap-2">
+          {data.links?.unitPage && (
+            <Link className="rounded border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50" href={data.links.unitPage}>
+              View Unit
+            </Link>
+          )}
+          {data.links?.unitComplaintsPage && (
+            <Link className="rounded border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50" href={data.links.unitComplaintsPage}>
+              View Complaint Ledger
+            </Link>
+          )}
+        </div>
+      </div>
+
+      <div className="mt-3 grid gap-2 md:grid-cols-2">
+        <Stat label="Unit" value={identity.hostelLabel || identity.unitLabel} />
+        <Stat label="Corridor" value={identity.corridor ? `#${identity.corridor.id} - ${identity.corridor.name}` : "N/A"} />
+        <Stat label="Room Number" value={identity.roomNumber || "N/A"} />
+        <Stat label="Bed Slot" value={identity.bedSlot ? `${identity.bedSlot}` : "N/A"} />
+        <OccupantIdStat label="Occupant ID" displayValue={identity.occupantIdDisplay || null} rawValue={identity.occupantId || null} />
+        <Stat label="Check-in Date" value={formatDate(identity.checkInDate)} />
+      </div>
+
+      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${trustBandTone(trust.trustBand)}`}>
+            Trust: {trust.trustScore ?? "N/A"} ({trust.trustBand || "unknown"})
+          </span>
+          <DensityBadge count={trust.complaintDensity30d || 0} />
+          <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${trust.status === "suspended" ? "border-red-300 bg-red-50 text-red-700" : "border-slate-300 bg-white text-slate-700"}`}>
+            Status: {trust.status || "N/A"}
+          </span>
+          {trust.auditRequired && <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">Audit Required</span>}
+        </div>
+        <p className={`mt-2 text-sm ${trust.visibilityThresholdBreached ? "text-red-700" : "text-slate-700"}`}>
+          {trust.message || "Unit governance status unavailable."}
+        </p>
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-2">
+        <Stat label="Rent" value={properties.rent !== undefined ? `Rs ${properties.rent}` : "N/A"} />
+        <Stat label="Distance" value={properties.distanceKm !== undefined ? `${properties.distanceKm} km` : "N/A"} />
+        <Stat label="Institution Proximity" value={properties.institutionProximityKm !== undefined ? `${properties.institutionProximityKm} km` : "N/A"} />
+        <Stat label="Occupancy Type" value={properties.occupancyType || "N/A"} />
+        <Stat label="AC" value={boolLabel(properties.ac)} />
+        <Stat label="Bed Available" value={boolLabel(properties.bedAvailable)} />
+        <Stat label="Water Access" value={boolLabel(properties.waterAvailable)} />
+        <Stat label="Toilets Available" value={properties.toiletsAvailable ?? "N/A"} />
+        <Stat label="Ventilation" value={boolLabel(properties.ventilationGood)} />
+        <Stat label="Availability" value={`${availability.availableSlots ?? 0} / ${availability.capacity ?? 0} slots`} />
+      </div>
+
+      <div className="mt-4 grid gap-2 md:grid-cols-3">
+        <MediaGrid title="Photos" items={data.media?.photos} />
+        <MediaGrid title="Documents" items={data.media?.documents} />
+        <MediaGrid title="360 Walkthroughs" items={data.media?.walkthroughs360} />
+      </div>
+
+      <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
+        <p className="text-sm font-semibold text-slate-900">Unit Health (Last {complaintHealth.windowDays || 30} Days)</p>
+        <div className="mt-2 grid gap-2 md:grid-cols-3">
+          <Stat label="Complaints (30d)" value={complaintHealth.totalComplaints30d ?? 0} />
+          <Stat label="Open (30d)" value={complaintHealth.openComplaints30d ?? 0} />
+          <Stat label="My Open Complaints" value={complaintHealth.myOpenComplaints ?? 0} />
+          <Stat label="Avg Resolution" value={complaintHealth.avgResolutionHours30d !== null && complaintHealth.avgResolutionHours30d !== undefined ? `${complaintHealth.avgResolutionHours30d}h` : "N/A"} />
+          <Stat label="SLA Breaches" value={complaintHealth.slaBreaches30d ?? 0} />
+          <Stat label="Incident Flags" value={complaintHealth.incidentFlags30d ?? 0} />
+        </div>
+        <p className="mt-2 text-xs text-slate-600">
+          Trend: {trend.direction || "flat"} ({trend.previous14d ?? 0} to {trend.current14d ?? 0} complaints in successive 14-day windows)
+        </p>
+      </div>
+    </section>
+  );
+}
+
 function StudentProfile({ data }) {
   const identity = data?.identity || {};
   const occupancy = data?.occupancy || {};
   const complaintSummary = data?.complaintSummary || {};
   const history = Array.isArray(occupancy.history) ? occupancy.history : [];
+  const currentAccommodation = data?.currentAccommodation || null;
 
   return (
     <div className="space-y-4">
@@ -61,6 +197,8 @@ function StudentProfile({ data }) {
           <Stat label="Joined Date" value={formatDate(identity.joinedDate)} />
         </div>
       </section>
+
+      <CurrentAccommodationCard data={currentAccommodation} />
 
       <section className="rounded-xl border bg-white p-4 shadow-sm">
         <h2 className="mb-3 text-xl font-semibold">Occupancy</h2>

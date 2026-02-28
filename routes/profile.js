@@ -3,6 +3,7 @@ const prisma = require("../prismaClient");
 const { verifyToken } = require("../middlewares/auth");
 
 const router = express.Router();
+const HEALTH_WINDOW_DAYS = 30;
 
 function formatOccupantPublicId(publicId) {
   if (!publicId || !/^\d{12}$/.test(publicId)) {
@@ -31,6 +32,31 @@ function getAvgResolutionHours(complaints) {
 
   if (values.length === 0) return null;
   return Number((values.reduce((sum, value) => sum + value, 0) / values.length).toFixed(2));
+}
+
+function getTrustBand(trustScore) {
+  if (Number(trustScore) < 50) return "hidden";
+  if (Number(trustScore) < 80) return "standard";
+  return "priority";
+}
+
+function getWindowCutoff(days) {
+  return new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+}
+
+function isSlaBreach(complaint) {
+  const now = new Date();
+  if (!complaint.slaDeadline) return false;
+  const deadline = new Date(complaint.slaDeadline);
+  if (Number.isNaN(deadline.getTime())) return false;
+
+  if (!complaint.resolved) {
+    return now > deadline;
+  }
+  if (!complaint.resolvedAt) return false;
+  const resolvedAt = new Date(complaint.resolvedAt);
+  if (Number.isNaN(resolvedAt.getTime())) return false;
+  return resolvedAt > deadline;
 }
 
 router.get("/profile", verifyToken, async (req, res) => {
@@ -79,9 +105,29 @@ router.get("/profile", verifyToken, async (req, res) => {
           where: { studentId: student.id, endDate: null },
           include: {
             unit: {
-              select: {
-                id: true,
+              include: {
                 corridor: { select: { id: true, name: true } },
+                media: {
+                  select: { id: true, type: true, publicUrl: true, createdAt: true, locked: true },
+                  orderBy: { createdAt: "desc" },
+                },
+                complaints: {
+                  select: {
+                    id: true,
+                    studentId: true,
+                    severity: true,
+                    resolved: true,
+                    createdAt: true,
+                    resolvedAt: true,
+                    slaDeadline: true,
+                    incidentFlag: true,
+                  },
+                  orderBy: { createdAt: "desc" },
+                },
+                occupancies: {
+                  where: { endDate: null },
+                  select: { id: true },
+                },
               },
             },
           },
@@ -129,6 +175,7 @@ router.get("/profile", verifyToken, async (req, res) => {
       const latestVdp = student.vdpEntries[0] || null;
       const resolvedComplaints = complaints.filter((item) => item.resolved);
       const activeOccupant = occupants.find((item) => item.active) || null;
+      const currentUnit = currentOccupancy?.unit || null;
       const profileStatus = currentOccupancy
         ? "active"
         : shortlistCount > 0
@@ -136,6 +183,111 @@ router.get("/profile", verifyToken, async (req, res) => {
           : latestVdp?.verified
             ? "verified"
             : "registered";
+
+      let currentAccommodation = null;
+      if (currentOccupancy && currentUnit) {
+        const allUnitComplaints = Array.isArray(currentUnit.complaints) ? currentUnit.complaints : [];
+        const cutoff = getWindowCutoff(HEALTH_WINDOW_DAYS);
+        const complaints30d = allUnitComplaints.filter((item) => {
+          const createdAt = item.createdAt ? new Date(item.createdAt) : null;
+          return createdAt && !Number.isNaN(createdAt.getTime()) && createdAt >= cutoff;
+        });
+        const resolved30d = complaints30d.filter((item) => item.resolved);
+        const avgResolutionHours30d = getAvgResolutionHours(resolved30d);
+        const incidents30d = complaints30d.filter((item) => item.incidentFlag).length;
+        const slaBreaches30d = complaints30d.filter(isSlaBreach).length;
+        const myOpenComplaints = allUnitComplaints.filter((item) => item.studentId === student.id && !item.resolved).length;
+        const currentOpenComplaints = complaints30d.filter((item) => !item.resolved).length;
+        const occupancyCount = Array.isArray(currentUnit.occupancies) ? currentUnit.occupancies.length : 0;
+        const availableSlots = Math.max((currentUnit.capacity || 0) - occupancyCount, 0);
+        const trustBand = getTrustBand(currentUnit.trustScore);
+        const media = Array.isArray(currentUnit.media) ? currentUnit.media : [];
+        const mediaByType = {
+          photos: media.filter((item) => item.type === "photo"),
+          documents: media.filter((item) => item.type === "document"),
+          walkthroughs360: media.filter((item) => item.type === "walkthrough360"),
+        };
+
+        const trendCurrent14d = complaints30d.filter((item) => {
+          const createdAt = new Date(item.createdAt);
+          const cutoff14 = getWindowCutoff(14);
+          return createdAt >= cutoff14;
+        }).length;
+        const trendPrevious14d = complaints30d.filter((item) => {
+          const createdAt = new Date(item.createdAt);
+          const end = getWindowCutoff(14);
+          const start = getWindowCutoff(28);
+          return createdAt >= start && createdAt < end;
+        }).length;
+
+        currentAccommodation = {
+          identity: {
+            unitId: currentUnit.id,
+            unitLabel: `Unit #${currentUnit.id}`,
+            hostelLabel: `Hostel Unit #${currentUnit.id}`,
+            corridor: currentUnit.corridor ? { id: currentUnit.corridor.id, name: currentUnit.corridor.name } : null,
+            roomNumber: activeOccupant?.roomNumber || null,
+            bedSlot: activeOccupant?.occupantIndex || null,
+            occupantId: activeOccupant?.publicId || null,
+            occupantIdDisplay: formatOccupantPublicId(activeOccupant?.publicId || null),
+            checkInDate: currentOccupancy.startDate,
+          },
+          trust: {
+            trustScore: currentUnit.trustScore,
+            trustBand,
+            status: currentUnit.status,
+            auditRequired: currentUnit.auditRequired,
+            complaintDensity30d: complaints30d.length,
+            visibilityThresholdBreached: Number(currentUnit.trustScore) < 50,
+            message:
+              currentUnit.status === "suspended" || currentUnit.auditRequired
+                ? "Unit under review. Corrective actions in progress."
+                : Number(currentUnit.trustScore) < 50
+                  ? "Unit currently under visibility threshold."
+                  : "Unit is currently within governance visibility threshold.",
+          },
+          availability: {
+            occupancyCount,
+            capacity: currentUnit.capacity,
+            availableSlots,
+          },
+          properties: {
+            bedAvailable: currentUnit.bedAvailable,
+            waterAvailable: currentUnit.waterAvailable,
+            toiletsAvailable: currentUnit.toiletsAvailable,
+            ventilationGood: currentUnit.ventilationGood,
+            ac: currentUnit.ac,
+            occupancyType: currentUnit.occupancyType,
+            distanceKm: currentUnit.distanceKm,
+            rent: currentUnit.rent,
+            institutionProximityKm: currentUnit.institutionProximityKm,
+          },
+          media: mediaByType,
+          complaintHealth: {
+            windowDays: HEALTH_WINDOW_DAYS,
+            totalComplaints30d: complaints30d.length,
+            openComplaints30d: currentOpenComplaints,
+            avgResolutionHours30d,
+            slaBreaches30d,
+            incidentFlags30d: incidents30d,
+            myOpenComplaints,
+            trend: {
+              current14d: trendCurrent14d,
+              previous14d: trendPrevious14d,
+              direction:
+                trendCurrent14d > trendPrevious14d
+                  ? "up"
+                  : trendCurrent14d < trendPrevious14d
+                    ? "down"
+                    : "flat",
+            },
+          },
+          links: {
+            unitPage: `/unit/${currentUnit.id}`,
+            unitComplaintsPage: `/unit/${currentUnit.id}/complaints`,
+          },
+        };
+      }
 
       return res.json({
         role: "student",
@@ -190,6 +342,7 @@ router.get("/profile", verifyToken, async (req, res) => {
           avgResolutionHours: getAvgResolutionHours(resolvedComplaints),
           latest: complaints.slice(0, 5),
         },
+        currentAccommodation,
       });
     }
 
