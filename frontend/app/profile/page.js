@@ -23,6 +23,18 @@ function Stat({ label, value }) {
   );
 }
 
+function OccupantIdStat({ label, displayValue, rawValue }) {
+  const primary = displayValue || rawValue || "N/A";
+  const showRaw = Boolean(displayValue && rawValue && displayValue !== rawValue);
+  return (
+    <div className="rounded-lg border border-slate-200 bg-white p-3">
+      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
+      <p className="mt-1 text-lg font-semibold text-slate-900">{primary}</p>
+      {showRaw && <p className="mt-1 text-xs text-slate-500">Raw: {rawValue}</p>}
+    </div>
+  );
+}
+
 function StudentProfile({ data }) {
   const identity = data?.identity || {};
   const occupancy = data?.occupancy || {};
@@ -39,7 +51,11 @@ function StudentProfile({ data }) {
           <Stat label="Institution" value={identity.institution?.name || "N/A"} />
           <Stat label="Intake" value={identity.intake} />
           <Stat label="Corridor" value={identity.corridor ? `#${identity.corridor.id} - ${identity.corridor.name}` : "N/A"} />
-          <Stat label="Occupant ID" value={identity.occupantId || "N/A"} />
+          <OccupantIdStat
+            label="Occupant ID"
+            displayValue={identity.occupantIdDisplay || null}
+            rawValue={identity.occupantId || identity.currentOccupantId || null}
+          />
           <Stat label="VDP Status" value={identity.vdp?.status || "not_joined"} />
           <Stat label="Status" value={identity.status} />
           <Stat label="Joined Date" value={formatDate(identity.joinedDate)} />
@@ -80,7 +96,7 @@ function StudentProfile({ data }) {
                   }`}
                   key={`occupant-id-${item.id}`}
                 >
-                  {item.publicId} {item.active ? "(Active)" : "(Inactive)"}
+                  {item.publicIdDisplay || item.publicId} {item.active ? "(Active)" : "(Inactive)"}
                 </span>
               ))}
             </div>

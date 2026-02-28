@@ -5,6 +5,12 @@ const { generateOccupantId } = require("../services/occupantIdService");
 
 const router = express.Router();
 
+function createCheckInError(code, message) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
 router.post("/occupancy/check-in", verifyToken, requireRole("landlord"), async (req, res) => {
   try {
     const { unitId, studentId } = req.body;
@@ -56,34 +62,6 @@ router.post("/occupancy/check-in", verifyToken, requireRole("landlord"), async (
       return res.status(400).json({ error: "Student is already checked into a unit" });
     }
 
-    const activeOccupancyCount = await prisma.occupancy.count({
-      where: {
-        unitId: parsedUnitId,
-        endDate: null,
-      },
-    });
-    if (activeOccupancyCount >= unit.capacity) {
-      await prisma.$transaction(async (tx) => {
-        await tx.auditLog.create({
-          data: {
-            unitId: parsedUnitId,
-            triggerType: "capacity_violation",
-            reason: "Capacity breach attempt: landlord tried to check in beyond approved unit capacity",
-          },
-        });
-
-        await tx.unit.update({
-          where: { id: parsedUnitId },
-          data: {
-            structuralApproved: false,
-            auditRequired: true,
-            ...(unit.status === "archived" ? {} : { status: "suspended" }),
-          },
-        });
-      });
-      return res.status(400).json({ error: "Unit capacity reached" });
-    }
-
     const cityCode = Number(unit.corridor?.cityCode || 0);
     const corridorCode = Number(unit.corridorId);
     const hostelCode = Number(unit.id);
@@ -91,56 +69,112 @@ router.post("/occupancy/check-in", verifyToken, requireRole("landlord"), async (
     if (cityCode < 0 || cityCode > 99 || corridorCode < 0 || corridorCode > 999 || hostelCode < 0 || hostelCode > 999 || roomNumber < 0 || roomNumber > 999) {
       return res.status(400).json({ error: "Unit/corridor mapping exceeds occupant id segment limits" });
     }
-    let occupantIndex = activeOccupancyCount + 1;
-    let publicId = null;
+    const maxEncodableSlots = 9;
+    const maxAllowedCapacity = Math.min(unit.capacity, maxEncodableSlots);
 
-    while (occupantIndex <= 9) {
-      const candidate = generateOccupantId({
-        cityCode,
-        corridorCode,
-        hostelCode,
-        roomNumber,
-        occupantIndex,
-      });
-      const existing = await prisma.occupant.findUnique({
-        where: { publicId: candidate },
-        select: { id: true },
-      });
-      if (!existing) {
-        publicId = candidate;
-        break;
-      }
-      occupantIndex += 1;
+    if (maxAllowedCapacity <= 0) {
+      return res.status(400).json({ error: "Unit capacity is not configured for occupancy" });
     }
 
-    if (!publicId) {
-      return res.status(400).json({ error: "No occupant slot available for this room mapping" });
-    }
+    const runTransactionalCheckIn = async () =>
+      prisma.$transaction(async (tx) => {
+        await tx.$queryRaw`SELECT id FROM "Unit" WHERE id = ${parsedUnitId} FOR UPDATE`;
 
-    const { occupancy, occupant } = await prisma.$transaction(async (tx) => {
-      const createdOccupancy = await tx.occupancy.create({
-        data: {
-          unitId: parsedUnitId,
-          studentId: parsedStudentId,
-        },
-      });
+        const activeCount = await tx.occupancy.count({
+          where: {
+            unitId: parsedUnitId,
+            endDate: null,
+          },
+        });
+        if (activeCount >= maxAllowedCapacity) {
+          throw createCheckInError("CAPACITY_REACHED", "Unit capacity reached");
+        }
 
-      const createdOccupant = await tx.occupant.create({
-        data: {
-          publicId,
+        const activeForStudent = await tx.occupancy.findFirst({
+          where: {
+            studentId: parsedStudentId,
+            endDate: null,
+          },
+          select: { id: true },
+        });
+        if (activeForStudent) {
+          throw createCheckInError("STUDENT_ALREADY_ACTIVE", "Student is already checked into a unit");
+        }
+
+        const existing = await tx.occupant.findMany({
+          where: {
+            unitId: parsedUnitId,
+            roomNumber,
+            active: true,
+          },
+          select: { occupantIndex: true },
+        });
+
+        const usedIndices = new Set(existing.map((item) => item.occupantIndex));
+        let occupantIndex = 1;
+        while (usedIndices.has(occupantIndex) && occupantIndex <= maxAllowedCapacity) {
+          occupantIndex += 1;
+        }
+        if (occupantIndex > maxAllowedCapacity || occupantIndex > maxEncodableSlots) {
+          throw createCheckInError("NO_SLOT_AVAILABLE", "No occupant slot available for this room mapping");
+        }
+
+        const publicId = generateOccupantId({
           cityCode,
           corridorCode,
           hostelCode,
           roomNumber,
           occupantIndex,
-          studentId: parsedStudentId,
-          unitId: parsedUnitId,
-          active: true,
-        },
+        });
+
+        const createdOccupancy = await tx.occupancy.create({
+          data: {
+            unitId: parsedUnitId,
+            studentId: parsedStudentId,
+          },
+        });
+
+        const createdOccupant = await tx.occupant.create({
+          data: {
+            publicId,
+            cityCode,
+            corridorCode,
+            hostelCode,
+            roomNumber,
+            occupantIndex,
+            studentId: parsedStudentId,
+            unitId: parsedUnitId,
+            active: true,
+          },
+        });
+
+        return { occupancy: createdOccupancy, occupant: createdOccupant };
       });
 
-      return { occupancy: createdOccupancy, occupant: createdOccupant };
-    });
+    let attempt = 0;
+    const maxRetries = 3;
+    let result = null;
+    while (attempt < maxRetries) {
+      try {
+        result = await runTransactionalCheckIn();
+        break;
+      } catch (error) {
+        if (error?.code === "P2002") {
+          attempt += 1;
+          if (attempt >= maxRetries) {
+            throw createCheckInError("CHECKIN_CONFLICT", "Check-in conflict. Please retry.");
+          }
+          continue;
+        }
+        throw error;
+      }
+    }
+
+    if (!result) {
+      throw createCheckInError("CHECKIN_CONFLICT", "Check-in conflict. Please retry.");
+    }
+
+    const { occupancy, occupant } = result;
     return res.status(201).json({
       ...occupancy,
       occupant: {
@@ -149,6 +183,43 @@ router.post("/occupancy/check-in", verifyToken, requireRole("landlord"), async (
       },
     });
   } catch (error) {
+    if (error?.code === "STUDENT_ALREADY_ACTIVE") {
+      return res.status(400).json({ error: error.message });
+    }
+    if (error?.code === "CAPACITY_REACHED") {
+      const { unitId } = req.body;
+      const parsedUnitId = Number(unitId);
+      if (!Number.isNaN(parsedUnitId)) {
+        const currentUnit = await prisma.unit.findUnique({
+          where: { id: parsedUnitId },
+          select: { id: true, status: true },
+        });
+        if (currentUnit) {
+          await prisma.$transaction(async (tx) => {
+            await tx.auditLog.create({
+              data: {
+                unitId: parsedUnitId,
+                triggerType: "capacity_violation",
+                reason: "Capacity breach attempt: landlord tried to check in beyond approved unit capacity",
+              },
+            });
+
+            await tx.unit.update({
+              where: { id: parsedUnitId },
+              data: {
+                structuralApproved: false,
+                auditRequired: true,
+                ...(currentUnit.status === "archived" ? {} : { status: "suspended" }),
+              },
+            });
+          });
+        }
+      }
+      return res.status(400).json({ error: error.message });
+    }
+    if (error?.code === "NO_SLOT_AVAILABLE" || error?.code === "CHECKIN_CONFLICT") {
+      return res.status(409).json({ error: error.message });
+    }
     console.error(error);
     return res.status(500).json({ error: "Something went wrong" });
   }

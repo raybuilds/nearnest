@@ -256,21 +256,36 @@ router.post("/complaint", verifyToken, requireRole("student"), async (req, res) 
     }
 
     let resolvedUnitId = unitId ? Number(unitId) : null;
+    let resolvedOccupantRecordId = null;
     if (unitId && Number.isNaN(resolvedUnitId)) {
       return res.status(400).json({ error: "unitId must be a number" });
     }
     if (occupantId !== undefined && occupantId !== null && String(occupantId).trim() !== "") {
       const normalizedOccupantId = String(occupantId).trim();
+      if (!/^\d{12}$/.test(normalizedOccupantId)) {
+        return res.status(400).json({ error: "Invalid occupant ID" });
+      }
       const occupant = await prisma.occupant.findUnique({
         where: { publicId: normalizedOccupantId },
+        include: {
+          unit: {
+            select: {
+              corridorId: true,
+            },
+          },
+        },
       });
       if (!occupant || !occupant.active) {
-        return res.status(404).json({ error: "Active occupantId not found" });
+        return res.status(400).json({ error: "Invalid occupant ID" });
       }
       if (occupant.studentId !== requesterStudent.id) {
-        return res.status(403).json({ error: "You can only file complaints for your own occupant id" });
+        return res.status(400).json({ error: "Invalid occupant ID" });
+      }
+      if (!occupant.unit || occupant.unit.corridorId !== requesterStudent.corridorId) {
+        return res.status(400).json({ error: "Invalid occupant ID" });
       }
       resolvedUnitId = occupant.unitId;
+      resolvedOccupantRecordId = occupant.id;
     }
 
     if (!resolvedUnitId) {
@@ -281,6 +296,9 @@ router.post("/complaint", verifyToken, requireRole("student"), async (req, res) 
     if (!unit) {
       return res.status(404).json({ error: "Unit not found" });
     }
+    if (unit.corridorId !== requesterStudent.corridorId) {
+      return res.status(403).json({ error: "You can only file complaints in your corridor" });
+    }
 
 
     const createdAt = new Date();
@@ -289,6 +307,7 @@ router.post("/complaint", verifyToken, requireRole("student"), async (req, res) 
     const complaint = await prisma.complaint.create({
       data: {
         unitId: resolvedUnitId,
+        occupantRecordId: resolvedOccupantRecordId,
         studentId: requesterStudent.id,
         severity: parsedSeverity,
         message: normalizedMessage,

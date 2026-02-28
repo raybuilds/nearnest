@@ -96,6 +96,8 @@ model Complaint {
   incidentFlag Boolean   @default(false)
   unit        Unit      @relation(fields: [unitId], references: [id])
   unitId      Int
+  occupantRecordId Int?
+  occupant    Occupant? @relation(fields: [occupantRecordId], references: [id])
   student     Student   @relation(fields: [studentId], references: [id])
   studentId   Int
 }
@@ -153,9 +155,12 @@ model Occupant {
   createdAt     DateTime @default(now())
   student       Student  @relation(fields: [studentId], references: [id])
   unit          Unit     @relation(fields: [unitId], references: [id])
+  complaints    Complaint[]
 
+  @@unique([unitId, roomNumber, occupantIndex, active])
   @@index([studentId, active])
   @@index([unitId, active])
+  @@index([unitId, roomNumber, active])
 }
 
 model StructuralChecklist {

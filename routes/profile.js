@@ -4,6 +4,13 @@ const { verifyToken } = require("../middlewares/auth");
 
 const router = express.Router();
 
+function formatOccupantPublicId(publicId) {
+  if (!publicId || !/^\d{12}$/.test(publicId)) {
+    return publicId || null;
+  }
+  return `NN-${publicId.slice(0, 2)}-${publicId.slice(2, 5)}-${publicId.slice(5, 8)}-${publicId.slice(8, 11)}-${publicId.slice(11, 12)}`;
+}
+
 function getLateResolvedCount(complaints) {
   return complaints.filter((item) => {
     if (!item.resolved || !item.resolvedAt || !item.slaDeadline) return false;
@@ -140,6 +147,8 @@ router.get("/profile", verifyToken, async (req, res) => {
           corridor: student.corridor ? { id: student.corridor.id, name: student.corridor.name } : null,
           joinedDate: user.createdAt,
           occupantId: activeOccupant?.publicId || null,
+          occupantIdDisplay: formatOccupantPublicId(activeOccupant?.publicId || null),
+          currentOccupantId: activeOccupant?.publicId || null,
           vdp: latestVdp
             ? {
                 status: latestVdp.status,
@@ -155,6 +164,7 @@ router.get("/profile", verifyToken, async (req, res) => {
                 unitId: currentOccupancy.unitId,
                 checkInDate: currentOccupancy.startDate,
                 occupantId: activeOccupant?.publicId || null,
+                occupantIdDisplay: formatOccupantPublicId(activeOccupant?.publicId || null),
                 corridor: currentOccupancy.unit?.corridor || null,
               }
             : null,
@@ -168,6 +178,7 @@ router.get("/profile", verifyToken, async (req, res) => {
           occupantIds: occupants.map((item) => ({
             id: item.id,
             publicId: item.publicId,
+            publicIdDisplay: formatOccupantPublicId(item.publicId),
             unitId: item.unitId,
             active: item.active,
             createdAt: item.createdAt,
