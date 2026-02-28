@@ -8,9 +8,11 @@ function getAuthToken() {
 export async function apiRequest(path, options = {}) {
   const token = getAuthToken();
   const authHeader = token ? { Authorization: `Bearer ${token}` } : {};
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
+  const baseHeaders = isFormData ? { ...authHeader } : { "Content-Type": "application/json", ...authHeader };
 
   const response = await fetch(`${BASE_URL}${path}`, {
-    headers: { "Content-Type": "application/json", ...authHeader, ...(options.headers || {}) },
+    headers: { ...baseHeaders, ...(options.headers || {}) },
     ...options,
   });
 

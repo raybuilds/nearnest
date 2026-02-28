@@ -210,9 +210,9 @@ function LandlordDashboard() {
   const [toiletsAvailable, setToiletsAvailable] = useState(true);
   const [ventilationGood, setVentilationGood] = useState(true);
   const [selfDeclaration, setSelfDeclaration] = useState("");
-  const [photoUrl, setPhotoUrl] = useState("");
-  const [documentUrl, setDocumentUrl] = useState("");
-  const [walkthroughUrl, setWalkthroughUrl] = useState("");
+  const [photoFile, setPhotoFile] = useState(null);
+  const [documentFile, setDocumentFile] = useState(null);
+  const [walkthroughFile, setWalkthroughFile] = useState(null);
   const [checkInUnitId, setCheckInUnitId] = useState("");
   const [checkInStudentId, setCheckInStudentId] = useState("");
   const [checkOutOccupancyId, setCheckOutOccupancyId] = useState("");
@@ -358,8 +358,8 @@ function LandlordDashboard() {
     setError("");
     setStatus("");
     try {
-      if (!photoUrl || !documentUrl || !walkthroughUrl) {
-        throw new Error("photo URL, document URL, and 360 walkthrough URL are required");
+      if (!photoFile || !documentFile || !walkthroughFile) {
+        throw new Error("photo, document, and 360 walkthrough files are required");
       }
       if (!selfDeclaration.trim()) {
         throw new Error("selfDeclaration is required");
@@ -398,17 +398,28 @@ function LandlordDashboard() {
         }),
       });
 
+      const photoForm = new FormData();
+      photoForm.append("type", "photo");
+      photoForm.append("file", photoFile);
       await apiRequest(`/unit/${result.id}/media`, {
         method: "POST",
-        body: JSON.stringify({ type: "photo", url: photoUrl.trim() }),
+        body: photoForm,
       });
+
+      const documentForm = new FormData();
+      documentForm.append("type", "document");
+      documentForm.append("file", documentFile);
       await apiRequest(`/unit/${result.id}/media`, {
         method: "POST",
-        body: JSON.stringify({ type: "document", url: documentUrl.trim() }),
+        body: documentForm,
       });
+
+      const walkthroughForm = new FormData();
+      walkthroughForm.append("type", "walkthrough360");
+      walkthroughForm.append("file", walkthroughFile);
       await apiRequest(`/unit/${result.id}/media`, {
         method: "POST",
-        body: JSON.stringify({ type: "360", url: walkthroughUrl.trim() }),
+        body: walkthroughForm,
       });
 
       await apiRequest(`/unit/${result.id}/submit`, {
@@ -418,9 +429,9 @@ function LandlordDashboard() {
 
       setStatus(`Created unit #${result.id} and submitted for admin review`);
       setSelfDeclaration("");
-      setPhotoUrl("");
-      setDocumentUrl("");
-      setWalkthroughUrl("");
+      setPhotoFile(null);
+      setDocumentFile(null);
+      setWalkthroughFile(null);
       loadDemandMetrics(Number(corridorId));
       loadMyUnits();
     } catch (err) {
@@ -580,9 +591,36 @@ function LandlordDashboard() {
           Ventilation Good
         </label>
         <input className="rounded border p-2 md:col-span-2" placeholder="Self-declaration text" value={selfDeclaration} onChange={(e) => setSelfDeclaration(e.target.value)} required />
-        <input className="rounded border p-2 md:col-span-2" placeholder="Photo URL" value={photoUrl} onChange={(e) => setPhotoUrl(e.target.value)} required />
-        <input className="rounded border p-2 md:col-span-2" placeholder="Document URL" value={documentUrl} onChange={(e) => setDocumentUrl(e.target.value)} required />
-        <input className="rounded border p-2 md:col-span-2" placeholder="360 Walkthrough URL" value={walkthroughUrl} onChange={(e) => setWalkthroughUrl(e.target.value)} required />
+        <label className="rounded border p-2 md:col-span-2">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Photo File</span>
+          <input
+            accept="image/*"
+            className="w-full text-sm"
+            onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
+            type="file"
+            required
+          />
+        </label>
+        <label className="rounded border p-2 md:col-span-2">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Document File</span>
+          <input
+            accept=".pdf,.doc,.docx,.txt,image/*"
+            className="w-full text-sm"
+            onChange={(e) => setDocumentFile(e.target.files?.[0] || null)}
+            type="file"
+            required
+          />
+        </label>
+        <label className="rounded border p-2 md:col-span-2">
+          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">360 Walkthrough File</span>
+          <input
+            accept=".html,.zip,.json,video/*,image/*"
+            className="w-full text-sm"
+            onChange={(e) => setWalkthroughFile(e.target.files?.[0] || null)}
+            type="file"
+            required
+          />
+        </label>
         <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60 md:col-span-2" disabled={loading} type="submit">
           {loading ? "Creating & Submitting..." : "Create + Submit Unit"}
         </button>

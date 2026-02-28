@@ -6,6 +6,7 @@ import { apiRequest } from "@/lib/api";
 
 export default function ComplaintForm() {
   const [unitId, setUnitId] = useState("");
+  const [occupantId, setOccupantId] = useState("");
   const [studentId, setStudentId] = useState("");
   const [severity, setSeverity] = useState("1");
   const [incidentType, setIncidentType] = useState("");
@@ -31,7 +32,8 @@ export default function ComplaintForm() {
       const result = await apiRequest("/complaint", {
         method: "POST",
         body: JSON.stringify({
-          unitId: Number(unitId),
+          unitId: unitId ? Number(unitId) : undefined,
+          occupantId: occupantId.trim() || undefined,
           studentId: Number(studentId),
           severity: Number(severity),
           incidentType: incidentType || undefined,
@@ -40,6 +42,8 @@ export default function ComplaintForm() {
       });
       setStatusMessage(`Complaint submitted. New trustScore: ${result.trustScore}`);
       setComplaintText("");
+      setUnitId("");
+      setOccupantId("");
     } catch (err) {
       setError(err.message);
     } finally {
@@ -68,12 +72,18 @@ export default function ComplaintForm() {
     <section className="space-y-4 rounded-xl border bg-white p-4 shadow-sm">
       <h2 className="text-xl font-semibold">Complaints</h2>
 
-      <form onSubmit={submitComplaint} className="grid gap-2 md:grid-cols-5">
+      <form onSubmit={submitComplaint} className="grid gap-2 md:grid-cols-6">
         <input
           className="rounded border p-2"
           placeholder="unitId"
           value={unitId}
           onChange={(e) => setUnitId(e.target.value)}
+        />
+        <input
+          className="rounded border p-2"
+          placeholder="occupantId (12 digits)"
+          value={occupantId}
+          onChange={(e) => setOccupantId(e.target.value)}
         />
         <input
           className="rounded border p-2"
@@ -96,7 +106,7 @@ export default function ComplaintForm() {
           <option value="other">Other</option>
         </select>
         <textarea
-          className="rounded border p-2 md:col-span-4"
+          className="rounded border p-2 md:col-span-5"
           placeholder="Describe the complaint (optional)"
           value={complaintText}
           onChange={(e) => setComplaintText(e.target.value)}

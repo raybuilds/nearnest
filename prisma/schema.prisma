@@ -10,6 +10,7 @@ datasource db {
 model Corridor {
   id           Int           @id @default(autoincrement())
   name         String
+  cityCode     Int           @default(0)
   students     Student[]
   units        Unit[]
   institutions Institution[]
@@ -40,6 +41,7 @@ model Student {
   complaints Complaint[]
   vdpEntries VDPEntry[]
   occupancies Occupancy[]
+  occupants  Occupant[]
   shortlists Shortlist[]
 }
 
@@ -74,6 +76,7 @@ model Unit {
   corridorId                  Int
   complaints                  Complaint[]
   occupancies                 Occupancy[]
+  occupants                   Occupant[]
   shortlists                  Shortlist[]
   structuralChecklist         StructuralChecklist?
   operationalChecklist        OperationalChecklist?
@@ -134,6 +137,25 @@ model Occupancy {
   endDate   DateTime?
   unit      Unit     @relation(fields: [unitId], references: [id])
   student   Student  @relation(fields: [studentId], references: [id])
+}
+
+model Occupant {
+  id            Int      @id @default(autoincrement())
+  publicId      String   @unique
+  cityCode      Int
+  corridorCode  Int
+  hostelCode    Int
+  roomNumber    Int
+  occupantIndex Int
+  studentId     Int
+  unitId        Int
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  student       Student  @relation(fields: [studentId], references: [id])
+  unit          Unit     @relation(fields: [unitId], references: [id])
+
+  @@index([studentId, active])
+  @@index([unitId, active])
 }
 
 model StructuralChecklist {

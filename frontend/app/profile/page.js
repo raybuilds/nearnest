@@ -39,6 +39,7 @@ function StudentProfile({ data }) {
           <Stat label="Institution" value={identity.institution?.name || "N/A"} />
           <Stat label="Intake" value={identity.intake} />
           <Stat label="Corridor" value={identity.corridor ? `#${identity.corridor.id} - ${identity.corridor.name}` : "N/A"} />
+          <Stat label="Occupant ID" value={identity.occupantId || "N/A"} />
           <Stat label="VDP Status" value={identity.vdp?.status || "not_joined"} />
           <Stat label="Status" value={identity.status} />
           <Stat label="Joined Date" value={formatDate(identity.joinedDate)} />
@@ -62,6 +63,25 @@ function StudentProfile({ data }) {
                   <p className="text-xs text-slate-600">Start: {formatDate(item.startDate)}</p>
                   <p className="text-xs text-slate-600">End: {formatDate(item.endDate)}</p>
                 </div>
+              ))}
+            </div>
+          )}
+        </div>
+        <div className="mt-4">
+          <p className="mb-2 text-sm font-semibold text-slate-800">Occupant IDs</p>
+          {!Array.isArray(occupancy.occupantIds) || occupancy.occupantIds.length === 0 ? (
+            <p className="text-sm text-slate-600">No occupant IDs yet.</p>
+          ) : (
+            <div className="flex flex-wrap gap-2">
+              {occupancy.occupantIds.map((item) => (
+                <span
+                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${
+                    item.active ? "border-green-300 bg-green-50 text-green-700" : "border-slate-300 bg-slate-50 text-slate-700"
+                  }`}
+                  key={`occupant-id-${item.id}`}
+                >
+                  {item.publicId} {item.active ? "(Active)" : "(Inactive)"}
+                </span>
               ))}
             </div>
           )}

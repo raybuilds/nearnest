@@ -28,6 +28,12 @@ function parseUnitId(text) {
   return Number(match[1]);
 }
 
+function parseOccupantId(text) {
+  const match = String(text || "").match(/\b(\d{12})\b/);
+  if (!match) return null;
+  return match[1];
+}
+
 function detectIncidentType(text) {
   if (text.includes("fire")) return "fire";
   if (text.includes("injury")) return "injury";
@@ -175,9 +181,10 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
       const text = message.toLowerCase();
       const severity = parseSeverity(text) || 3;
       const incidentType = detectIncidentType(text);
+      const occupantId = parseOccupantId(text);
       let unitId = parseUnitId(text);
 
-      if (!unitId) {
+      if (!unitId && !occupantId) {
         const active = await prisma.occupancy.findFirst({
           where: { studentId: student.id, endDate: null },
           select: { unitId: true },
@@ -185,15 +192,15 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
         unitId = active?.unitId || null;
       }
 
-      if (!unitId) {
+      if (!unitId && !occupantId) {
         return res.json({
           intent,
-          assistant: "I need a unit id to file this complaint. Please say: 'complaint for unit 28, severity 4 ...'",
+          assistant: "I need an occupantId (12 digits) or unit id to file this complaint.",
         });
       }
 
       const draft = {
-        unitId,
+        ...(occupantId ? { occupantId } : { unitId }),
         studentId: student.id,
         severity,
         incidentType,
@@ -204,7 +211,7 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
         return res.json({
           intent,
           requiresConfirmation: true,
-          assistant: `I can submit this complaint for unit ${unitId} with severity ${severity}. Confirm?`,
+          assistant: `I can submit this complaint with severity ${severity}${occupantId ? ` for occupant ${occupantId}` : ` for unit ${unitId}`}. Confirm?`,
           action: {
             intent,
             payload: draft,

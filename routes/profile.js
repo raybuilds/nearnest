@@ -67,7 +67,7 @@ router.get("/profile", verifyToken, async (req, res) => {
         return res.status(403).json({ error: "Student profile not found" });
       }
 
-      const [currentOccupancy, occupancyHistory, complaints, shortlistCount] = await Promise.all([
+      const [currentOccupancy, occupancyHistory, complaints, shortlistCount, occupants] = await Promise.all([
         prisma.occupancy.findFirst({
           where: { studentId: student.id, endDate: null },
           include: {
@@ -106,10 +106,22 @@ router.get("/profile", verifyToken, async (req, res) => {
           orderBy: { createdAt: "desc" },
         }),
         prisma.shortlist.count({ where: { studentId: student.id } }),
+        prisma.occupant.findMany({
+          where: { studentId: student.id },
+          orderBy: { createdAt: "desc" },
+          select: {
+            id: true,
+            publicId: true,
+            unitId: true,
+            active: true,
+            createdAt: true,
+          },
+        }),
       ]);
 
       const latestVdp = student.vdpEntries[0] || null;
       const resolvedComplaints = complaints.filter((item) => item.resolved);
+      const activeOccupant = occupants.find((item) => item.active) || null;
       const profileStatus = currentOccupancy
         ? "active"
         : shortlistCount > 0
@@ -127,6 +139,7 @@ router.get("/profile", verifyToken, async (req, res) => {
           intake: student.intake,
           corridor: student.corridor ? { id: student.corridor.id, name: student.corridor.name } : null,
           joinedDate: user.createdAt,
+          occupantId: activeOccupant?.publicId || null,
           vdp: latestVdp
             ? {
                 status: latestVdp.status,
@@ -141,6 +154,7 @@ router.get("/profile", verifyToken, async (req, res) => {
             ? {
                 unitId: currentOccupancy.unitId,
                 checkInDate: currentOccupancy.startDate,
+                occupantId: activeOccupant?.publicId || null,
                 corridor: currentOccupancy.unit?.corridor || null,
               }
             : null,
@@ -150,6 +164,13 @@ router.get("/profile", verifyToken, async (req, res) => {
             startDate: item.startDate,
             endDate: item.endDate,
             corridor: item.unit?.corridor || null,
+          })),
+          occupantIds: occupants.map((item) => ({
+            id: item.id,
+            publicId: item.publicId,
+            unitId: item.unitId,
+            active: item.active,
+            createdAt: item.createdAt,
           })),
         },
         complaintSummary: {

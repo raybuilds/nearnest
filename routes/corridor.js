@@ -101,14 +101,22 @@ router.get("/corridors", async (req, res) => {
 
 router.post("/corridor", verifyToken, requireRole("admin"), async (req, res) => {
   try {
-    const { name } = req.body;
+    const { name, cityCode } = req.body;
 
     if (!name || typeof name !== "string") {
       return res.status(400).json({ error: "name is required" });
     }
 
+    let parsedCityCode = 0;
+    if (cityCode !== undefined && cityCode !== null && String(cityCode).trim() !== "") {
+      parsedCityCode = Number(cityCode);
+      if (!Number.isInteger(parsedCityCode) || parsedCityCode < 0 || parsedCityCode > 99) {
+        return res.status(400).json({ error: "cityCode must be an integer from 0 to 99" });
+      }
+    }
+
     const corridor = await prisma.corridor.create({
-      data: { name: name.trim() },
+      data: { name: name.trim(), cityCode: parsedCityCode },
     });
 
     res.status(201).json(corridor);

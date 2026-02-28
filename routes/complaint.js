@@ -217,10 +217,10 @@ async function recalculateUnitTrustScore(unitId) {
 
 router.post("/complaint", verifyToken, requireRole("student"), async (req, res) => {
   try {
-    const { unitId, studentId, severity, incidentType, message } = req.body;
+    const { unitId, studentId, occupantId, severity, incidentType, message } = req.body;
 
-    if (!unitId || !studentId || severity === undefined) {
-      return res.status(400).json({ error: "unitId, studentId and severity are required" });
+    if ((!unitId && !occupantId) || severity === undefined) {
+      return res.status(400).json({ error: "Provide occupantId or unitId, and severity" });
     }
 
     const parsedSeverity = Number(severity);
@@ -244,30 +244,52 @@ router.post("/complaint", verifyToken, requireRole("student"), async (req, res) 
       }
     }
 
-    const [unit, student] = await Promise.all([
-      prisma.unit.findUnique({ where: { id: Number(unitId) } }),
-      prisma.student.findUnique({ where: { id: Number(studentId) } }),
-    ]);
+    const requesterStudent = await prisma.student.findFirst({
+      where: { userId: req.user.id },
+    });
+    if (!requesterStudent) {
+      return res.status(404).json({ error: "Student profile not found" });
+    }
 
+    if (studentId !== undefined && studentId !== null && Number(studentId) !== requesterStudent.id) {
+      return res.status(403).json({ error: "You can only file complaints as your own student identity" });
+    }
+
+    let resolvedUnitId = unitId ? Number(unitId) : null;
+    if (unitId && Number.isNaN(resolvedUnitId)) {
+      return res.status(400).json({ error: "unitId must be a number" });
+    }
+    if (occupantId !== undefined && occupantId !== null && String(occupantId).trim() !== "") {
+      const normalizedOccupantId = String(occupantId).trim();
+      const occupant = await prisma.occupant.findUnique({
+        where: { publicId: normalizedOccupantId },
+      });
+      if (!occupant || !occupant.active) {
+        return res.status(404).json({ error: "Active occupantId not found" });
+      }
+      if (occupant.studentId !== requesterStudent.id) {
+        return res.status(403).json({ error: "You can only file complaints for your own occupant id" });
+      }
+      resolvedUnitId = occupant.unitId;
+    }
+
+    if (!resolvedUnitId) {
+      return res.status(400).json({ error: "Unit could not be resolved" });
+    }
+
+    const unit = await prisma.unit.findUnique({ where: { id: resolvedUnitId } });
     if (!unit) {
       return res.status(404).json({ error: "Unit not found" });
     }
 
-    if (!student) {
-      return res.status(404).json({ error: "Student not found" });
-    }
-
-    if (student.userId !== req.user.id) {
-      return res.status(403).json({ error: "You can only file complaints as your own student identity" });
-    }
 
     const createdAt = new Date();
     const slaDeadline = new Date(createdAt.getTime() + 48 * 60 * 60 * 1000);
 
     const complaint = await prisma.complaint.create({
       data: {
-        unitId: Number(unitId),
-        studentId: Number(studentId),
+        unitId: resolvedUnitId,
+        studentId: requesterStudent.id,
         severity: parsedSeverity,
         message: normalizedMessage,
         createdAt,
@@ -277,7 +299,7 @@ router.post("/complaint", verifyToken, requireRole("student"), async (req, res) 
       },
     });
 
-    const trustScore = await recalculateUnitTrustScore(Number(unitId));
+    const trustScore = await recalculateUnitTrustScore(resolvedUnitId);
 
     res.status(201).json({
       message: "Complaint recorded",

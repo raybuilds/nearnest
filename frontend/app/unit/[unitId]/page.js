@@ -34,20 +34,51 @@ function InfoBadge({ label, value }) {
   );
 }
 
-function MediaList({ title, media }) {
+function MediaList({ title, media, variant = "link", onPreview }) {
   return (
     <div className="rounded-lg border border-slate-200 p-3">
       <p className="mb-2 text-sm font-semibold text-slate-800">{title}</p>
       {media?.length ? (
-        <ul className="space-y-1 text-sm">
-          {media.map((item) => (
-            <li key={`media-${title}-${item.id}`}>
-              <a className="break-all text-blue-700 underline" href={item.publicUrl || item.url} rel="noreferrer" target="_blank">
-                {item.publicUrl || item.url}
-              </a>
-            </li>
-          ))}
-        </ul>
+        variant === "photo" ? (
+          <div className="grid grid-cols-2 gap-2">
+            {media.map((item) => {
+              const src = item.publicUrl || item.url;
+              return (
+                <button
+                  className="group relative block overflow-hidden rounded border border-slate-200 bg-slate-50"
+                  key={`media-${title}-${item.id}`}
+                  onClick={() => onPreview?.({ src, label: item.fileName || title })}
+                  type="button"
+                >
+                  {item.locked && (
+                    <span className="absolute right-1 top-1 z-10 rounded bg-slate-900/85 px-1.5 py-0.5 text-[10px] font-semibold text-white">
+                      Locked
+                    </span>
+                  )}
+                  <img
+                    alt={item.fileName || `Unit ${title}`}
+                    className="h-24 w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                    loading="lazy"
+                    src={src}
+                  />
+                </button>
+              );
+            })}
+          </div>
+        ) : (
+          <ul className="space-y-1 text-sm">
+            {media.map((item) => {
+              const src = item.publicUrl || item.url;
+              return (
+                <li key={`media-${title}-${item.id}`}>
+                  <a className="break-all text-blue-700 underline" href={src} rel="noreferrer" target="_blank">
+                    {src}
+                  </a>
+                </li>
+              );
+            })}
+          </ul>
+        )
       ) : (
         <p className="text-sm text-slate-600">No items</p>
       )}
@@ -64,7 +95,7 @@ function ChecklistRow({ label, value }) {
   );
 }
 
-function StudentUnitView({ data }) {
+function StudentUnitView({ data, onPreview }) {
   const photos = (data.discovery.media || []).filter((item) => String(item.type).toLowerCase() === "photo");
   const docs = (data.discovery.media || []).filter((item) => String(item.type).toLowerCase() === "document");
   const walkthroughs = (data.discovery.media || []).filter((item) => {
@@ -83,7 +114,7 @@ function StudentUnitView({ data }) {
           <InfoBadge label="Institution Proximity (km)" value={data.discovery.institutionProximityKm} />
         </div>
         <div className="grid gap-3 md:grid-cols-3">
-          <MediaList title="Photos" media={photos} />
+          <MediaList media={photos} onPreview={onPreview} title="Photos" variant="photo" />
           <MediaList title="Documents" media={docs} />
           <MediaList title="360 Walkthroughs" media={walkthroughs} />
         </div>
@@ -134,7 +165,7 @@ function StudentUnitView({ data }) {
   );
 }
 
-function LandlordUnitView({ overview, interested, complaints, auditLogs }) {
+function LandlordUnitView({ overview, interested, complaints, auditLogs, onPreview }) {
   const occupants = interested.filter((item) => item.status === "occupant");
   const shortlisted = interested.filter((item) => item.status === "shortlisted");
   const photos = (overview?.media?.all || []).filter((item) => String(item.type).toLowerCase() === "photo");
@@ -174,7 +205,7 @@ function LandlordUnitView({ overview, interested, complaints, auditLogs }) {
           <p className="text-sm text-slate-700">{overview.declarations?.selfDeclaration || "N/A"}</p>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
-          <MediaList title="Photos" media={photos} />
+          <MediaList media={photos} onPreview={onPreview} title="Photos" variant="photo" />
           <MediaList title="Documents" media={docs} />
           <MediaList title="360 Walkthroughs" media={walkthroughs} />
         </div>
@@ -252,6 +283,7 @@ function AdminUnitView({
   onSaveStructuralChecklist,
   onSaveOperationalChecklist,
   updatingChecklist,
+  onPreview,
 }) {
   const photos = (data.evidence.media || []).filter((item) => String(item.type).toLowerCase() === "photo");
   const docs = (data.evidence.media || []).filter((item) => String(item.type).toLowerCase() === "document");
@@ -315,7 +347,7 @@ function AdminUnitView({
           </div>
         </div>
         <div className="grid gap-3 md:grid-cols-3">
-          <MediaList title="Photos" media={photos} />
+          <MediaList media={photos} onPreview={onPreview} title="Photos" variant="photo" />
           <MediaList title="Documents" media={docs} />
           <MediaList title="360 Walkthroughs" media={walkthroughs} />
         </div>
@@ -547,6 +579,7 @@ export default function UnitRolePage() {
   const [updatingGovernance, setUpdatingGovernance] = useState(false);
   const [updatingChecklist, setUpdatingChecklist] = useState(false);
   const [actionMessage, setActionMessage] = useState("");
+  const [previewItem, setPreviewItem] = useState(null);
   const [structuralDraft, setStructuralDraft] = useState({
     fireExit: false,
     wiringSafe: false,
@@ -717,6 +750,7 @@ export default function UnitRolePage() {
         <AdminUnitView
           actionMessage={actionMessage}
           data={adminData}
+          onPreview={(item) => setPreviewItem(item)}
           onOperationalDraftChange={updateOperationalDraft}
           onSetOperationalApproved={(value) => updateAdminGovernance({ operationalBaselineApproved: value })}
           onSetStructuralApproved={(value) => updateAdminGovernance({ structuralApproved: value })}
@@ -730,14 +764,47 @@ export default function UnitRolePage() {
           updatingGovernance={updatingGovernance}
         />
       )}
-      {!loading && !error && role === "student" && studentData && <StudentUnitView data={studentData} />}
+      {!loading && !error && role === "student" && studentData && <StudentUnitView data={studentData} onPreview={(item) => setPreviewItem(item)} />}
       {!loading && !error && role === "landlord" && landlordOverview && (
         <LandlordUnitView
           auditLogs={landlordAuditLogs}
           complaints={landlordComplaints}
           interested={landlordInterested}
+          onPreview={(item) => setPreviewItem(item)}
           overview={landlordOverview}
         />
+      )}
+
+      {previewItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setPreviewItem(null)}
+          role="presentation"
+        >
+          <div
+            className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-xl bg-white shadow-2xl"
+            onClick={(e) => e.stopPropagation()}
+            role="presentation"
+          >
+            <div className="flex items-center justify-between border-b px-4 py-3">
+              <p className="truncate text-sm font-semibold text-slate-800">{previewItem.label}</p>
+              <button
+                className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
+                onClick={() => setPreviewItem(null)}
+                type="button"
+              >
+                Close
+              </button>
+            </div>
+            <div className="bg-slate-100 p-3">
+              <img
+                alt={previewItem.label}
+                className="max-h-[75vh] w-full rounded object-contain"
+                src={previewItem.src}
+              />
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

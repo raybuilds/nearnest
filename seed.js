@@ -21,10 +21,11 @@ async function main() {
 
   const corridor = await prisma.corridor.upsert({
     where: { id: 1 },
-    update: {},
+    update: { cityCode: 12 },
     create: {
       id: 1,
       name: "Aligarh AMU Corridor",
+      cityCode: 12,
     },
   });
   console.log("Created corridor:", corridor.name);
@@ -418,6 +419,40 @@ async function main() {
   ];
   for (const row of occupancies) {
     await prisma.occupancy.upsert({
+      where: { id: row.id },
+      update: row,
+      create: row,
+    });
+  }
+
+  const occupants = [
+    {
+      id: 601,
+      publicId: "120010280281",
+      cityCode: 12,
+      corridorCode: 1,
+      hostelCode: 28,
+      roomNumber: 28,
+      occupantIndex: 1,
+      studentId: student.id,
+      unitId: 28,
+      active: true,
+    },
+    {
+      id: 602,
+      publicId: "120010120121",
+      cityCode: 12,
+      corridorCode: 1,
+      hostelCode: 12,
+      roomNumber: 12,
+      occupantIndex: 1,
+      studentId: student3.id,
+      unitId: 12,
+      active: true,
+    },
+  ];
+  for (const row of occupants) {
+    await prisma.occupant.upsert({
       where: { id: row.id },
       update: row,
       create: row,
