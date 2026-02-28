@@ -13,6 +13,7 @@ const occupancyRoutes = require("./routes/occupancy");
 const shortlistRoutes = require("./routes/shortlist");
 const landlordRoutes = require("./routes/landlord");
 const dawnRoutes = require("./routes/dawn");
+const profileRoutes = require("./routes/profile");
 
 const app = express();
 
@@ -40,6 +41,7 @@ app.use(occupancyRoutes);
 app.use(shortlistRoutes);
 app.use(landlordRoutes);
 app.use(dawnRoutes);
+app.use(profileRoutes);
 
 app.listen(5000, () => {
   console.log("Server running on port 5000");

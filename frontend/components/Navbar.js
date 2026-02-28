@@ -41,6 +41,9 @@ export default function Navbar() {
             <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/dashboard">
               Dashboard
             </Link>
+            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/profile">
+              Profile
+            </Link>
             <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/complaints">
               Complaints
             </Link>
@@ -51,6 +54,9 @@ export default function Navbar() {
             <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/dashboard">
               Landlord
             </Link>
+            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/profile">
+              Profile
+            </Link>
             <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/complaints">
               Complaints
             </Link>
@@ -60,6 +66,9 @@ export default function Navbar() {
           <>
             <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/dashboard">
               Dashboard
+            </Link>
+            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/profile">
+              Profile
             </Link>
             <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/complaints">
               Complaints
