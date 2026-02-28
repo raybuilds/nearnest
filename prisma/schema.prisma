@@ -1,0 +1,182 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Corridor {
+  id           Int           @id @default(autoincrement())
+  name         String
+  students     Student[]
+  units        Unit[]
+  institutions Institution[]
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  name      String
+  email     String    @unique
+  password  String
+  role      String
+  createdAt DateTime  @default(now())
+  student   Student?
+  landlord  Landlord?
+}
+
+model Student {
+  id         Int        @id @default(autoincrement())
+  name       String
+  intake     String
+  userId     Int?       @unique
+  institutionId Int?
+  corridor   Corridor   @relation(fields: [corridorId], references: [id])
+  corridorId Int
+  user       User?      @relation(fields: [userId], references: [id])
+  institution Institution? @relation(fields: [institutionId], references: [id])
+  complaints Complaint[]
+  vdpEntries VDPEntry[]
+  occupancies Occupancy[]
+  shortlists Shortlist[]
+}
+
+model Landlord {
+  id     Int    @id @default(autoincrement())
+  userId Int    @unique
+  user   User   @relation(fields: [userId], references: [id])
+  units  Unit[]
+}
+
+model Unit {
+  id                          Int        @id @default(autoincrement())
+  status                      String     @default("draft")
+  trustScore                  Float      @default(75)
+  rent                        Int        @default(0)
+  distanceKm                  Float      @default(0)
+  institutionProximityKm      Float      @default(0)
+  ac                          Boolean    @default(false)
+  occupancyType               String     @default("unknown")
+  bedAvailable                Boolean    @default(true)
+  waterAvailable              Boolean    @default(true)
+  toiletsAvailable            Int        @default(1)
+  ventilationGood             Boolean    @default(true)
+  capacity                    Int        @default(1)
+  structuralApproved          Boolean    @default(false)
+  operationalBaselineApproved Boolean    @default(false)
+  auditRequired               Boolean    @default(false)
+  falseDeclarationCount       Int        @default(0)
+  landlordId                  Int?
+  corridor                    Corridor   @relation(fields: [corridorId], references: [id])
+  landlord                    Landlord?  @relation(fields: [landlordId], references: [id])
+  corridorId                  Int
+  complaints                  Complaint[]
+  occupancies                 Occupancy[]
+  shortlists                  Shortlist[]
+  structuralChecklist         StructuralChecklist?
+  operationalChecklist        OperationalChecklist?
+  media                       UnitMedia[]
+  auditLogs                   AuditLog[]
+}
+
+model Complaint {
+  id          Int       @id @default(autoincrement())
+  severity    Int
+  message     String?
+  resolved    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  resolvedAt  DateTime?
+  slaDeadline DateTime?
+  incidentType String?
+  incidentFlag Boolean   @default(false)
+  unit        Unit      @relation(fields: [unitId], references: [id])
+  unitId      Int
+  student     Student   @relation(fields: [studentId], references: [id])
+  studentId   Int
+}
+
+model VDPEntry {
+  id         Int     @id @default(autoincrement())
+  studentId  Int
+  corridorId Int
+  intake     String
+  verified   Boolean @default(true)
+  status     String  @default("verified")
+  joinedAt   DateTime @default(now())
+
+  student Student @relation(fields: [studentId], references: [id])
+}
+
+model Shortlist {
+  id        Int      @id @default(autoincrement())
+  studentId Int
+  unitId    Int
+  createdAt DateTime @default(now())
+  student   Student  @relation(fields: [studentId], references: [id])
+  unit      Unit     @relation(fields: [unitId], references: [id])
+}
+
+model Institution {
+  id         Int       @id @default(autoincrement())
+  name       String
+  corridorId Int
+  corridor   Corridor  @relation(fields: [corridorId], references: [id])
+  students   Student[]
+}
+
+model Occupancy {
+  id        Int      @id @default(autoincrement())
+  unitId    Int
+  studentId Int
+  startDate DateTime @default(now())
+  endDate   DateTime?
+  unit      Unit     @relation(fields: [unitId], references: [id])
+  student   Student  @relation(fields: [studentId], references: [id])
+}
+
+model StructuralChecklist {
+  id                 Int      @id @default(autoincrement())
+  unitId             Int      @unique
+  fireExit           Boolean  @default(false)
+  wiringSafe         Boolean  @default(false)
+  plumbingSafe       Boolean  @default(false)
+  occupancyCompliant Boolean  @default(false)
+  approved           Boolean  @default(false)
+  unit               Unit     @relation(fields: [unitId], references: [id])
+}
+
+model OperationalChecklist {
+  id                Int      @id @default(autoincrement())
+  unitId            Int      @unique
+  bedAvailable      Boolean  @default(false)
+  waterAvailable    Boolean  @default(false)
+  toiletsAvailable  Boolean  @default(false)
+  ventilationGood   Boolean  @default(false)
+  selfDeclaration   String?
+  approved          Boolean  @default(false)
+  unit              Unit     @relation(fields: [unitId], references: [id])
+}
+
+model UnitMedia {
+  id        Int      @id @default(autoincrement())
+  unitId    Int
+  type      String
+  url       String
+  createdAt DateTime @default(now())
+  unit      Unit     @relation(fields: [unitId], references: [id])
+}
+
+model AuditLog {
+  id        Int      @id @default(autoincrement())
+  unitId    Int
+  triggerType String @default("manual")
+  reason    String
+  correctiveAction String?
+  correctiveDeadline DateTime?
+  verificationNotes String?
+  createdAt DateTime @default(now())
+  resolved  Boolean  @default(false)
+  resolvedAt DateTime?
+  unit      Unit     @relation(fields: [unitId], references: [id])
+}

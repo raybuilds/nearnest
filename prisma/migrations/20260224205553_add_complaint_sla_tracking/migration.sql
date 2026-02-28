@@ -1,0 +1,4 @@
+-- AlterTable
+ALTER TABLE "Complaint" ADD COLUMN     "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+ADD COLUMN     "resolvedAt" TIMESTAMP(3),
+ADD COLUMN     "slaDeadline" TIMESTAMP(3);

@@ -1,0 +1,2 @@
+ALTER TABLE "Complaint"
+ADD COLUMN IF NOT EXISTS "message" TEXT;
