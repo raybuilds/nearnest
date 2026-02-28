@@ -18,6 +18,7 @@ const profileRoutes = require("./routes/profile");
 const mediaRoutes = require("./routes/media");
 
 const app = express();
+const PORT = Number(process.env.PORT || 5000);
 
 app.use(cors());
 app.use(express.json());
@@ -46,6 +47,6 @@ app.use(dawnRoutes);
 app.use(profileRoutes);
 app.use(mediaRoutes);
 
-app.listen(5000, () => {
-  console.log("Server running on port 5000");
+app.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 });

@@ -54,8 +54,22 @@ function DensityBadge({ count }) {
   return <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${tone}`}>Density: {count}/30d</span>;
 }
 
-function MediaGrid({ title, items }) {
-  const list = Array.isArray(items) ? items : [];
+function normalizeMediaItems(items) {
+  if (!Array.isArray(items)) return [];
+  const seen = new Set();
+  return items
+    .filter((item) => item && typeof item.publicUrl === "string")
+    .map((item) => ({ ...item, publicUrl: item.publicUrl.trim() }))
+    .filter((item) => /^https?:\/\//i.test(item.publicUrl) && item.publicUrl.length >= 12)
+    .filter((item) => {
+      if (seen.has(item.publicUrl)) return false;
+      seen.add(item.publicUrl);
+      return true;
+    });
+}
+
+function MediaGrid({ title, items, kind }) {
+  const list = normalizeMediaItems(items);
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3">
       <p className="text-xs uppercase tracking-wide text-slate-500">{title}</p>
@@ -63,17 +77,30 @@ function MediaGrid({ title, items }) {
         <p className="mt-2 text-sm text-slate-600">No items</p>
       ) : (
         <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {list.slice(0, 4).map((item) => (
-            <a
-              key={`media-${item.id}`}
-              href={item.publicUrl}
-              target="_blank"
-              rel="noreferrer"
-              className="truncate rounded border border-slate-200 px-2 py-1 text-xs text-slate-700 hover:bg-slate-50"
-            >
-              {item.publicUrl}
-            </a>
-          ))}
+          {list.slice(0, 4).map((item, index) => {
+            const label = `${title.slice(0, -1)} ${index + 1}`;
+            const isPhoto = kind === "photo";
+            return (
+              <a
+                key={`media-${item.id}`}
+                href={item.publicUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="rounded border border-slate-200 p-2 text-xs text-slate-700 hover:bg-slate-50"
+              >
+                {isPhoto && (
+                  <img
+                    src={item.publicUrl}
+                    alt={label}
+                    className="mb-2 h-16 w-full rounded object-cover"
+                    loading="lazy"
+                  />
+                )}
+                <p className="font-semibold">{label}</p>
+                <p className="truncate text-slate-500">{item.publicUrl}</p>
+              </a>
+            );
+          })}
         </div>
       )}
     </div>
@@ -147,9 +174,9 @@ function CurrentAccommodationCard({ data }) {
       </div>
 
       <div className="mt-4 grid gap-2 md:grid-cols-3">
-        <MediaGrid title="Photos" items={data.media?.photos} />
-        <MediaGrid title="Documents" items={data.media?.documents} />
-        <MediaGrid title="360 Walkthroughs" items={data.media?.walkthroughs360} />
+        <MediaGrid title="Photos" items={data.media?.photos} kind="photo" />
+        <MediaGrid title="Documents" items={data.media?.documents} kind="document" />
+        <MediaGrid title="360 Walkthroughs" items={data.media?.walkthroughs360} kind="walkthrough360" />
       </div>
 
       <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">

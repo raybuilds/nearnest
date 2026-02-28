@@ -1,111 +1,146 @@
 # NearNest
 
-NearNest is a role-based housing governance platform with:
-- Student discovery and complaint protection
-- Landlord operational control
-- Admin governance and audit oversight
+NearNest is a role-aware housing governance platform with three depth layers:
+- Student: discovery + transparency + protection
+- Landlord: operational control
+- Admin: governance and enforcement oversight
 
-This repo contains:
-- Backend: Node.js + Express + Prisma + PostgreSQL
-- Frontend: Next.js 14 (App Router) + Tailwind CSS
+It combines unit discovery, trust scoring, complaint-led governance, audits, occupancy, media evidence, and a conversational query layer (Dawn).
 
-## Core Concepts
+## Tech Stack
 
-- Corridor: locality/container for students, units, and institutions
-- Unit: rental listing with trust, baseline approvals, checklist evidence, and media
-- VDP (Verified Demand Pool): student eligibility gate before unit discovery
-- Trust: computed unit trust score and trust band used for visibility/governance
-- Complaints: immutable behavioral ledger used for SLA and audit signals
-- Audit: governance history with corrective actions and resolution flow
+- Backend: Node.js, Express, Prisma, PostgreSQL, JWT auth
+- Frontend: Next.js 14 (App Router), React 18, Tailwind CSS
+- Storage: local disk abstraction via `services/storageService.js` + `UnitMedia` metadata in Postgres
 
-## Role Model
-
-- Student:
-  - discover visible units
-  - shortlist units
-  - file complaints with severity + message
-  - view own complaint history and transparent unit trust signals
-- Landlord:
-  - create/submit units
-  - manage checklist and media
-  - check in/out occupants
-  - resolve complaints for owned units
-  - monitor demand/risk signals
-- Admin:
-  - review/approve/reject/suspend units
-  - edit checklist items in audit layer
-  - manage audit logs and corrective plans
-  - monitor complaint density and governance metrics
-
-## Monorepo Structure
+## Monorepo Layout
 
 ```text
 .
-├── index.js                  # backend entrypoint (port 5000)
-├── routes/                   # Express route modules
-├── engines/                  # trust scoring engine
-├── prisma/
-│   ├── schema.prisma
-│   └── migrations/
-├── seed.js                   # demo data seed script
-└── frontend/                 # Next.js app (port 3000)
+|-- index.js                         # backend entrypoint (port 5000)
+|-- routes/                          # API routes (auth, unit, complaint, profile, etc.)
+|-- engines/trustEngine.js           # trust scoring logic
+|-- services/                        # storage + occupant ID helpers
+|-- scripts/backfillOccupants.js     # one-time data repair helper
+|-- prisma/
+|   |-- schema.prisma
+|   `-- migrations/
+|-- seed.js                          # demo dataset + credentials
+`-- frontend/                        # Next.js app (port 3000)
+    |-- app/
+    |-- components/
+    `-- lib/api.js
 ```
 
-## Prerequisites
+## Core Domain Model
 
-- Node.js 18+ (Node 20+ recommended)
-- PostgreSQL 14+
-- npm
+- Corridor: parent geography for students, units, institutions
+- Unit: listing with status, trust score, baseline flags, checklist state, and media
+- VDPEntry: Verified Demand Pool gating for student discovery
+- Complaint: immutable behavioral event (severity/SLA/incident flags)
+- AuditLog: governance actions and corrective plans
+- Occupancy: check-in/out lifecycle
+- Occupant: privacy-preserving, location-encoded public occupancy ID
+- UnitMedia: media metadata with lockable evidence lifecycle
 
-## Environment Variables
+## Governance Model
 
-Create `.env` in repo root:
+- Trust Band:
+  - `hidden` when trust score < 50
+  - `standard` when 50-79
+  - `priority` when 80+
+- Visibility to students requires:
+  - `status = approved`
+  - `structuralApproved = true`
+  - `operationalBaselineApproved = true`
+  - `trustScore >= 50`
+- Complaint pressure can trigger audit-required and suspension logic.
+
+## Occupant ID System
+
+12-digit public ID format:
+
+`CC CCC HHH RRR I`
+
+- `CC`: city code (2 digits)
+- `CCC`: corridor code (3)
+- `HHH`: hostel code (3)
+- `RRR`: room number (3)
+- `I`: occupant index (1)
+
+Example: `120010280281`
+
+Safety controls:
+- Global uniqueness: `publicId @unique`
+- Active slot uniqueness: `@@unique([unitId, roomNumber, occupantIndex, active])`
+- Check-in is transactional with row lock + retry on `P2002`
+- Checkout archives occupant (`active=false`), never deletes
+
+## Roles and UI Depth
+
+- Student:
+  - `/dashboard`, `/profile`, `/complaints`, `/unit/{id}`, `/unit/{id}/complaints`
+  - sees trust signals, media, availability, sanitized complaint aggregates
+  - does not see audit internals or other students' private details
+- Landlord:
+  - unit creation/submission, checklists, media upload, occupancy check-in/out
+  - complaint risk panel and unit operations
+- Admin:
+  - corridor/institution governance controls
+  - unit review and full audit/compliance depth
+  - complaint governance console
+
+## Dawn (Conversational Layer)
+
+Endpoint: `POST /dawn/query`
+
+- Parses role-scoped intents from natural language
+- Reads data and routes actions through existing APIs
+- Must not bypass RBAC, validation, trust logic, or DB constraints
+
+## Environment Setup
+
+### 1) Backend `.env` (repo root)
 
 ```env
-DATABASE_URL="postgresql://USER:PASSWORD@localhost:5432/nearnest?schema=public"
-JWT_SECRET="replace-with-a-strong-secret"
+DATABASE_URL="postgresql://postgres:password@localhost:5432/nearnest"
+JWT_SECRET="replace-with-strong-secret"
 ```
 
-Notes:
-- `JWT_SECRET` is required by backend auth middleware.
-- Frontend currently calls backend at hardcoded `http://localhost:5000` (`frontend/lib/api.js`).
+### 2) Frontend env (`frontend/.env.local`)
+
+```env
+NEXT_PUBLIC_API_URL=http://localhost:5000
+```
+
+`frontend/lib/api.js` reads `NEXT_PUBLIC_API_URL` with localhost fallback.
 
 ## Install
 
-Backend deps:
+From repo root:
 
 ```bash
 npm install
-```
-
-Frontend deps:
-
-```bash
 cd frontend
 npm install
+cd ..
 ```
 
-## Database Setup
-
-Apply migrations:
+## Database and Seed
 
 ```bash
 npx prisma migrate deploy
-```
-
-Generate Prisma client:
-
-```bash
 npx prisma generate
-```
-
-Seed demo data:
-
-```bash
 node seed.js
 ```
 
-## Run
+If legacy occupancy data exists without occupant records:
+
+```bash
+node scripts/backfillOccupants.js
+```
+
+## Run Locally
 
 Backend (root):
 
@@ -113,64 +148,109 @@ Backend (root):
 node index.js
 ```
 
-Frontend (`frontend/`):
+Frontend:
 
 ```bash
+cd frontend
 npm run dev
 ```
 
-Open:
+URLs:
 - Frontend: `http://localhost:3000`
 - Backend health: `http://localhost:5000/`
 
-## Authentication
+## Demo Credentials (from seed)
 
-- Register: `POST /auth/register` (student or landlord)
-- Login: `POST /auth/login`
-- Use returned JWT as `Authorization: Bearer <token>`
+- Admin: `admin@nearnest.com` / `admin123`
+- Student: `student@nearnest.com` / `student123`
+- Student2: `student2@nearnest.test` / `student123`
+- Student3: `student3@nearnest.test` / `student123`
+- Landlord: `landlord@nearnest.com` / `landlord123`
+- Landlord2: `landlord2@nearnest.test` / `landlord123`
 
-## Major API Areas
+## API Surface (Key Routes)
 
-- Corridor and demand:
-  - `GET /corridors`
-  - `GET /corridor/:corridorId/overview`
-  - `GET /corridor/:corridorId/demand`
-- Student discovery and trust transparency:
-  - `GET /units/:corridorId`
-  - `GET /units/:corridorId/hidden-reasons`
-  - `GET /student/unit/:id/details`
-- Unit lifecycle and governance:
-  - `POST /unit`
-  - `POST /unit/:id/submit`
-  - `PATCH /admin/unit/:id/review`
-  - `GET /admin/unit/:id/details`
-- Complaints:
-  - `POST /complaint`
-  - `PATCH /complaint/:complaintId/resolve`
-  - `GET /complaints`
-  - `GET /unit/:unitId/complaints`
-- Occupancy and shortlist:
-  - `POST /shortlist`
-  - `POST /occupancy/check-in`
-  - `PATCH /occupancy/:id/check-out`
-- Dawn conversational layer:
-  - `POST /dawn/query`
+Auth:
+- `POST /auth/register`
+- `POST /auth/login`
 
-## Demo Tips
+Profile:
+- `GET /profile` (role-aware payload)
 
-- Use seeded users and units after `node seed.js`.
-- Test all 3 roles separately in different browser sessions/incognito windows.
-- For governance demos, show:
-  - complaint creation
-  - SLA status changes
-  - audit-trigger consequences
-  - role-specific unit detail depth
+Corridors / Demand:
+- `GET /corridors`
+- `GET /corridor/:corridorId/overview`
+- `GET /corridor/:corridorId/demand`
 
-## Known Notes
+Units:
+- `POST /unit` (landlord)
+- `POST /unit/:id/submit` (landlord)
+- `GET /units/:corridorId` (student visible units)
+- `GET /units/:corridorId/hidden-reasons` (student transparency)
+- `GET /student/unit/:id/details` (student depth)
+- `GET /admin/unit/:id/details` (admin depth)
 
-- Repository currently includes generated frontend build artifacts under `frontend/.next`.
-- `routes/index.js` is a legacy route module and is not mounted by `index.js`.
+Complaints:
+- `POST /complaint` (student; accepts `unitId` or `occupantId`)
+- `PATCH /complaint/:complaintId/resolve` (landlord/admin)
+- `GET /complaints` (global role-specific dashboards)
+- `GET /unit/:unitId/complaints` (unit-local complaint ledger)
+
+Occupancy:
+- `POST /occupancy/check-in` (landlord)
+- `PATCH /occupancy/:id/check-out` (landlord)
+
+Media:
+- `POST /unit/:id/media` (landlord draft uploads)
+- `GET /media/:id` (RBAC-gated media streaming)
+
+Audit / Admin:
+- `PATCH /admin/unit/:id/review`
+- `POST /admin/unit/:id/audit/trigger`
+- `GET /admin/audit/:corridorId`
+- `GET /admin/unit/:id/audit-logs`
+
+Dawn:
+- `POST /dawn/query`
+
+## Important Invariants
+
+- Complaints are append-only behavioral entries; no delete/edit endpoints
+- Trust is system-calculated; no direct trust override endpoint
+- Evidence can be locked after submission
+- Occupant ID usage in complaints enforces:
+  - active occupant record
+  - ownership (`occupant.studentId == requester`)
+  - corridor consistency
+  - generic invalid-ID responses for enumeration resistance
+
+## Operational Notes
+
+- Backend has no `npm run dev` script; run with `node index.js` (or add your own nodemon script).
+- `routes/index.js` is legacy and not mounted by `index.js`.
+- `.next` should never be committed; cleanup is enforced in `.gitignore`.
+
+## Troubleshooting
+
+- `Invalid or expired token`:
+  - ensure backend uses the same `JWT_SECRET` as when token was issued
+  - logout/login to refresh token
+- Next.js `Cannot find module './XYZ.js'` in `.next`:
+  - stop frontend process
+  - delete `frontend/.next`
+  - restart `npm run dev`
+- Prisma `EPERM` on Windows generate:
+  - stop backend process (DLL lock), then rerun `npx prisma generate`
+- Prisma migration drift warning (`migrate dev` reset prompt):
+  - use `npx prisma migrate deploy` for non-destructive apply
+
+## Security and Privacy Boundaries
+
+- Student views are sanitized and aggregate-driven
+- No other-student identity exposure on complaint timelines in student views
+- Landlord/admin have broader operational/governance visibility based on RBAC
+- Media access passes through `/media/:id` checks (not direct filesystem exposure)
 
 ## License
 
-No license file is currently defined.
+No license file is currently present.

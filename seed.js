@@ -9,7 +9,11 @@ async function main() {
   const adminPassword = await bcrypt.hash("admin123", 10);
   const admin = await prisma.user.upsert({
     where: { email: "admin@nearnest.com" },
-    update: {},
+    update: {
+      name: "Admin User",
+      password: adminPassword,
+      role: "admin",
+    },
     create: {
       name: "Admin User",
       email: "admin@nearnest.com",
@@ -33,7 +37,11 @@ async function main() {
   const studentPassword = await bcrypt.hash("student123", 10);
   const studentUser = await prisma.user.upsert({
     where: { email: "student@nearnest.com" },
-    update: {},
+    update: {
+      name: "Test Student",
+      password: studentPassword,
+      role: "student",
+    },
     create: {
       name: "Test Student",
       email: "student@nearnest.com",
@@ -42,10 +50,14 @@ async function main() {
     },
   });
   const student = await prisma.student.upsert({
-    where: { id: 1 },
-    update: {},
+    where: { userId: studentUser.id },
+    update: {
+      name: "Test Student",
+      intake: "2026A",
+      corridorId: corridor.id,
+      userId: studentUser.id,
+    },
     create: {
-      id: 1,
       name: "Test Student",
       intake: "2026A",
       corridorId: corridor.id,
@@ -55,7 +67,11 @@ async function main() {
 
   const student2User = await prisma.user.upsert({
     where: { email: "student2@nearnest.test" },
-    update: {},
+    update: {
+      name: "Ayaan Student",
+      password: studentPassword,
+      role: "student",
+    },
     create: {
       name: "Ayaan Student",
       email: "student2@nearnest.test",
@@ -64,10 +80,14 @@ async function main() {
     },
   });
   const student2 = await prisma.student.upsert({
-    where: { id: 2 },
-    update: {},
+    where: { userId: student2User.id },
+    update: {
+      name: "Ayaan Student",
+      intake: "2026A",
+      corridorId: corridor.id,
+      userId: student2User.id,
+    },
     create: {
-      id: 2,
       name: "Ayaan Student",
       intake: "2026A",
       corridorId: corridor.id,
@@ -77,7 +97,11 @@ async function main() {
 
   const student3User = await prisma.user.upsert({
     where: { email: "student3@nearnest.test" },
-    update: {},
+    update: {
+      name: "Noor Student",
+      password: studentPassword,
+      role: "student",
+    },
     create: {
       name: "Noor Student",
       email: "student3@nearnest.test",
@@ -86,10 +110,14 @@ async function main() {
     },
   });
   const student3 = await prisma.student.upsert({
-    where: { id: 3 },
-    update: {},
+    where: { userId: student3User.id },
+    update: {
+      name: "Noor Student",
+      intake: "2026B",
+      corridorId: corridor.id,
+      userId: student3User.id,
+    },
     create: {
-      id: 3,
       name: "Noor Student",
       intake: "2026B",
       corridorId: corridor.id,
@@ -101,7 +129,11 @@ async function main() {
   const landlordPassword = await bcrypt.hash("landlord123", 10);
   const landlordUser = await prisma.user.upsert({
     where: { email: "landlord@nearnest.com" },
-    update: {},
+    update: {
+      name: "Test Landlord",
+      password: landlordPassword,
+      role: "landlord",
+    },
     create: {
       name: "Test Landlord",
       email: "landlord@nearnest.com",
@@ -110,14 +142,18 @@ async function main() {
     },
   });
   const landlord = await prisma.landlord.upsert({
-    where: { id: 1 },
-    update: {},
-    create: { id: 1, userId: landlordUser.id },
+    where: { userId: landlordUser.id },
+    update: { userId: landlordUser.id },
+    create: { userId: landlordUser.id },
   });
 
   const landlord2User = await prisma.user.upsert({
     where: { email: "landlord2@nearnest.test" },
-    update: {},
+    update: {
+      name: "Prime Landlord",
+      password: landlordPassword,
+      role: "landlord",
+    },
     create: {
       name: "Prime Landlord",
       email: "landlord2@nearnest.test",
@@ -126,9 +162,9 @@ async function main() {
     },
   });
   const landlord2 = await prisma.landlord.upsert({
-    where: { id: 2 },
-    update: {},
-    create: { id: 2, userId: landlord2User.id },
+    where: { userId: landlord2User.id },
+    update: { userId: landlord2User.id },
+    create: { userId: landlord2User.id },
   });
   console.log("Created demo landlord users.");
 
@@ -453,7 +489,14 @@ async function main() {
   ];
   for (const row of occupants) {
     await prisma.occupant.upsert({
-      where: { id: row.id },
+      where: {
+        unitId_roomNumber_occupantIndex_active: {
+          unitId: row.unitId,
+          roomNumber: row.roomNumber,
+          occupantIndex: row.occupantIndex,
+          active: row.active,
+        },
+      },
       update: row,
       create: row,
     });

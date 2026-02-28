@@ -1,0 +1,44 @@
+
+> nearnest-frontend@1.0.0 dev
+> next dev
+
+  ▲ Next.js 14.2.33
+  - Local:        http://localhost:3000
+  - Environments: .env.local
+
+ ✓ Starting...
+ ✓ Ready in 1759ms
+ ○ Compiling /admin ...
+ ✓ Compiled /admin in 2.5s (513 modules)
+ GET /admin 200 in 2611ms
+ ✓ Compiled /login in 272ms (519 modules)
+ GET /login 200 in 365ms
+ ✓ Compiled /dashboard in 212ms (513 modules)
+ GET /dashboard 200 in 261ms
+ ✓ Compiled /profile in 169ms (519 modules)
+ GET /profile 200 in 87ms
+ ✓ Compiled in 413ms (528 modules)
+ GET /profile 200 in 78ms
+ GET /login 200 in 55ms
+ ✓ Compiled /dashboard in 116ms (263 modules)
+ GET /dashboard 200 in 190ms
+ GET /login 200 in 66ms
+ GET /dashboard 200 in 63ms
+ ✓ Compiled in 504ms (533 modules)
+ ✓ Compiled in 257ms (533 modules)
+ GET /profile 200 in 67ms
+ GET /dashboard 200 in 34ms
+ ✓ Compiled /unit/[unitId] in 391ms (527 modules)
+ GET /unit/u 200 in 97ms
+ ✓ Compiled /unit/[unitId]/complaints in 240ms (533 modules)
+ GET /unit/u 200 in 97ms
+ GET /login 200 in 72ms
+ GET /dashboard 200 in 56ms
+ ✓ Compiled /complaints in 384ms (549 modules)
+ GET /login 200 in 100ms
+ GET /dashboard 200 in 65ms
+ ✓ Compiled /_not-found in 322ms (534 modules)
+ GET /k 404 in 372ms
+ GET /k 404 in 57ms
+ GET /unit/u 200 in 69ms
+ ✓ Compiled in 675ms (545 modules)
