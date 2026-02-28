@@ -1,12 +1,22 @@
 const express = require("express");
+const multer = require("multer");
 const prisma = require("../prismaClient");
 const { verifyToken, requireRole } = require("../middlewares/auth");
+const { uploadFile } = require("../services/storageService");
 
 const router = express.Router();
 const EXPLAIN_WINDOW_DAYS = 30;
 const UNIT_STATUSES = new Set(["draft", "submitted", "admin_review", "approved", "rejected", "suspended", "archived"]);
 const DEFAULT_RANDOM_AUDIT_SAMPLE = 3;
 const MAX_RANDOM_AUDIT_SAMPLE = 20;
+const MEDIA_TYPES = new Set(["photo", "document", "walkthrough360"]);
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: {
+    fileSize: 25 * 1024 * 1024,
+  },
+});
 
 function getTrustBand(trustScore) {
   if (trustScore < 50) return "hidden";
@@ -71,6 +81,39 @@ async function getLandlordFromUser(userId) {
   return prisma.landlord.findFirst({
     where: { userId },
   });
+}
+
+function normalizeMediaType(rawType) {
+  const value = String(rawType || "").trim().toLowerCase();
+  if (value === "360") return "walkthrough360";
+  return value;
+}
+
+function isAllowedMimeType(type, mimeType) {
+  const normalized = String(mimeType || "").toLowerCase();
+  if (type === "photo") {
+    return normalized.startsWith("image/");
+  }
+  if (type === "document") {
+    return (
+      normalized === "application/pdf" ||
+      normalized === "application/msword" ||
+      normalized === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      normalized.startsWith("text/") ||
+      normalized.startsWith("image/")
+    );
+  }
+  if (type === "walkthrough360") {
+    return (
+      normalized === "text/html" ||
+      normalized === "application/zip" ||
+      normalized === "application/x-zip-compressed" ||
+      normalized === "application/json" ||
+      normalized.startsWith("video/") ||
+      normalized.startsWith("image/")
+    );
+  }
+  return false;
 }
 
 router.post("/unit", verifyToken, requireRole("landlord"), async (req, res) => {
@@ -385,7 +428,7 @@ router.get("/landlord/units", verifyToken, requireRole("landlord"), async (req, 
         structuralChecklist: true,
         operationalChecklist: true,
         media: {
-          select: { id: true, type: true, url: true, createdAt: true },
+          select: { id: true, type: true, publicUrl: true, createdAt: true, locked: true },
           orderBy: { createdAt: "desc" },
         },
         auditLogs: {
@@ -536,18 +579,16 @@ router.put("/unit/:id/operational-checklist", verifyToken, requireRole("landlord
   }
 });
 
-router.post("/unit/:id/media", verifyToken, requireRole("landlord"), async (req, res) => {
+router.post("/unit/:id/media", verifyToken, requireRole("landlord"), upload.single("file"), async (req, res) => {
   try {
     const unitId = Number(req.params.id);
     if (Number.isNaN(unitId)) {
       return res.status(400).json({ error: "unit id must be a number" });
     }
-    const { type, url } = req.body;
-    if (!type || !url) {
-      return res.status(400).json({ error: "type and url are required" });
-    }
-    if (!["photo", "document", "360"].includes(String(type).trim())) {
-      return res.status(400).json({ error: "media type must be photo, document, or 360" });
+
+    const normalizedType = normalizeMediaType(req.body?.type);
+    if (!MEDIA_TYPES.has(normalizedType)) {
+      return res.status(400).json({ error: "media type must be photo, document, or walkthrough360" });
     }
 
     const landlord = await getLandlordFromUser(req.user.id);
@@ -561,14 +602,61 @@ router.post("/unit/:id/media", verifyToken, requireRole("landlord"), async (req,
     if (unit.landlordId !== landlord.id) {
       return res.status(403).json({ error: "You can only manage your own units" });
     }
+    if (unit.status !== "draft") {
+      return res.status(400).json({ error: "Media can only be uploaded while unit status is draft" });
+    }
+
+    const existingLockedMedia = await prisma.unitMedia.count({
+      where: { unitId, locked: true },
+    });
+    if (existingLockedMedia > 0) {
+      return res.status(400).json({ error: "Media is locked for this unit" });
+    }
+
+    let uploadMeta;
+    if (req.file) {
+      if (!isAllowedMimeType(normalizedType, req.file.mimetype)) {
+        return res.status(400).json({ error: `Invalid file type for ${normalizedType}` });
+      }
+      uploadMeta = await uploadFile(req.file, `units/${unitId}`);
+    } else if (req.body?.url) {
+      // Backward-compatible path for existing UI flows that submit URLs.
+      const externalUrl = String(req.body.url).trim();
+      if (!externalUrl) {
+        return res.status(400).json({ error: "file or url is required" });
+      }
+      uploadMeta = {
+        storageKey: `external:${externalUrl}`,
+        publicUrl: externalUrl,
+        fileName: externalUrl.split("/").pop() || "external-link",
+        mimeType: "application/octet-stream",
+        sizeInBytes: 0,
+      };
+    } else {
+      return res.status(400).json({ error: "file or url is required" });
+    }
 
     const media = await prisma.unitMedia.create({
       data: {
         unitId,
-        type: String(type).trim(),
-        url: String(url).trim(),
+        type: normalizedType,
+        storageKey: uploadMeta.storageKey,
+        publicUrl: uploadMeta.publicUrl || "",
+        fileName: uploadMeta.fileName,
+        mimeType: uploadMeta.mimeType,
+        sizeInBytes: uploadMeta.sizeInBytes,
+        uploadedById: req.user.id,
       },
     });
+
+    if (!media.publicUrl || media.publicUrl === "") {
+      const publicUrl = `/media/${media.id}`;
+      await prisma.unitMedia.update({
+        where: { id: media.id },
+        data: { publicUrl },
+      });
+      media.publicUrl = publicUrl;
+    }
 
     return res.status(201).json(media);
   } catch (error) {
@@ -604,7 +692,7 @@ router.post("/unit/:id/submit", verifyToken, requireRole("landlord"), async (req
     }
 
     const submittedMediaTypes = new Set(unit.media.map((item) => String(item.type).trim().toLowerCase()));
-    const missingMediaTypes = ["photo", "document", "360"].filter((type) => !submittedMediaTypes.has(type));
+    const missingMediaTypes = ["photo", "document", "walkthrough360"].filter((type) => !submittedMediaTypes.has(type));
 
     if (!unit.structuralChecklist || !unit.operationalChecklist || missingMediaTypes.length > 0) {
       return res.status(400).json({
@@ -613,9 +701,15 @@ router.post("/unit/:id/submit", verifyToken, requireRole("landlord"), async (req
       });
     }
 
-    const updated = await prisma.unit.update({
-      where: { id: unitId },
-      data: { status: "submitted" },
+    const updated = await prisma.$transaction(async (tx) => {
+      await tx.unitMedia.updateMany({
+        where: { unitId },
+        data: { locked: true },
+      });
+      return tx.unit.update({
+        where: { id: unitId },
+        data: { status: "submitted" },
+      });
     });
     return res.json(updated);
   } catch (error) {
@@ -1353,7 +1447,7 @@ router.get("/admin/unit/:id/details", verifyToken, requireRole("admin"), async (
         structuralChecklist: true,
         operationalChecklist: true,
         media: {
-          select: { id: true, type: true, url: true, createdAt: true },
+          select: { id: true, type: true, publicUrl: true, createdAt: true, locked: true },
           orderBy: { createdAt: "desc" },
         },
         complaints: {
@@ -1527,7 +1621,7 @@ router.get("/student/unit/:id/details", verifyToken, requireRole("student"), asy
       where: { id: unitId },
       include: {
         media: {
-          select: { id: true, type: true, url: true, createdAt: true },
+          select: { id: true, type: true, publicUrl: true, createdAt: true, locked: true },
           orderBy: { createdAt: "desc" },
         },
         occupancies: {

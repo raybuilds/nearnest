@@ -24,6 +24,7 @@ model User {
   createdAt DateTime  @default(now())
   student   Student?
   landlord  Landlord?
+  uploadedMedia UnitMedia[]
 }
 
 model Student {
@@ -161,10 +162,23 @@ model OperationalChecklist {
 model UnitMedia {
   id        Int      @id @default(autoincrement())
   unitId    Int
-  type      String
-  url       String
+  type      MediaType
+  storageKey String
+  publicUrl String
+  fileName  String
+  mimeType  String
+  sizeInBytes Int
+  uploadedById Int
+  locked    Boolean  @default(false)
   createdAt DateTime @default(now())
   unit      Unit     @relation(fields: [unitId], references: [id])
+  uploadedBy User    @relation(fields: [uploadedById], references: [id])
+}
+
+enum MediaType {
+  photo
+  document
+  walkthrough360
 }
 
 model AuditLog {

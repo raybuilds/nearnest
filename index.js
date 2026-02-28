@@ -14,6 +14,7 @@ const shortlistRoutes = require("./routes/shortlist");
 const landlordRoutes = require("./routes/landlord");
 const dawnRoutes = require("./routes/dawn");
 const profileRoutes = require("./routes/profile");
+const mediaRoutes = require("./routes/media");
 
 const app = express();
 
@@ -42,6 +43,7 @@ app.use(shortlistRoutes);
 app.use(landlordRoutes);
 app.use(dawnRoutes);
 app.use(profileRoutes);
+app.use(mediaRoutes);
 
 app.listen(5000, () => {
   console.log("Server running on port 5000");

@@ -42,8 +42,8 @@ function MediaList({ title, media }) {
         <ul className="space-y-1 text-sm">
           {media.map((item) => (
             <li key={`media-${title}-${item.id}`}>
-              <a className="break-all text-blue-700 underline" href={item.url} rel="noreferrer" target="_blank">
-                {item.url}
+              <a className="break-all text-blue-700 underline" href={item.publicUrl || item.url} rel="noreferrer" target="_blank">
+                {item.publicUrl || item.url}
               </a>
             </li>
           ))}
@@ -67,7 +67,10 @@ function ChecklistRow({ label, value }) {
 function StudentUnitView({ data }) {
   const photos = (data.discovery.media || []).filter((item) => String(item.type).toLowerCase() === "photo");
   const docs = (data.discovery.media || []).filter((item) => String(item.type).toLowerCase() === "document");
-  const walkthroughs = (data.discovery.media || []).filter((item) => String(item.type).toLowerCase() === "360");
+  const walkthroughs = (data.discovery.media || []).filter((item) => {
+    const mediaType = String(item.type).toLowerCase();
+    return mediaType === "walkthrough360" || mediaType === "360";
+  });
 
   return (
     <div className="space-y-6">
@@ -136,7 +139,10 @@ function LandlordUnitView({ overview, interested, complaints, auditLogs }) {
   const shortlisted = interested.filter((item) => item.status === "shortlisted");
   const photos = (overview?.media?.all || []).filter((item) => String(item.type).toLowerCase() === "photo");
   const docs = (overview?.media?.all || []).filter((item) => String(item.type).toLowerCase() === "document");
-  const walkthroughs = (overview?.media?.all || []).filter((item) => String(item.type).toLowerCase() === "360");
+  const walkthroughs = (overview?.media?.all || []).filter((item) => {
+    const mediaType = String(item.type).toLowerCase();
+    return mediaType === "walkthrough360" || mediaType === "360";
+  });
 
   return (
     <div className="space-y-6">
@@ -249,7 +255,10 @@ function AdminUnitView({
 }) {
   const photos = (data.evidence.media || []).filter((item) => String(item.type).toLowerCase() === "photo");
   const docs = (data.evidence.media || []).filter((item) => String(item.type).toLowerCase() === "document");
-  const walkthroughs = (data.evidence.media || []).filter((item) => String(item.type).toLowerCase() === "360");
+  const walkthroughs = (data.evidence.media || []).filter((item) => {
+    const mediaType = String(item.type).toLowerCase();
+    return mediaType === "walkthrough360" || mediaType === "360";
+  });
   const structuralChecklist = data.evidence.structuralChecklist || {};
   const operationalChecklist = data.evidence.operationalChecklist || {};
   const structuralCanApprove =

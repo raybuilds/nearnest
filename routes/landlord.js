@@ -228,7 +228,7 @@ router.get("/landlord/unit/:unitId/overview", verifyToken, requireRole("landlord
           structuralChecklist: true,
           operationalChecklist: true,
           media: {
-            select: { id: true, type: true, url: true, createdAt: true },
+            select: { id: true, type: true, publicUrl: true, createdAt: true, locked: true },
             orderBy: { createdAt: "desc" },
           },
         },
@@ -238,9 +238,9 @@ router.get("/landlord/unit/:unitId/overview", verifyToken, requireRole("landlord
     const mediaByType = { photo: [], document: [], walkthrough360: [] };
     (unitDetails?.media || []).forEach((item) => {
       const normalizedType = String(item.type || "").trim().toLowerCase();
-      if (normalizedType === "photo") mediaByType.photo.push(item.url);
-      if (normalizedType === "document") mediaByType.document.push(item.url);
-      if (normalizedType === "360") mediaByType.walkthrough360.push(item.url);
+      if (normalizedType === "photo") mediaByType.photo.push(item.publicUrl);
+      if (normalizedType === "document") mediaByType.document.push(item.publicUrl);
+      if (normalizedType === "walkthrough360") mediaByType.walkthrough360.push(item.publicUrl);
     });
 
     return res.json({
