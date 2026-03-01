@@ -2,6 +2,7 @@ const express = require("express");
 const prisma = require("../prismaClient");
 const { calculateTrustScore } = require("../engines/trustEngine");
 const { verifyToken, requireRole } = require("../middlewares/auth");
+const { complaintLimiter } = require("../middlewares/rateLimiter");
 
 const router = express.Router();
 const AUDIT_WINDOW_DAYS = 60;
@@ -221,7 +222,7 @@ async function recalculateUnitTrustScore(unitId) {
   return trustScore;
 }
 
-router.post("/complaint", verifyToken, requireRole("student"), async (req, res) => {
+router.post("/complaint", verifyToken, requireRole("student"), complaintLimiter, async (req, res) => {
   try {
     const { unitId, studentId, occupantId, severity, incidentType, message } = req.body;
 

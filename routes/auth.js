@@ -90,7 +90,7 @@ router.post("/register", async (req, res) => {
         role: result.user.role,
       },
       JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "2h" }
     );
 
     return res.status(201).json({
@@ -145,7 +145,7 @@ router.post("/login", async (req, res) => {
         role: user.role,
       },
       JWT_SECRET,
-      { expiresIn: "7d" }
+      { expiresIn: "2h" }
     );
 
     let studentId = null;

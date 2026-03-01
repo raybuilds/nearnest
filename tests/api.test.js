@@ -2,6 +2,7 @@ const { test, before, after } = require("node:test");
 const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
 const bcrypt = require("bcrypt");
+const jwt = require("jsonwebtoken");
 const prisma = require("../prismaClient");
 const { generateOccupantId } = require("../services/occupantIdService");
 
@@ -307,6 +308,21 @@ test("security: complaint with another student's occupantId is rejected", async 
       await prisma.corridor.deleteMany({ where: { id: corridorId } });
     }
   }
+});
+
+test("expired JWT is rejected", async () => {
+  const expiredToken = jwt.sign(
+    { id: 1, role: "student" },
+    TEST_SECRET,
+    { expiresIn: "-1h" }
+  );
+
+  const response = await api("/profile", {
+    token: expiredToken,
+  });
+
+  assert.equal(response.status, 401);
+  assert.equal(response.data.error, "Invalid or expired token");
 });
 
 test("transaction concurrency: parallel check-ins enforce capacity and slot invariants", async () => {
