@@ -91,8 +91,27 @@ It does not bypass RBAC.
 Additional constraints:
 
 - Dawn requires valid JWT context and infers intents per role.
+- Dawn route is modular and intent-mapped (no giant switch):
+  - `student_search` -> `studentSearch`
+  - `student_complaint` -> `studentComplaintDraft`
+  - `student_complaint_summary` -> `studentComplaintSummary`
+  - `landlord_recurring` -> `landlordRecurringIssues`
+  - `landlord_risk` -> `landlordRiskSummary`
+  - `admin_density` -> `adminCorridorAnalytics`
 - It delegates actions through the same backend endpoints used by the product UI.
 - All validation, trust recalculation, and policy enforcement still happen in underlying routes/services.
+- Dawn is non-authoritative:
+  - no direct DB writes from Dawn handlers
+  - no direct trustScore writes
+  - no direct unit status updates
+  - no automatic audit triggers
+  - no structural/operational approval actions
+- Mutation operations are confirmation-gated (draft -> explicit confirm -> API call).
+- Soft recommendations are deterministic and rule-based:
+  - water complaints >= 3 (30d) -> suggest plumbing review
+  - SLA breaches >= 2 -> suggest response-process review
+  - rising 14d complaint trend -> suggest monitoring
+- Complaint intent supports common-area reporting by tagging `incidentType="common_area"` while still binding to an active unit context.
 
 ## 3. Security Principles
 

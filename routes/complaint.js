@@ -7,7 +7,7 @@ const router = express.Router();
 const AUDIT_WINDOW_DAYS = 60;
 const AUDIT_THRESHOLD = 5;
 const SLA_BREACH_AUDIT_THRESHOLD = 3;
-const INCIDENT_TYPES = new Set(["safety", "injury", "fire", "harassment", "other"]);
+const INCIDENT_TYPES = new Set(["safety", "injury", "fire", "harassment", "water", "common_area", "other"]);
 const SLA_HOURS = 48;
 const DENSITY_WARNING_THRESHOLD = 3;
 const COMPLAINT_STATUS_FILTERS = new Set(["open", "resolved", "late", "sla_breached"]);
@@ -76,6 +76,12 @@ function getAverageResolutionHours(complaints) {
 
   if (hours.length === 0) return null;
   return Number((hours.reduce((sum, value) => sum + value, 0) / hours.length).toFixed(2));
+}
+
+function getTrustBand(trustScore) {
+  if (Number(trustScore) < 50) return "hidden";
+  if (Number(trustScore) < 80) return "standard";
+  return "priority";
 }
 
 function mapComplaintForList(complaint, includeStudent = false) {
@@ -232,7 +238,7 @@ router.post("/complaint", verifyToken, requireRole("student"), async (req, res) 
     if (incidentType !== undefined && incidentType !== null && String(incidentType).trim() !== "") {
       normalizedIncidentType = String(incidentType).trim().toLowerCase();
       if (!INCIDENT_TYPES.has(normalizedIncidentType)) {
-        return res.status(400).json({ error: "incidentType must be one of safety, injury, fire, harassment, other" });
+        return res.status(400).json({ error: "incidentType must be one of safety, injury, fire, harassment, water, common_area, other" });
       }
     }
     const incidentFlag = Boolean(normalizedIncidentType && normalizedIncidentType !== "other");
@@ -596,6 +602,7 @@ router.get("/unit/:unitId/complaints", verifyToken, async (req, res) => {
         id: true,
         corridorId: true,
         landlordId: true,
+        trustScore: true,
       },
     });
     if (!unit) {
@@ -638,9 +645,14 @@ router.get("/unit/:unitId/complaints", verifyToken, async (req, res) => {
         return acc;
       }, {});
 
+      const complaints30d = complaints.filter((item) => getCreatedWithinDays(item.createdAt, 30));
       const resolved = complaints.filter((item) => item.resolved);
       const lateResolved = complaints.filter((item) => getSlaMeta(item).status === "late");
       const slaCompliance = resolved.length === 0 ? null : Number((((resolved.length - lateResolved.length) / resolved.length) * 100).toFixed(2));
+      const slaBreaches30d = complaints30d.filter((item) => {
+        const status = getSlaMeta(item).status;
+        return status === "late" || status === "sla_breached";
+      }).length;
 
       return res.json({
         role: "student",
@@ -648,7 +660,11 @@ router.get("/unit/:unitId/complaints", verifyToken, async (req, res) => {
         summary: {
           totalComplaints: complaints.length,
           activeComplaints: complaints.filter((item) => !item.resolved).length,
-          complaintsLast30Days: complaints.filter((item) => getCreatedWithinDays(item.createdAt, 30)).length,
+          complaintsLast30Days: complaints30d.length,
+          avgResolutionHours30d: getAverageResolutionHours(complaints30d),
+          slaBreaches30d,
+          trustScore: unit.trustScore,
+          trustBand: getTrustBand(unit.trustScore),
           incidentBreakdown,
           slaCompliance,
         },

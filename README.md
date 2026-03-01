@@ -95,8 +95,33 @@ Safety controls:
 Endpoint: `POST /dawn/query`
 
 - Parses role-scoped intents from natural language
-- Reads data and routes actions through existing APIs
+- Uses modular intent handlers in `services/dawnIntents/`:
+  - `studentSearch`
+  - `studentComplaintDraft`
+  - `studentComplaintSummary`
+  - `landlordRecurringIssues`
+  - `landlordRiskSummary`
+  - `adminCorridorAnalytics`
+- Dispatches via intent map in `routes/dawn.js` (no monolithic switch)
+- Reads data and routes actions through existing APIs only
 - Must not bypass RBAC, validation, trust logic, or DB constraints
+- Must not write directly to DB, mutate trust/status directly, or auto-trigger governance actions
+
+Phase 1 Dawn capabilities:
+- Student:
+  - natural-language smart search (`maxRent`, `ac`, `maxDistance`) using `/units/:corridorId`
+  - complaint drafting with automatic occupant/unit binding from authenticated profile context
+  - unit complaint health summary (aggregate-only)
+- Landlord:
+  - recurring issue summary (30-day grouping by incident type)
+  - deterministic soft recommendations (rule-based; no auto-action)
+  - unit risk summary (trust/audit/density signals)
+- Admin:
+  - corridor complaint density ranking (30-day window)
+
+Mutation safety:
+- Complaint creation is always two-step in Dawn: draft -> confirm -> submit
+- No silent submissions
 
 ## Environment Setup
 
@@ -195,6 +220,7 @@ Complaints:
 - `PATCH /complaint/:complaintId/resolve` (landlord/admin)
 - `GET /complaints` (global role-specific dashboards)
 - `GET /unit/:unitId/complaints` (unit-local complaint ledger)
+  - student summary includes: `complaintsLast30Days`, `activeComplaints`, `avgResolutionHours30d`, `slaBreaches30d`, `trustScore`, `trustBand`
 
 Occupancy:
 - `POST /occupancy/check-in` (landlord)
@@ -229,6 +255,15 @@ Dawn:
 - Backend has no `npm run dev` script; run with `node index.js` (or add your own nodemon script).
 - `routes/index.js` is legacy and not mounted by `index.js`.
 - `.next` should never be committed; cleanup is enforced in `.gitignore`.
+
+## Test Coverage
+
+Backend integration tests use Node test runner (`node --test tests/*.test.js`) and cover:
+- auth/profile flow
+- complaint ownership security checks
+- occupancy concurrency invariants
+- Dawn Phase 1 intents (student, landlord, admin)
+- Dawn negative cases (no active occupancy complaint attempt, cross-landlord targeting rejection)
 
 ## Troubleshooting
 
