@@ -46,3 +46,6 @@ jobs:
 
       - name: Run Tests
         run: npm test
+        env:
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/nearnest_test
+          JWT_SECRET: ci-secret

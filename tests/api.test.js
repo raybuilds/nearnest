@@ -3,6 +3,15 @@ const assert = require("node:assert/strict");
 const { spawn } = require("node:child_process");
 const bcrypt = require("bcrypt");
 const jwt = require("jsonwebtoken");
+require("dotenv").config();
+
+if (!process.env.DATABASE_URL) {
+  process.env.DATABASE_URL = "postgresql://postgres:postgres@localhost:5432/nearnest_test";
+}
+if (!process.env.JWT_SECRET) {
+  process.env.JWT_SECRET = "ci-secret";
+}
+
 const prisma = require("../prismaClient");
 const { generateOccupantId } = require("../services/occupantIdService");
 
