@@ -1,641 +1,858 @@
-const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcrypt");
+const { PrismaClient } = require("@prisma/client");
+const { calculateTrustScore } = require("./engines/trustEngine");
+const { generateOccupantId } = require("./services/occupantIdService");
 
 const prisma = new PrismaClient();
 
+const FIXED_SALT = "$2b$10$abcdefghijklmnopqrstuv";
+const BASE_TIME = new Date("2026-02-01T09:00:00.000Z");
+
+function hashPassword(plain) {
+  return bcrypt.hashSync(plain, FIXED_SALT);
+}
+
+function hoursAfter(date, hours) {
+  return new Date(date.getTime() + hours * 60 * 60 * 1000);
+}
+
+function daysAfter(date, days) {
+  return new Date(date.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
+function daysBefore(date, days) {
+  return new Date(date.getTime() - days * 24 * 60 * 60 * 1000);
+}
+
+function isResolvedLate(complaint) {
+  if (!complaint.resolved || !complaint.slaDeadline || !complaint.resolvedAt) return false;
+  return new Date(complaint.resolvedAt) > new Date(complaint.slaDeadline);
+}
+
+function getWindowCount(complaints, days, predicate = () => true) {
+  const cutoff = daysBefore(BASE_TIME, days);
+  return complaints.filter((item) => {
+    const createdAt = new Date(item.createdAt);
+    return createdAt >= cutoff && predicate(item);
+  }).length;
+}
+
+async function recalculateUnitGovernance(unitId) {
+  const unit = await prisma.unit.findUnique({
+    where: { id: unitId },
+    include: { complaints: true },
+  });
+  if (!unit) return null;
+
+  const trustScore = calculateTrustScore(unit);
+  const complaints = unit.complaints || [];
+
+  const densityTriggered = getWindowCount(complaints, 60) >= 5;
+  const slaTriggered = getWindowCount(complaints, 60, (item) => isResolvedLate(item)) >= 3;
+  const incidentTriggered = getWindowCount(complaints, 60, (item) => Boolean(item.incidentFlag)) >= 1;
+  const shouldRequireAudit = densityTriggered || slaTriggered || incidentTriggered || unit.auditRequired;
+
+  await prisma.unit.update({
+    where: { id: unitId },
+    data: {
+      trustScore,
+      auditRequired: shouldRequireAudit,
+      ...(shouldRequireAudit && unit.status !== "archived" ? { status: "suspended" } : {}),
+    },
+  });
+
+  return trustScore;
+}
+
+async function createComplaint({
+  unitId,
+  studentId,
+  occupantRecordId = null,
+  severity,
+  message,
+  incidentType,
+  incidentFlag,
+  createdAt,
+  resolved,
+  resolvedAt = null,
+}) {
+  const slaDeadline = hoursAfter(createdAt, 48);
+
+  const complaint = await prisma.complaint.create({
+    data: {
+      unitId,
+      studentId,
+      occupantRecordId,
+      severity,
+      message,
+      incidentType,
+      incidentFlag,
+      createdAt,
+      slaDeadline,
+      resolved,
+      resolvedAt,
+    },
+  });
+
+  await recalculateUnitGovernance(unitId);
+  return complaint;
+}
+
+async function createOccupancyWithOccupant({
+  student,
+  unit,
+  corridorCode,
+  roomNumber,
+  occupantIndex,
+  startDate,
+}) {
+  const publicId = generateOccupantId({
+    cityCode: unit.corridor.cityCode,
+    corridorCode,
+    hostelCode: unit.id,
+    roomNumber,
+    occupantIndex,
+  });
+
+  const occupant = await prisma.occupant.create({
+    data: {
+      publicId,
+      cityCode: unit.corridor.cityCode,
+      corridorCode,
+      hostelCode: unit.id,
+      roomNumber,
+      occupantIndex,
+      studentId: student.id,
+      unitId: unit.id,
+      active: true,
+      createdAt: startDate,
+    },
+  });
+
+  const occupancy = await prisma.occupancy.create({
+    data: {
+      unitId: unit.id,
+      studentId: student.id,
+      startDate,
+      endDate: null,
+    },
+  });
+
+  return { occupant, occupancy };
+}
+
 async function main() {
-  console.log("Seeding database...");
+  console.log("Stage 1: Reset database");
+  await prisma.auditLog.deleteMany({});
+  await prisma.complaint.deleteMany({});
+  await prisma.occupant.deleteMany({});
+  await prisma.occupancy.deleteMany({});
+  await prisma.unitMedia.deleteMany({});
+  await prisma.structuralChecklist.deleteMany({});
+  await prisma.operationalChecklist.deleteMany({});
+  await prisma.shortlist.deleteMany({});
+  await prisma.vDPEntry.deleteMany({});
+  await prisma.unit.deleteMany({});
+  await prisma.student.deleteMany({});
+  await prisma.landlord.deleteMany({});
+  await prisma.institution.deleteMany({});
+  await prisma.corridor.deleteMany({});
+  await prisma.user.deleteMany({});
 
-  const adminPassword = await bcrypt.hash("admin123", 10);
-  const admin = await prisma.user.upsert({
-    where: { email: "admin@nearnest.com" },
-    update: {
-      name: "Admin User",
-      password: adminPassword,
-      role: "admin",
-    },
-    create: {
-      name: "Admin User",
-      email: "admin@nearnest.com",
-      password: adminPassword,
-      role: "admin",
-    },
+  console.log("Stage 2: Create corridors");
+  const corridorAMU = await prisma.corridor.create({
+    data: { name: "Aligarh AMU Academic Belt", cityCode: 11 },
   });
-  console.log("Created admin user:", admin.email);
-
-  const corridor = await prisma.corridor.upsert({
-    where: { id: 1 },
-    update: { cityCode: 12 },
-    create: {
-      id: 1,
-      name: "Aligarh AMU Corridor",
-      cityCode: 12,
-    },
+  const corridorKota = await prisma.corridor.create({
+    data: { name: "Kota Coaching Cluster - Vigyan Nagar", cityCode: 22 },
   });
-  console.log("Created corridor:", corridor.name);
-
-  const studentPassword = await bcrypt.hash("student123", 10);
-  const studentUser = await prisma.user.upsert({
-    where: { email: "student@nearnest.com" },
-    update: {
-      name: "Test Student",
-      password: studentPassword,
-      role: "student",
-    },
-    create: {
-      name: "Test Student",
-      email: "student@nearnest.com",
-      password: studentPassword,
-      role: "student",
-    },
-  });
-  const student = await prisma.student.upsert({
-    where: { userId: studentUser.id },
-    update: {
-      name: "Test Student",
-      intake: "2026A",
-      corridorId: corridor.id,
-      userId: studentUser.id,
-    },
-    create: {
-      name: "Test Student",
-      intake: "2026A",
-      corridorId: corridor.id,
-      userId: studentUser.id,
-    },
+  const corridorDelhi = await prisma.corridor.create({
+    data: { name: "Old Delhi Hostel Lane", cityCode: 33 },
   });
 
-  const student2User = await prisma.user.upsert({
-    where: { email: "student2@nearnest.test" },
-    update: {
-      name: "Ayaan Student",
-      password: studentPassword,
-      role: "student",
-    },
-    create: {
-      name: "Ayaan Student",
-      email: "student2@nearnest.test",
-      password: studentPassword,
-      role: "student",
-    },
-  });
-  const student2 = await prisma.student.upsert({
-    where: { userId: student2User.id },
-    update: {
-      name: "Ayaan Student",
-      intake: "2026A",
-      corridorId: corridor.id,
-      userId: student2User.id,
-    },
-    create: {
-      name: "Ayaan Student",
-      intake: "2026A",
-      corridorId: corridor.id,
-      userId: student2User.id,
-    },
+  console.log("Stage 3: Create institutions");
+  const instAMU = await prisma.institution.create({ data: { name: "Aligarh Muslim University", corridorId: corridorAMU.id } });
+  const instAMUEng = await prisma.institution.create({ data: { name: "AMU Engineering Faculty", corridorId: corridorAMU.id } });
+  const instAllen = await prisma.institution.create({ data: { name: "Allen Career Institute", corridorId: corridorKota.id } });
+  const instResonance = await prisma.institution.create({ data: { name: "Resonance Academy", corridorId: corridorKota.id } });
+  const instPolytechnic = await prisma.institution.create({ data: { name: "Local Polytechnic", corridorId: corridorKota.id } });
+  const instDTI = await prisma.institution.create({ data: { name: "Delhi Technical Institute", corridorId: corridorDelhi.id } });
+  const instCommerce = await prisma.institution.create({ data: { name: "Old City Commerce College", corridorId: corridorDelhi.id } });
+
+  console.log("Stage 4: Create users");
+  const adminUser = await prisma.user.create({
+    data: { name: "System Admin", email: "admin@nearnest.com", password: hashPassword("admin123"), role: "admin" },
   });
 
-  const student3User = await prisma.user.upsert({
-    where: { email: "student3@nearnest.test" },
-    update: {
-      name: "Noor Student",
-      password: studentPassword,
-      role: "student",
-    },
-    create: {
-      name: "Noor Student",
-      email: "student3@nearnest.test",
-      password: studentPassword,
-      role: "student",
-    },
+  const landlordUser1 = await prisma.user.create({
+    data: { name: "Ramesh Kumar", email: "landlord1@nearnest.com", password: hashPassword("landlord123"), role: "landlord" },
   });
-  const student3 = await prisma.student.upsert({
-    where: { userId: student3User.id },
-    update: {
-      name: "Noor Student",
-      intake: "2026B",
-      corridorId: corridor.id,
-      userId: student3User.id,
-    },
-    create: {
-      name: "Noor Student",
-      intake: "2026B",
-      corridorId: corridor.id,
-      userId: student3User.id,
-    },
+  const landlordUser2 = await prisma.user.create({
+    data: { name: "Suresh Gupta", email: "landlord2@nearnest.com", password: hashPassword("landlord123"), role: "landlord" },
   });
-  console.log("Created demo student users.");
+  const landlord1 = await prisma.landlord.create({ data: { userId: landlordUser1.id } });
+  const landlord2 = await prisma.landlord.create({ data: { userId: landlordUser2.id } });
 
-  const landlordPassword = await bcrypt.hash("landlord123", 10);
-  const landlordUser = await prisma.user.upsert({
-    where: { email: "landlord@nearnest.com" },
-    update: {
-      name: "Test Landlord",
-      password: landlordPassword,
-      role: "landlord",
-    },
-    create: {
-      name: "Test Landlord",
-      email: "landlord@nearnest.com",
-      password: landlordPassword,
-      role: "landlord",
-    },
-  });
-  const landlord = await prisma.landlord.upsert({
-    where: { userId: landlordUser.id },
-    update: { userId: landlordUser.id },
-    create: { userId: landlordUser.id },
-  });
+  const studentUsers = {
+    amu1: await prisma.user.create({
+      data: { name: "Ahmad Farooq", email: "student_amu_1@nearnest.com", password: hashPassword("student123"), role: "student" },
+    }),
+    amu2: await prisma.user.create({
+      data: { name: "Fatima Zehra", email: "student_amu_2@nearnest.com", password: hashPassword("student123"), role: "student" },
+    }),
+    amu3: await prisma.user.create({
+      data: { name: "Obaidullah", email: "student_amu_3@nearnest.com", password: hashPassword("student123"), role: "student" },
+    }),
+    kota1: await prisma.user.create({
+      data: { name: "Raj Malhotra", email: "student_kota_1@nearnest.com", password: hashPassword("student123"), role: "student" },
+    }),
+    kota2: await prisma.user.create({
+      data: { name: "Priya Sharma", email: "student_kota_2@nearnest.com", password: hashPassword("student123"), role: "student" },
+    }),
+    kota3: await prisma.user.create({
+      data: { name: "Amit Kumar", email: "student_kota_3@nearnest.com", password: hashPassword("student123"), role: "student" },
+    }),
+    delhi1: await prisma.user.create({
+      data: { name: "Arjun Singh", email: "student_delhi_1@nearnest.com", password: hashPassword("student123"), role: "student" },
+    }),
+    delhi2: await prisma.user.create({
+      data: { name: "Meera Devi", email: "student_delhi_2@nearnest.com", password: hashPassword("student123"), role: "student" },
+    }),
+  };
 
-  const landlord2User = await prisma.user.upsert({
-    where: { email: "landlord2@nearnest.test" },
-    update: {
-      name: "Prime Landlord",
-      password: landlordPassword,
-      role: "landlord",
-    },
-    create: {
-      name: "Prime Landlord",
-      email: "landlord2@nearnest.test",
-      password: landlordPassword,
-      role: "landlord",
-    },
-  });
-  const landlord2 = await prisma.landlord.upsert({
-    where: { userId: landlord2User.id },
-    update: { userId: landlord2User.id },
-    create: { userId: landlord2User.id },
-  });
-  console.log("Created demo landlord users.");
+  const students = {
+    amu1: await prisma.student.create({
+      data: { name: "Ahmad Farooq", intake: "2024A", userId: studentUsers.amu1.id, corridorId: corridorAMU.id, institutionId: instAMU.id },
+    }),
+    amu2: await prisma.student.create({
+      data: { name: "Fatima Zehra", intake: "2024A", userId: studentUsers.amu2.id, corridorId: corridorAMU.id, institutionId: instAMUEng.id },
+    }),
+    amu3: await prisma.student.create({
+      data: { name: "Obaidullah", intake: "2023B", userId: studentUsers.amu3.id, corridorId: corridorAMU.id, institutionId: instAMU.id },
+    }),
+    kota1: await prisma.student.create({
+      data: { name: "Raj Malhotra", intake: "2024A", userId: studentUsers.kota1.id, corridorId: corridorKota.id, institutionId: instAllen.id },
+    }),
+    kota2: await prisma.student.create({
+      data: { name: "Priya Sharma", intake: "2024A", userId: studentUsers.kota2.id, corridorId: corridorKota.id, institutionId: instResonance.id },
+    }),
+    kota3: await prisma.student.create({
+      data: { name: "Amit Kumar", intake: "2023C", userId: studentUsers.kota3.id, corridorId: corridorKota.id, institutionId: instPolytechnic.id },
+    }),
+    delhi1: await prisma.student.create({
+      data: { name: "Arjun Singh", intake: "2024A", userId: studentUsers.delhi1.id, corridorId: corridorDelhi.id, institutionId: instDTI.id },
+    }),
+    delhi2: await prisma.student.create({
+      data: { name: "Meera Devi", intake: "2024A", userId: studentUsers.delhi2.id, corridorId: corridorDelhi.id, institutionId: instCommerce.id },
+    }),
+  };
 
-  const demoUnits = [
-    {
-      id: 12,
-      landlordId: landlord.id,
+  console.log("Stage 5: Create units");
+  const unitAMU1 = await prisma.unit.create({
+    data: {
       status: "approved",
-      trustScore: 82,
-      rent: 8500,
+      corridorId: corridorAMU.id,
+      landlordId: landlord1.id,
+      rent: 5600,
       distanceKm: 0.8,
       institutionProximityKm: 0.5,
+      ac: false,
+      occupancyType: "double",
+      bedAvailable: true,
+      waterAvailable: true,
+      toiletsAvailable: 2,
+      ventilationGood: true,
+      capacity: 2,
+      structuralApproved: true,
+      operationalBaselineApproved: true,
+      auditRequired: false,
+    },
+  });
+  const unitAMU2 = await prisma.unit.create({
+    data: {
+      status: "approved",
+      corridorId: corridorAMU.id,
+      landlordId: landlord1.id,
+      rent: 5200,
+      distanceKm: 1.0,
+      institutionProximityKm: 0.7,
+      ac: false,
+      occupancyType: "double",
+      bedAvailable: true,
+      waterAvailable: true,
+      toiletsAvailable: 1,
+      ventilationGood: true,
+      capacity: 2,
+      structuralApproved: true,
+      operationalBaselineApproved: true,
+      auditRequired: false,
+    },
+  });
+  const unitAMU3 = await prisma.unit.create({
+    data: {
+      status: "approved",
+      corridorId: corridorAMU.id,
+      landlordId: landlord2.id,
+      rent: 6100,
+      distanceKm: 0.6,
+      institutionProximityKm: 0.4,
       ac: true,
       occupancyType: "single",
-      capacity: 2,
-      structuralApproved: true,
-      operationalBaselineApproved: true,
       bedAvailable: true,
       waterAvailable: true,
       toiletsAvailable: 1,
       ventilationGood: true,
+      capacity: 1,
+      structuralApproved: true,
+      operationalBaselineApproved: true,
       auditRequired: false,
     },
-    {
-      id: 17,
-      landlordId: landlord.id,
+  });
+  const unitKota1 = await prisma.unit.create({
+    data: {
       status: "approved",
-      trustScore: 74,
-      rent: 6500,
-      distanceKm: 1.9,
-      institutionProximityKm: 1.2,
+      corridorId: corridorKota.id,
+      landlordId: landlord2.id,
+      rent: 3800,
+      distanceKm: 2.0,
+      institutionProximityKm: 1.4,
       ac: false,
-      occupancyType: "double",
+      occupancyType: "triple",
+      bedAvailable: true,
+      waterAvailable: true,
+      toiletsAvailable: 1,
+      ventilationGood: true,
       capacity: 3,
       structuralApproved: true,
       operationalBaselineApproved: true,
-      bedAvailable: true,
-      waterAvailable: true,
-      toiletsAvailable: 2,
-      ventilationGood: true,
       auditRequired: false,
     },
-    {
-      id: 27,
-      landlordId: landlord.id,
-      status: "admin_review",
-      trustScore: 55,
-      rent: 7200,
-      distanceKm: 1.1,
-      institutionProximityKm: 0.8,
+  });
+  const unitDelhiA = await prisma.unit.create({
+    data: {
+      status: "approved",
+      corridorId: corridorDelhi.id,
+      landlordId: landlord1.id,
+      rent: 7300,
+      distanceKm: 1.3,
+      institutionProximityKm: 1.0,
       ac: true,
       occupancyType: "triple",
-      capacity: 3,
-      structuralApproved: false,
-      operationalBaselineApproved: false,
-      bedAvailable: true,
-      waterAvailable: true,
-      toiletsAvailable: 1,
-      ventilationGood: true,
-      auditRequired: true,
-    },
-    {
-      id: 28,
-      landlordId: landlord.id,
-      status: "approved",
-      trustScore: 78,
-      rent: 7000,
-      distanceKm: 1.0,
-      institutionProximityKm: 0.9,
-      ac: true,
-      occupancyType: "double",
-      capacity: 2,
-      structuralApproved: true,
-      operationalBaselineApproved: true,
-      bedAvailable: true,
-      waterAvailable: true,
-      toiletsAvailable: 1,
-      ventilationGood: true,
-      auditRequired: false,
-    },
-    {
-      id: 31,
-      landlordId: landlord2.id,
-      status: "suspended",
-      trustScore: 46,
-      rent: 5800,
-      distanceKm: 2.6,
-      institutionProximityKm: 2.1,
-      ac: false,
-      occupancyType: "shared",
-      capacity: 4,
-      structuralApproved: false,
-      operationalBaselineApproved: true,
       bedAvailable: true,
       waterAvailable: true,
       toiletsAvailable: 2,
-      ventilationGood: false,
-      auditRequired: true,
+      ventilationGood: true,
+      capacity: 3,
+      structuralApproved: true,
+      operationalBaselineApproved: true,
+      auditRequired: false,
     },
-  ];
+  });
+  const unitDelhiB = await prisma.unit.create({
+    data: {
+      status: "approved",
+      corridorId: corridorDelhi.id,
+      landlordId: landlord2.id,
+      rent: 4600,
+      distanceKm: 1.0,
+      institutionProximityKm: 0.8,
+      ac: false,
+      occupancyType: "double",
+      bedAvailable: true,
+      waterAvailable: true,
+      toiletsAvailable: 1,
+      ventilationGood: true,
+      capacity: 2,
+      structuralApproved: true,
+      operationalBaselineApproved: true,
+      auditRequired: false,
+    },
+  });
+  const unitDelhiC = await prisma.unit.create({
+    data: {
+      status: "approved",
+      corridorId: corridorDelhi.id,
+      landlordId: landlord1.id,
+      rent: 5600,
+      distanceKm: 0.9,
+      institutionProximityKm: 0.6,
+      ac: false,
+      occupancyType: "double",
+      bedAvailable: true,
+      waterAvailable: true,
+      toiletsAvailable: 1,
+      ventilationGood: true,
+      capacity: 2,
+      structuralApproved: true,
+      operationalBaselineApproved: true,
+      auditRequired: false,
+    },
+  });
 
-  for (const unit of demoUnits) {
-    await prisma.unit.upsert({
-      where: { id: unit.id },
-      update: unit,
-      create: { ...unit, corridorId: corridor.id },
+  console.log("Stage 6: Apply checklists");
+  const healthyChecklistUnits = [unitAMU1, unitAMU2, unitAMU3, unitKota1, unitDelhiA, unitDelhiC];
+  for (const unit of healthyChecklistUnits) {
+    await prisma.structuralChecklist.create({
+      data: {
+        unitId: unit.id,
+        fireExit: true,
+        wiringSafe: true,
+        plumbingSafe: true,
+        occupancyCompliant: true,
+        approved: true,
+      },
+    });
+    await prisma.operationalChecklist.create({
+      data: {
+        unitId: unit.id,
+        bedAvailable: true,
+        waterAvailable: true,
+        toiletsAvailable: true,
+        ventilationGood: true,
+        selfDeclaration: "All baseline controls verified.",
+        approved: true,
+      },
     });
   }
 
-  const structuralChecklistRows = [
-    { unitId: 12, fireExit: true, wiringSafe: true, plumbingSafe: true, occupancyCompliant: true, approved: true },
-    { unitId: 17, fireExit: true, wiringSafe: true, plumbingSafe: true, occupancyCompliant: true, approved: true },
-    { unitId: 27, fireExit: false, wiringSafe: true, plumbingSafe: false, occupancyCompliant: false, approved: false },
-    { unitId: 28, fireExit: true, wiringSafe: true, plumbingSafe: true, occupancyCompliant: true, approved: true },
-    { unitId: 31, fireExit: false, wiringSafe: false, plumbingSafe: true, occupancyCompliant: false, approved: false },
-  ];
-  for (const row of structuralChecklistRows) {
-    await prisma.structuralChecklist.upsert({
-      where: { unitId: row.unitId },
-      update: row,
-      create: row,
-    });
-  }
+  await prisma.structuralChecklist.create({
+    data: {
+      unitId: unitDelhiB.id,
+      fireExit: false,
+      wiringSafe: true,
+      plumbingSafe: true,
+      occupancyCompliant: false,
+      approved: false,
+    },
+  });
+  await prisma.operationalChecklist.create({
+    data: {
+      unitId: unitDelhiB.id,
+      bedAvailable: true,
+      waterAvailable: true,
+      toiletsAvailable: true,
+      ventilationGood: true,
+      selfDeclaration: "Pending corrective action after overcapacity violation.",
+      approved: false,
+    },
+  });
+  await prisma.unit.update({
+    where: { id: unitDelhiB.id },
+    data: { structuralApproved: false, operationalBaselineApproved: false, auditRequired: true },
+  });
 
-  const operationalChecklistRows = [
-    { unitId: 12, bedAvailable: true, waterAvailable: true, toiletsAvailable: true, ventilationGood: true, selfDeclaration: "All amenities checked and maintained weekly.", approved: true },
-    { unitId: 17, bedAvailable: true, waterAvailable: true, toiletsAvailable: true, ventilationGood: true, selfDeclaration: "Good for budget-focused students, clean shared spaces.", approved: true },
-    { unitId: 27, bedAvailable: true, waterAvailable: true, toiletsAvailable: true, ventilationGood: true, selfDeclaration: "Pending final inspection paperwork upload.", approved: false },
-    { unitId: 28, bedAvailable: true, waterAvailable: true, toiletsAvailable: true, ventilationGood: true, selfDeclaration: "Near AMU gate, recently renovated rooms.", approved: true },
-    { unitId: 31, bedAvailable: true, waterAvailable: true, toiletsAvailable: true, ventilationGood: false, selfDeclaration: "Ventilation fix in progress.", approved: false },
-  ];
-  for (const row of operationalChecklistRows) {
-    await prisma.operationalChecklist.upsert({
-      where: { unitId: row.unitId },
-      update: row,
-      create: row,
-    });
-  }
-
+  console.log("Stage 7: Attach media");
   const mediaRows = [
     {
-      id: 1201,
-      unitId: 12,
+      unitId: unitAMU1.id,
       type: "photo",
-      storageKey: "external:https://demo.nearnest.local/unit12-photo.jpg",
-      publicUrl: "https://demo.nearnest.local/unit12-photo.jpg",
-      fileName: "unit12-photo.jpg",
+      storageKey: "media/amu_room_1.jpg",
+      publicUrl: "https://cdn.nearnest.test/media/amu_room_1.jpg",
+      fileName: "amu_room_1.jpg",
       mimeType: "image/jpeg",
-      sizeInBytes: 0,
-      uploadedById: landlordUser.id,
-      locked: true,
+      sizeInBytes: 245000,
+      uploadedById: landlordUser1.id,
     },
     {
-      id: 1202,
-      unitId: 12,
-      type: "document",
-      storageKey: "external:https://demo.nearnest.local/unit12-doc.pdf",
-      publicUrl: "https://demo.nearnest.local/unit12-doc.pdf",
-      fileName: "unit12-doc.pdf",
-      mimeType: "application/pdf",
-      sizeInBytes: 0,
-      uploadedById: landlordUser.id,
-      locked: true,
-    },
-    {
-      id: 1203,
-      unitId: 12,
-      type: "walkthrough360",
-      storageKey: "external:https://demo.nearnest.local/unit12-360",
-      publicUrl: "https://demo.nearnest.local/unit12-360",
-      fileName: "unit12-360",
-      mimeType: "text/html",
-      sizeInBytes: 0,
-      uploadedById: landlordUser.id,
-      locked: true,
-    },
-    {
-      id: 1701,
-      unitId: 17,
+      unitId: unitKota1.id,
       type: "photo",
-      storageKey: "external:https://demo.nearnest.local/unit17-photo.jpg",
-      publicUrl: "https://demo.nearnest.local/unit17-photo.jpg",
-      fileName: "unit17-photo.jpg",
+      storageKey: "media/kota_pg_waterline.jpg",
+      publicUrl: "https://cdn.nearnest.test/media/kota_pg_waterline.jpg",
+      fileName: "kota_pg_waterline.jpg",
       mimeType: "image/jpeg",
-      sizeInBytes: 0,
-      uploadedById: landlordUser.id,
-      locked: true,
+      sizeInBytes: 312000,
+      uploadedById: landlordUser2.id,
     },
     {
-      id: 1702,
-      unitId: 17,
-      type: "document",
-      storageKey: "external:https://demo.nearnest.local/unit17-doc.pdf",
-      publicUrl: "https://demo.nearnest.local/unit17-doc.pdf",
-      fileName: "unit17-doc.pdf",
-      mimeType: "application/pdf",
-      sizeInBytes: 0,
-      uploadedById: landlordUser.id,
-      locked: true,
-    },
-    {
-      id: 1703,
-      unitId: 17,
-      type: "walkthrough360",
-      storageKey: "external:https://demo.nearnest.local/unit17-360",
-      publicUrl: "https://demo.nearnest.local/unit17-360",
-      fileName: "unit17-360",
-      mimeType: "text/html",
-      sizeInBytes: 0,
-      uploadedById: landlordUser.id,
-      locked: true,
-    },
-    {
-      id: 2801,
-      unitId: 28,
+      unitId: unitDelhiA.id,
       type: "photo",
-      storageKey: "external:https://demo.nearnest.local/unit28-photo.jpg",
-      publicUrl: "https://demo.nearnest.local/unit28-photo.jpg",
-      fileName: "unit28-photo.jpg",
+      storageKey: "media/delhi_fire_exit.jpg",
+      publicUrl: "https://cdn.nearnest.test/media/delhi_fire_exit.jpg",
+      fileName: "delhi_fire_exit.jpg",
       mimeType: "image/jpeg",
-      sizeInBytes: 0,
-      uploadedById: landlordUser.id,
-      locked: true,
+      sizeInBytes: 287000,
+      uploadedById: landlordUser1.id,
     },
     {
-      id: 2802,
-      unitId: 28,
+      unitId: unitDelhiA.id,
       type: "document",
-      storageKey: "external:https://demo.nearnest.local/unit28-doc.pdf",
-      publicUrl: "https://demo.nearnest.local/unit28-doc.pdf",
-      fileName: "unit28-doc.pdf",
+      storageKey: "docs/fire_safety_certificate_2024.pdf",
+      publicUrl: "https://cdn.nearnest.test/docs/fire_safety_certificate_2024.pdf",
+      fileName: "fire_safety_certificate_2024.pdf",
       mimeType: "application/pdf",
-      sizeInBytes: 0,
-      uploadedById: landlordUser.id,
-      locked: true,
+      sizeInBytes: 1048576,
+      uploadedById: landlordUser1.id,
     },
     {
-      id: 2803,
-      unitId: 28,
+      unitId: unitKota1.id,
+      type: "document",
+      storageKey: "docs/plumbing_inspection_kota.pdf",
+      publicUrl: "https://cdn.nearnest.test/docs/plumbing_inspection_kota.pdf",
+      fileName: "plumbing_inspection_kota.pdf",
+      mimeType: "application/pdf",
+      sizeInBytes: 524288,
+      uploadedById: landlordUser2.id,
+    },
+    {
+      unitId: unitAMU2.id,
       type: "walkthrough360",
-      storageKey: "external:https://demo.nearnest.local/unit28-360",
-      publicUrl: "https://demo.nearnest.local/unit28-360",
-      fileName: "unit28-360",
-      mimeType: "text/html",
-      sizeInBytes: 0,
-      uploadedById: landlordUser.id,
-      locked: true,
+      storageKey: "media/walkthrough_demo.jpg",
+      publicUrl: "https://cdn.nearnest.test/media/walkthrough_demo.jpg",
+      fileName: "walkthrough_demo.jpg",
+      mimeType: "image/jpeg",
+      sizeInBytes: 1572864,
+      uploadedById: landlordUser1.id,
     },
   ];
+
   for (const row of mediaRows) {
-    await prisma.unitMedia.upsert({
-      where: { id: row.id },
-      update: row,
-      create: row,
+    await prisma.unitMedia.create({
+      data: {
+        ...row,
+        locked: false,
+        createdAt: daysAfter(BASE_TIME, 1),
+      },
     });
   }
 
+  // After submission: lock evidence.
+  await prisma.unitMedia.updateMany({ where: {}, data: { locked: true } });
+
+  console.log("Stage 8: Occupancy");
+  const amuUnit1Ref = await prisma.unit.findUnique({ where: { id: unitAMU1.id }, include: { corridor: true } });
+  const amuUnit2Ref = await prisma.unit.findUnique({ where: { id: unitAMU2.id }, include: { corridor: true } });
+  const kotaUnit1Ref = await prisma.unit.findUnique({ where: { id: unitKota1.id }, include: { corridor: true } });
+  const delhiUnitARef = await prisma.unit.findUnique({ where: { id: unitDelhiA.id }, include: { corridor: true } });
+  const delhiUnitBRef = await prisma.unit.findUnique({ where: { id: unitDelhiB.id }, include: { corridor: true } });
+
+  const occAMU1A = await createOccupancyWithOccupant({
+    student: students.amu1,
+    unit: amuUnit1Ref,
+    corridorCode: corridorAMU.id,
+    roomNumber: 101,
+    occupantIndex: 1,
+    startDate: daysAfter(BASE_TIME, 2),
+  });
+  const occAMU1B = await createOccupancyWithOccupant({
+    student: students.amu2,
+    unit: amuUnit1Ref,
+    corridorCode: corridorAMU.id,
+    roomNumber: 101,
+    occupantIndex: 2,
+    startDate: daysAfter(BASE_TIME, 2),
+  });
+  const occAMU2A = await createOccupancyWithOccupant({
+    student: students.amu3,
+    unit: amuUnit2Ref,
+    corridorCode: corridorAMU.id,
+    roomNumber: 102,
+    occupantIndex: 1,
+    startDate: daysAfter(BASE_TIME, 3),
+  });
+
+  const occKota1A = await createOccupancyWithOccupant({
+    student: students.kota1,
+    unit: kotaUnit1Ref,
+    corridorCode: corridorKota.id,
+    roomNumber: 201,
+    occupantIndex: 1,
+    startDate: daysAfter(BASE_TIME, 2),
+  });
+  const occKota1B = await createOccupancyWithOccupant({
+    student: students.kota2,
+    unit: kotaUnit1Ref,
+    corridorCode: corridorKota.id,
+    roomNumber: 201,
+    occupantIndex: 2,
+    startDate: daysAfter(BASE_TIME, 2),
+  });
+  const occKota1C = await createOccupancyWithOccupant({
+    student: students.kota3,
+    unit: kotaUnit1Ref,
+    corridorCode: corridorKota.id,
+    roomNumber: 201,
+    occupantIndex: 3,
+    startDate: daysAfter(BASE_TIME, 2),
+  });
+
+  const occDelhiA = await createOccupancyWithOccupant({
+    student: students.delhi1,
+    unit: delhiUnitARef,
+    corridorCode: corridorDelhi.id,
+    roomNumber: 301,
+    occupantIndex: 1,
+    startDate: daysAfter(BASE_TIME, 2),
+  });
+
+  // Overfill scenario for capacity=2 unit.
+  const occDelhiB1 = await createOccupancyWithOccupant({
+    student: students.kota1,
+    unit: delhiUnitBRef,
+    corridorCode: corridorDelhi.id,
+    roomNumber: 302,
+    occupantIndex: 1,
+    startDate: daysAfter(BASE_TIME, 3),
+  });
+  const occDelhiB2 = await createOccupancyWithOccupant({
+    student: students.kota2,
+    unit: delhiUnitBRef,
+    corridorCode: corridorDelhi.id,
+    roomNumber: 302,
+    occupantIndex: 2,
+    startDate: daysAfter(BASE_TIME, 3),
+  });
+  const occDelhiB3 = await createOccupancyWithOccupant({
+    student: students.kota3,
+    unit: delhiUnitBRef,
+    corridorCode: corridorDelhi.id,
+    roomNumber: 302,
+    occupantIndex: 3,
+    startDate: daysAfter(BASE_TIME, 3),
+  });
+  void occDelhiB3;
+  // student delhi2 intentionally has NO occupancy.
+
+  console.log("Stage 9: Complaint matrix");
+  await createComplaint({
+    unitId: unitAMU1.id,
+    studentId: students.amu1.id,
+    occupantRecordId: occAMU1A.occupant.id,
+    severity: 2,
+    message: "Minor hygiene issue in common wash area.",
+    incidentType: "other",
+    incidentFlag: false,
+    createdAt: daysBefore(BASE_TIME, 40),
+    resolved: true,
+    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 40), 20),
+  });
+
+  await createComplaint({
+    unitId: unitKota1.id,
+    studentId: students.kota1.id,
+    occupantRecordId: occKota1A.occupant.id,
+    severity: 4,
+    message: "Water leakage from upper pipeline.",
+    incidentType: "water",
+    incidentFlag: false,
+    createdAt: daysBefore(BASE_TIME, 20),
+    resolved: true,
+    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 20), 70), // resolved late
+  });
+  await createComplaint({
+    unitId: unitKota1.id,
+    studentId: students.kota1.id,
+    occupantRecordId: occKota1A.occupant.id,
+    severity: 2,
+    message: "Low water pressure in morning hours.",
+    incidentType: "water",
+    incidentFlag: false,
+    createdAt: daysBefore(BASE_TIME, 12),
+    resolved: true,
+    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 12), 24), // on time
+  });
+  await createComplaint({
+    unitId: unitKota1.id,
+    studentId: students.kota2.id,
+    occupantRecordId: occKota1B.occupant.id,
+    severity: 1,
+    message: "Water quality issue remains unresolved.",
+    incidentType: "water",
+    incidentFlag: false,
+    createdAt: daysBefore(BASE_TIME, 3),
+    resolved: false,
+  });
+
+  await createComplaint({
+    unitId: unitDelhiA.id,
+    studentId: students.delhi1.id,
+    occupantRecordId: occDelhiA.occupant.id,
+    severity: 5,
+    message: "Fire hazard near electrical panel.",
+    incidentType: "fire",
+    incidentFlag: true,
+    createdAt: daysBefore(BASE_TIME, 5),
+    resolved: false,
+  });
+
+  await createComplaint({
+    unitId: unitDelhiC.id,
+    studentId: students.delhi1.id,
+    severity: 3,
+    message: "Electrical fluctuation in room sockets.",
+    incidentType: "other",
+    incidentFlag: false,
+    createdAt: daysBefore(BASE_TIME, 35),
+    resolved: true,
+    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 35), 18),
+  });
+
+  await createComplaint({
+    unitId: unitDelhiC.id,
+    studentId: students.delhi1.id,
+    severity: 2,
+    message: "Lift not working in common area.",
+    incidentType: "common_area",
+    incidentFlag: false,
+    createdAt: daysBefore(BASE_TIME, 15),
+    resolved: true,
+    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 15), 30),
+  });
+
+  console.log("Stage 10: Audit logs");
+  const auditDensity = await prisma.auditLog.create({
+    data: {
+      unitId: unitDelhiB.id,
+      triggerType: "density",
+      reason: "Overcapacity violation: 3 active occupancies against capacity 2.",
+      correctiveAction: "Reduce occupancy to approved capacity and re-verify baselines.",
+      correctiveDeadline: daysAfter(BASE_TIME, 7),
+      verificationNotes: "Landlord notified; awaiting compliance evidence.",
+      createdAt: daysBefore(BASE_TIME, 2),
+      resolved: false,
+    },
+  });
+  void auditDensity;
+
+  const auditIncident = await prisma.auditLog.create({
+    data: {
+      unitId: unitDelhiA.id,
+      triggerType: "incident",
+      reason: "Severe fire complaint triggered emergency governance action.",
+      correctiveAction: "Complete wiring replacement and fire safety recertification.",
+      correctiveDeadline: daysAfter(BASE_TIME, 14),
+      verificationNotes: "Safety inspection pending.",
+      createdAt: daysBefore(BASE_TIME, 4),
+      resolved: false,
+    },
+  });
+  void auditIncident;
+
+  const auditManual = await prisma.auditLog.create({
+    data: {
+      unitId: unitAMU2.id,
+      triggerType: "manual",
+      reason: "Routine manual compliance review.",
+      correctiveAction: "No corrective action required.",
+      correctiveDeadline: null,
+      verificationNotes: "Unit remains compliant.",
+      createdAt: daysBefore(BASE_TIME, 25),
+      resolved: true,
+      resolvedAt: daysBefore(BASE_TIME, 20),
+    },
+  });
+  void auditManual;
+
+  const auditResolvedThenReopened = await prisma.auditLog.create({
+    data: {
+      unitId: unitDelhiC.id,
+      triggerType: "manual",
+      reason: "Resolved and reopened governance simulation.",
+      correctiveAction: "Electrical check and elevator maintenance verification.",
+      correctiveDeadline: daysAfter(BASE_TIME, 5),
+      verificationNotes: "Resolved once, reopened for verification drift scenario.",
+      createdAt: daysBefore(BASE_TIME, 18),
+      resolved: true,
+      resolvedAt: daysBefore(BASE_TIME, 12),
+    },
+  });
+  void auditResolvedThenReopened;
+
+  // Reopened unit simulation.
+  await prisma.unit.update({
+    where: { id: unitDelhiC.id },
+    data: { status: "approved", auditRequired: false },
+  });
+
+  // Enforce overcapacity and severe incident statuses for governance clarity.
+  await prisma.unit.update({
+    where: { id: unitDelhiB.id },
+    data: { status: "suspended", auditRequired: true },
+  });
+  await prisma.unit.update({
+    where: { id: unitDelhiA.id },
+    data: { status: "suspended", auditRequired: true },
+  });
+
+  console.log("Stage 11: VDP + shortlist");
   const vdpRows = [
-    { id: 1, studentId: student.id, corridorId: corridor.id, intake: student.intake, verified: true, status: "verified" },
-    { id: 2, studentId: student2.id, corridorId: corridor.id, intake: student2.intake, verified: true, status: "shortlisted" },
-    { id: 3, studentId: student3.id, corridorId: corridor.id, intake: student3.intake, verified: true, status: "active" },
+    { studentId: students.amu1.id, corridorId: corridorAMU.id, intake: students.amu1.intake, verified: true, status: "verified", joinedAt: daysBefore(BASE_TIME, 60) },
+    { studentId: students.amu2.id, corridorId: corridorAMU.id, intake: students.amu2.intake, verified: true, status: "shortlisted", joinedAt: daysBefore(BASE_TIME, 58) },
+    { studentId: students.kota1.id, corridorId: corridorKota.id, intake: students.kota1.intake, verified: true, status: "active", joinedAt: daysBefore(BASE_TIME, 55) },
+    { studentId: students.kota2.id, corridorId: corridorKota.id, intake: students.kota2.intake, verified: true, status: "verified", joinedAt: daysBefore(BASE_TIME, 54) },
+    { studentId: students.delhi1.id, corridorId: corridorDelhi.id, intake: students.delhi1.intake, verified: true, status: "active", joinedAt: daysBefore(BASE_TIME, 53) },
+    { studentId: students.delhi2.id, corridorId: corridorDelhi.id, intake: students.delhi2.intake, verified: true, status: "verified", joinedAt: daysBefore(BASE_TIME, 52) },
   ];
   for (const row of vdpRows) {
-    await prisma.vDPEntry.upsert({
-      where: { id: row.id },
-      update: row,
-      create: row,
-    });
+    await prisma.vDPEntry.create({ data: row });
   }
 
-  const shortlists = [
-    { id: 201, studentId: student.id, unitId: 28 },
-    { id: 202, studentId: student2.id, unitId: 28 },
-    { id: 203, studentId: student3.id, unitId: 12 },
-    { id: 204, studentId: student2.id, unitId: 17 },
-  ];
-  for (const row of shortlists) {
-    await prisma.shortlist.upsert({
-      where: { id: row.id },
-      update: row,
-      create: row,
-    });
+  await prisma.shortlist.create({ data: { studentId: students.amu2.id, unitId: unitAMU3.id, createdAt: daysBefore(BASE_TIME, 8) } });
+  await prisma.shortlist.create({ data: { studentId: students.kota2.id, unitId: unitKota1.id, createdAt: daysBefore(BASE_TIME, 7) } });
+  await prisma.shortlist.create({ data: { studentId: students.delhi2.id, unitId: unitDelhiC.id, createdAt: daysBefore(BASE_TIME, 6) } });
+
+  console.log("Stage 12: Validation");
+  const allUnits = await prisma.unit.findMany({ include: { complaints: true } });
+  const suspendedCount = allUnits.filter((u) => u.status === "suspended").length;
+  const healthyCount = allUnits.filter((u) => u.status === "approved" && u.structuralApproved && u.operationalBaselineApproved && u.trustScore >= 70).length;
+  const nearThresholdCount = allUnits.filter((u) => u.trustScore >= 50 && u.trustScore <= 65).length;
+  const openAuditCount = await prisma.auditLog.count({ where: { resolved: false } });
+  const resolvedAuditCount = await prisma.auditLog.count({ where: { resolved: true } });
+  const complaintRows = await prisma.complaint.findMany({
+    select: { id: true, unitId: true, studentId: true },
+  });
+  const fkComplaintOrphans = complaintRows.filter((row) => !row.unitId || !row.studentId).length;
+
+  if (fkComplaintOrphans !== 0) {
+    throw new Error("Validation failed: complaint foreign key orphan detected.");
+  }
+  if (suspendedCount < 1) {
+    throw new Error("Validation failed: expected at least one suspended unit.");
+  }
+  if (nearThresholdCount < 1) {
+    throw new Error("Validation failed: expected at least one near-threshold unit (50-65).");
+  }
+  if (healthyCount < 1) {
+    throw new Error("Validation failed: expected at least one healthy approved unit.");
+  }
+  if (openAuditCount < 1 || resolvedAuditCount < 1) {
+    throw new Error("Validation failed: expected both open and resolved audits.");
   }
 
-  const occupancies = [
-    { id: 301, unitId: 28, studentId: student.id, endDate: null },
-    { id: 302, unitId: 12, studentId: student3.id, endDate: null },
-  ];
-  for (const row of occupancies) {
-    await prisma.occupancy.upsert({
-      where: { id: row.id },
-      update: row,
-      create: row,
-    });
+  // Dawn data richness checks.
+  const dawnStudentVisibleUnits = await prisma.unit.count({
+    where: {
+      status: "approved",
+      structuralApproved: true,
+      operationalBaselineApproved: true,
+      trustScore: { gte: 50 },
+    },
+  });
+  const dawnLandlordRiskUnits = await prisma.unit.count({
+    where: {
+      OR: [{ auditRequired: true }, { trustScore: { lt: 60 } }],
+    },
+  });
+  const dawnAdminDensityCandidates = await prisma.complaint.count({
+    where: {
+      createdAt: { gte: daysBefore(BASE_TIME, 30) },
+    },
+  });
+
+  if (dawnStudentVisibleUnits < 1 || dawnLandlordRiskUnits < 1 || dawnAdminDensityCandidates < 1) {
+    throw new Error("Validation failed: Dawn queries would not have meaningful demo output.");
   }
 
-  const occupants = [
-    {
-      id: 601,
-      publicId: "120010280281",
-      cityCode: 12,
-      corridorCode: 1,
-      hostelCode: 28,
-      roomNumber: 28,
-      occupantIndex: 1,
-      studentId: student.id,
-      unitId: 28,
-      active: true,
-    },
-    {
-      id: 602,
-      publicId: "120010120121",
-      cityCode: 12,
-      corridorCode: 1,
-      hostelCode: 12,
-      roomNumber: 12,
-      occupantIndex: 1,
-      studentId: student3.id,
-      unitId: 12,
-      active: true,
-    },
-  ];
-  for (const row of occupants) {
-    await prisma.occupant.upsert({
-      where: {
-        unitId_roomNumber_occupantIndex_active: {
-          unitId: row.unitId,
-          roomNumber: row.roomNumber,
-          occupantIndex: row.occupantIndex,
-          active: row.active,
-        },
-      },
-      update: row,
-      create: row,
-    });
-  }
-
-  const now = new Date();
-  const complaints = [
-    {
-      id: 401,
-      unitId: 28,
-      studentId: student.id,
-      severity: 2,
-      incidentType: "other",
-      incidentFlag: false,
-      message: "Water pressure was low during morning hours.",
-      resolved: true,
-      createdAt: new Date(now.getTime() - 50 * 60 * 60 * 1000),
-      slaDeadline: new Date(now.getTime() - 2 * 60 * 60 * 1000),
-      resolvedAt: new Date(now.getTime() - 3 * 60 * 60 * 1000),
-    },
-    {
-      id: 402,
-      unitId: 28,
-      studentId: student2.id,
-      severity: 4,
-      incidentType: "safety",
-      incidentFlag: true,
-      message: "Main gate latch is broken and does not lock at night.",
-      resolved: false,
-      createdAt: new Date(now.getTime() - 8 * 60 * 60 * 1000),
-      slaDeadline: new Date(now.getTime() + 40 * 60 * 60 * 1000),
-      resolvedAt: null,
-    },
-    {
-      id: 403,
-      unitId: 17,
-      studentId: student2.id,
-      severity: 3,
-      incidentType: "harassment",
-      incidentFlag: true,
-      message: "Repeated noise disturbance from adjacent room late at night.",
-      resolved: true,
-      createdAt: new Date(now.getTime() - 120 * 60 * 60 * 1000),
-      slaDeadline: new Date(now.getTime() - 72 * 60 * 60 * 1000),
-      resolvedAt: new Date(now.getTime() - 60 * 60 * 60 * 1000),
-    },
-    {
-      id: 404,
-      unitId: 12,
-      studentId: student3.id,
-      severity: 5,
-      incidentType: "fire",
-      incidentFlag: true,
-      message: "Electrical board sparked briefly near kitchen area.",
-      resolved: false,
-      createdAt: new Date(now.getTime() - 20 * 60 * 60 * 1000),
-      slaDeadline: new Date(now.getTime() + 28 * 60 * 60 * 1000),
-      resolvedAt: null,
-    },
-    {
-      id: 405,
-      unitId: 31,
-      studentId: student2.id,
-      severity: 4,
-      incidentType: "injury",
-      incidentFlag: true,
-      message: "Slipped near wet staircase due to leakage.",
-      resolved: false,
-      createdAt: new Date(now.getTime() - 26 * 60 * 60 * 1000),
-      slaDeadline: new Date(now.getTime() + 22 * 60 * 60 * 1000),
-      resolvedAt: null,
-    },
-  ];
-  for (const row of complaints) {
-    await prisma.complaint.upsert({
-      where: { id: row.id },
-      update: row,
-      create: row,
-    });
-  }
-
-  await prisma.unit.update({
-    where: { id: 12 },
-    data: { trustScore: 69, auditRequired: true, status: "approved" },
-  });
-  await prisma.unit.update({
-    where: { id: 17 },
-    data: { trustScore: 66, auditRequired: true, status: "approved" },
-  });
-  await prisma.unit.update({
-    where: { id: 28 },
-    data: { trustScore: 63, auditRequired: true, status: "suspended" },
-  });
-  await prisma.unit.update({
-    where: { id: 31 },
-    data: { trustScore: 44, auditRequired: true, status: "suspended" },
-  });
-
-  await prisma.auditLog.upsert({
-    where: { id: 501 },
-    update: {},
-    create: {
-      id: 501,
-      unitId: 28,
-      triggerType: "incident",
-      reason: "Demo: repeated incident complaints in 60-day window",
-      correctiveAction: "Repair gate lock and submit verification video",
-      correctiveDeadline: new Date(now.getTime() + 4 * 24 * 60 * 60 * 1000),
-      resolved: false,
-    },
-  });
-  await prisma.auditLog.upsert({
-    where: { id: 502 },
-    update: {},
-    create: {
-      id: 502,
-      unitId: 17,
-      triggerType: "sla_breach",
-      reason: "Demo: complaint resolved after SLA deadline",
-      correctiveAction: "Introduce complaint escalation SOP within 12 hours",
-      correctiveDeadline: new Date(now.getTime() + 6 * 24 * 60 * 60 * 1000),
-      resolved: false,
-    },
-  });
-
-  console.log("Seeded demo units, media, shortlists, occupancies, complaints, and audit logs.");
-  console.log("Seed completed successfully.");
-  console.log("Login credentials:");
-  console.log("  Admin:     admin@nearnest.com / admin123");
-  console.log("  Student:   student@nearnest.com / student123");
-  console.log("  Student2:  student2@nearnest.test / student123");
-  console.log("  Student3:  student3@nearnest.test / student123");
-  console.log("  Landlord:  landlord@nearnest.com / landlord123");
-  console.log("  Landlord2: landlord2@nearnest.test / landlord123");
+  console.log("Seed complete.");
+  console.log(`Admin: admin@nearnest.com / admin123`);
+  console.log(`Landlords: landlord1@nearnest.com, landlord2@nearnest.com / landlord123`);
+  console.log(`Students: student_*@nearnest.com / student123`);
+  console.log(`Units: ${allUnits.length}, suspended: ${suspendedCount}, near-threshold: ${nearThresholdCount}, healthy: ${healthyCount}`);
+  console.log(`Audits open/resolved: ${openAuditCount}/${resolvedAuditCount}`);
 }
 
 main()
-  .catch((e) => {
-    console.error(e);
+  .catch((error) => {
+    console.error("Seed failed:", error);
     process.exit(1);
   })
   .finally(async () => {
