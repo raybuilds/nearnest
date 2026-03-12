@@ -1,4 +1,14 @@
 export default function UnitCard({ unit, showDetails = false, showForStudent = false }) {
+  const UNIT_STATUS_META = {
+    draft: { label: "Draft", color: "bg-slate-100 text-slate-700" },
+    submitted: { label: "Submitted", color: "bg-blue-100 text-blue-700" },
+    admin_review: { label: "Admin Review", color: "bg-purple-100 text-purple-700" },
+    approved: { label: "Approved", color: "bg-green-100 text-green-700" },
+    suspended: { label: "Suspended", color: "bg-amber-100 text-amber-700" },
+    rejected: { label: "Rejected", color: "bg-red-100 text-red-700" },
+    archived: { label: "Archived", color: "bg-gray-100 text-gray-700" },
+  };
+
   const bandColor =
     unit.trustBand === "priority"
       ? "bg-green-50 border-green-500"
@@ -13,14 +23,9 @@ export default function UnitCard({ unit, showDetails = false, showForStudent = f
         ? "bg-amber-500 text-white"
         : "bg-red-600 text-white";
 
-  const statusColors = {
-    draft: "bg-slate-100 text-slate-700",
-    submitted: "bg-blue-100 text-blue-700",
-    admin_review: "bg-purple-100 text-purple-700",
-    approved: "bg-green-100 text-green-700",
-    rejected: "bg-red-100 text-red-700",
-    suspended: "bg-amber-100 text-amber-700",
-    archived: "bg-gray-100 text-gray-700",
+  const statusMeta = UNIT_STATUS_META[unit.status] || {
+    label: "Invalid Status",
+    color: "bg-rose-100 text-rose-700",
   };
 
   const trustScoreColor =
@@ -65,13 +70,13 @@ export default function UnitCard({ unit, showDetails = false, showForStudent = f
 
       {unit.status && (
         <p className="text-sm text-slate-700">
-          Status: <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${statusColors[unit.status] || "bg-slate-100 text-slate-700"}`}>{unit.status.replace("_", " ")}</span>
+          Status: <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${statusMeta.color}`}>{statusMeta.label}</span>
         </p>
       )}
 
       {unit.auditRequired && (
         <p className="mt-1 text-sm">
-          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">⚠️ Audit Required</span>
+          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Audit Required</span>
         </p>
       )}
 
@@ -106,7 +111,7 @@ export default function UnitCard({ unit, showDetails = false, showForStudent = f
 
       {showDetails && unit.openAuditLogCount > 0 && (
         <p className="text-sm">
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">📋 {unit.openAuditLogCount} Audit{unit.openAuditLogCount > 1 ? "s" : ""}</span>
+          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">{unit.openAuditLogCount} Audit{unit.openAuditLogCount > 1 ? "s" : ""}</span>
         </p>
       )}
     </article>
