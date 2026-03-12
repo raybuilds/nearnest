@@ -3,7 +3,7 @@ const { buildSoftRecommendations, createHttpError, ensureRole, inLastDays, parse
 module.exports = async function landlordRecurringIssues({ req, context }) {
   ensureRole(req, ["landlord"]);
 
-  const { callApi } = context;
+  const { callApi, updateMemory } = context;
   const profile = await callApi("/profile");
   const ownLandlordId = profile?.identity?.landlordId || null;
   const requestedLandlordId = parseRequestedLandlordId(context.text);
@@ -52,6 +52,10 @@ module.exports = async function landlordRecurringIssues({ req, context }) {
     slaBreachCount,
     trendCurrent14d,
     trendPrevious14d,
+  });
+
+  updateMemory({
+    lastIntent: "landlord_recurring",
   });
 
   const lead = topIssues[0];

@@ -87,7 +87,8 @@ function detectIncidentType(text) {
   if (/\bfire|smoke\b/.test(text)) return "fire";
   if (/\binjury|hurt|accident\b/.test(text)) return "injury";
   if (/\bharass|abuse|threat\b/.test(text)) return "harassment";
-  if (/\block|wiring|electric|safety\b/.test(text)) return "safety";
+  if (/\b(electric|electrical|wiring|voltage|spark)\b/.test(text)) return "electrical";
+  if (/\block|safety\b/.test(text)) return "safety";
   return "other";
 }
 
@@ -95,6 +96,7 @@ function estimateSeverity(text, incidentType) {
   if (incidentType === "fire") return 5;
   if (incidentType === "injury") return 4;
   if (incidentType === "harassment") return 4;
+  if (incidentType === "electrical") return 4;
   if (incidentType === "common_area") return 3;
   if (incidentType === "water" || incidentType === "safety") return 3;
   if (/\burgent|immediate|critical\b/.test(text)) return 4;
@@ -113,10 +115,10 @@ function buildSoftRecommendations({ waterCount, slaBreachCount, trendCurrent14d,
   const suggestions = [];
 
   if (waterCount >= WATER_COMPLAINT_THRESHOLD) {
-    suggestions.push("Water-related complaints are elevated. Consider reviewing plumbing in affected units.");
+    suggestions.push("Recurring water issues detected. Consider inspecting plumbing infrastructure.");
   }
   if (slaBreachCount >= SLA_BREACH_REVIEW_THRESHOLD) {
-    suggestions.push("Repeated SLA breaches detected. Consider reviewing complaint response process.");
+    suggestions.push("Response delays detected. Faster resolution may improve trust score.");
   }
   if (trendCurrent14d > trendPrevious14d) {
     suggestions.push("Complaint density is rising versus the previous 14 days. Consider monitoring high-activity units.");

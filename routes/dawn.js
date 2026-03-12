@@ -7,6 +7,8 @@ const studentComplaintSummary = require("../services/dawnIntents/studentComplain
 const landlordRecurringIssues = require("../services/dawnIntents/landlordRecurringIssues");
 const landlordRiskSummary = require("../services/dawnIntents/landlordRiskSummary");
 const adminCorridorAnalytics = require("../services/dawnIntents/adminCorridorAnalytics");
+const { clearContext, getContext, updateContext } = require("../services/dawnContextStore");
+const { formatDawnResponse } = require("../services/dawnResponseFormatter");
 
 const router = express.Router();
 
@@ -92,7 +94,24 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
     }
 
     const role = req.user.role;
-    const intent = typeof providedIntent === "string" && providedIntent.trim() ? providedIntent.trim() : inferIntent(role, message);
+    const userId = req.user.id;
+    const memory = getContext(userId);
+
+    const shouldClearContext = /^\/?(clear|reset)\s+(memory|context)$/i.test(message.trim());
+    if (shouldClearContext) {
+      clearContext(userId);
+      return res.json({
+        intent: "context_reset",
+        assistant: "Context cleared. We can start fresh.",
+      });
+    }
+
+    let inferredIntent = inferIntent(role, message);
+    if (inferredIntent === "unsupported" && memory?.lastIntent) {
+      inferredIntent = memory.lastIntent;
+    }
+
+    const intent = typeof providedIntent === "string" && providedIntent.trim() ? providedIntent.trim() : inferredIntent;
     const handler = intentMap[intent];
 
     if (!handler) {
@@ -108,13 +127,30 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
       text: message.toLowerCase().trim(),
       confirm: Boolean(confirm),
       action: action && typeof action === "object" ? action : null,
+      memory,
+      updateMemory: (patch) => updateContext(userId, patch),
+      clearMemory: (field) => {
+        if (!field) {
+          clearContext(userId);
+          return;
+        }
+        const current = getContext(userId);
+        updateContext(userId, { ...current, [field]: null });
+      },
       callApi: (path, options = {}) => callApi(path, token, options),
     };
 
     const result = await handler({ req, context });
+    updateContext(userId, {
+      lastIntent: intent,
+      ...(result?.data?.unitId ? { lastUnitId: result.data.unitId } : {}),
+    });
+
+    const assistant = formatDawnResponse(intent, result || {});
     return res.json({
       intent,
       ...(result || {}),
+      assistant,
     });
   } catch (error) {
     if (error?.isHttpError) {

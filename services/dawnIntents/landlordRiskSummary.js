@@ -3,7 +3,7 @@ const { HIGH_DENSITY_THRESHOLD, createHttpError, ensureRole, parseRequestedLandl
 module.exports = async function landlordRiskSummary({ req, context }) {
   ensureRole(req, ["landlord"]);
 
-  const { callApi } = context;
+  const { callApi, updateMemory } = context;
   const profile = await callApi("/profile");
   const ownLandlordId = profile?.identity?.landlordId || null;
   const requestedLandlordId = parseRequestedLandlordId(context.text);
@@ -36,6 +36,11 @@ module.exports = async function landlordRiskSummary({ req, context }) {
     })
     .filter((item) => item.reasons.length > 0)
     .sort((a, b) => b.riskScore - a.riskScore || Number(a.trustScore) - Number(b.trustScore));
+
+  updateMemory({
+    lastIntent: "landlord_risk",
+    lastUnitId: risky[0]?.unitId || null,
+  });
 
   return {
     assistant: `Found ${risky.length} units with risk indicators.`,

@@ -3,7 +3,7 @@ const { ensureRole } = require("./utils");
 module.exports = async function studentComplaintSummary({ req, context }) {
   ensureRole(req, ["student"]);
 
-  const { callApi } = context;
+  const { callApi, updateMemory } = context;
   const profile = await callApi("/profile");
 
   const unitId = profile?.occupancy?.currentUnit?.unitId || profile?.currentAccommodation?.identity?.unitId || null;
@@ -22,6 +22,10 @@ module.exports = async function studentComplaintSummary({ req, context }) {
   const trust = profile?.currentAccommodation?.trust || {};
   const summary = unitComplaintSummary?.summary || {};
   const trustSignals = unitDetails?.trustSignals || {};
+  updateMemory({
+    lastIntent: "student_complaint_summary",
+    lastUnitId: unitId,
+  });
 
   return {
     assistant: `Unit #${unitId} health summary for the last 30 days.`,
