@@ -6,10 +6,16 @@ const router = express.Router();
 const HEALTH_WINDOW_DAYS = 30;
 
 function formatOccupantPublicId(publicId) {
-  if (!publicId || !/^\d{12}$/.test(publicId)) {
+  if (!publicId) {
+    return null;
+  }
+  if (/^[0-9]{2}-[0-9]{3}-[0-9]{3}-[0-9]{3}-[0-9]{1}$/.test(publicId)) {
     return publicId || null;
   }
-  return `NN-${publicId.slice(0, 2)}-${publicId.slice(2, 5)}-${publicId.slice(5, 8)}-${publicId.slice(8, 11)}-${publicId.slice(11, 12)}`;
+  if (/^\d{12}$/.test(publicId)) {
+    return `${publicId.slice(0, 2)}-${publicId.slice(2, 5)}-${publicId.slice(5, 8)}-${publicId.slice(8, 11)}-${publicId.slice(11, 12)}`;
+  }
+  return publicId || null;
 }
 
 function getLateResolvedCount(complaints) {

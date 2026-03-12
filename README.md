@@ -151,6 +151,42 @@ npm install
 cd ..
 ```
 
+## Running the Demo Environment
+
+1. Install dependencies.
+
+```bash
+npm install
+cd frontend
+npm install
+cd ..
+```
+
+2. Start PostgreSQL.
+
+3. Rebuild the demo dataset.
+
+```bash
+npm run demo:reset
+```
+
+`demo:reset` runs Prisma reset + seed and rebuilds the entire NearNest scenario dataset for a fresh, deterministic demo state.
+
+4. Start backend.
+
+```bash
+npm run dev
+```
+
+5. Start frontend.
+
+```bash
+cd frontend
+npm run dev
+```
+
+Optional (Windows): run `RUN_NEARNEST.bat` from repo root to start backend + frontend and open `http://localhost:3000`.
+
 ## Database and Seed
 
 ```bash
@@ -252,8 +288,6 @@ Dawn:
 
 ## Operational Notes
 
-- Backend has no `npm run dev` script; run with `node index.js` (or add your own nodemon script).
-- `routes/index.js` is legacy and not mounted by `index.js`.
 - `.next` should never be committed; cleanup is enforced in `.gitignore`.
 
 ## Test Coverage

@@ -3,6 +3,7 @@ const prisma = require("../prismaClient");
 const { calculateTrustScore } = require("../engines/trustEngine");
 const { verifyToken, requireRole } = require("../middlewares/auth");
 const { complaintLimiter } = require("../middlewares/rateLimiter");
+const { isValidOccupantId } = require("../services/occupantIdService");
 
 const router = express.Router();
 const AUDIT_WINDOW_DAYS = 60;
@@ -269,7 +270,7 @@ router.post("/complaint", verifyToken, requireRole("student"), complaintLimiter,
     }
     if (occupantId !== undefined && occupantId !== null && String(occupantId).trim() !== "") {
       const normalizedOccupantId = String(occupantId).trim();
-      if (!/^\d{12}$/.test(normalizedOccupantId)) {
+      if (!isValidOccupantId(normalizedOccupantId)) {
         return res.status(400).json({ error: "Invalid occupant ID" });
       }
       const occupant = await prisma.occupant.findUnique({

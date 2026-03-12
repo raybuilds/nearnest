@@ -1,15 +1,15 @@
 const bcrypt = require("bcrypt");
 const { PrismaClient } = require("@prisma/client");
 const { calculateTrustScore } = require("./engines/trustEngine");
-const { generateOccupantId } = require("./services/occupantIdService");
+const { generateOccupantId, isValidOccupantId } = require("./services/occupantIdService");
 
 const prisma = new PrismaClient();
 
-const FIXED_SALT = "$2b$10$abcdefghijklmnopqrstuv";
-const BASE_TIME = new Date("2026-02-01T09:00:00.000Z");
+const BCRYPT_ROUNDS = 10;
+const BASE_TIME = new Date("2026-01-01T10:00:00Z");
 
-function hashPassword(plain) {
-  return bcrypt.hashSync(plain, FIXED_SALT);
+async function hashPassword(plain) {
+  return bcrypt.hash(plain, BCRYPT_ROUNDS);
 }
 
 function hoursAfter(date, hours) {
@@ -22,6 +22,10 @@ function daysAfter(date, days) {
 
 function daysBefore(date, days) {
   return new Date(date.getTime() - days * 24 * 60 * 60 * 1000);
+}
+
+function complaintDay(offsetDays) {
+  return daysAfter(BASE_TIME, offsetDays);
 }
 
 function isResolvedLate(complaint) {
@@ -113,6 +117,16 @@ async function createOccupancyWithOccupant({
     roomNumber,
     occupantIndex,
   });
+  const existing = await prisma.occupant.findUnique({
+    where: { publicId },
+    select: { id: true },
+  });
+  if (!isValidOccupantId(publicId)) {
+    throw new Error(`Generated occupant ID is invalid: ${publicId}`);
+  }
+  if (existing) {
+    throw new Error(`Duplicate occupant ID generated during seed: ${publicId}`);
+  }
 
   const occupant = await prisma.occupant.create({
     data: {
@@ -180,43 +194,49 @@ async function main() {
   const instCommerce = await prisma.institution.create({ data: { name: "Old City Commerce College", corridorId: corridorDelhi.id } });
 
   console.log("Stage 4: Create users");
+  const [adminPasswordHash, landlordPasswordHash, studentPasswordHash] = await Promise.all([
+    hashPassword("admin123"),
+    hashPassword("landlord123"),
+    hashPassword("student123"),
+  ]);
+
   const adminUser = await prisma.user.create({
-    data: { name: "System Admin", email: "admin@nearnest.com", password: hashPassword("admin123"), role: "admin" },
+    data: { name: "System Admin", email: "admin@nearnest.com", password: adminPasswordHash, role: "admin" },
   });
 
   const landlordUser1 = await prisma.user.create({
-    data: { name: "Ramesh Kumar", email: "landlord1@nearnest.com", password: hashPassword("landlord123"), role: "landlord" },
+    data: { name: "Ramesh Kumar", email: "landlord@nearnest.com", password: landlordPasswordHash, role: "landlord" },
   });
   const landlordUser2 = await prisma.user.create({
-    data: { name: "Suresh Gupta", email: "landlord2@nearnest.com", password: hashPassword("landlord123"), role: "landlord" },
+    data: { name: "Suresh Gupta", email: "landlord2@nearnest.test", password: landlordPasswordHash, role: "landlord" },
   });
   const landlord1 = await prisma.landlord.create({ data: { userId: landlordUser1.id } });
   const landlord2 = await prisma.landlord.create({ data: { userId: landlordUser2.id } });
 
   const studentUsers = {
     amu1: await prisma.user.create({
-      data: { name: "Ahmad Farooq", email: "student_amu_1@nearnest.com", password: hashPassword("student123"), role: "student" },
+      data: { name: "Ahmad Farooq", email: "student@nearnest.com", password: studentPasswordHash, role: "student" },
     }),
     amu2: await prisma.user.create({
-      data: { name: "Fatima Zehra", email: "student_amu_2@nearnest.com", password: hashPassword("student123"), role: "student" },
+      data: { name: "Fatima Zehra", email: "student2@nearnest.test", password: studentPasswordHash, role: "student" },
     }),
     amu3: await prisma.user.create({
-      data: { name: "Obaidullah", email: "student_amu_3@nearnest.com", password: hashPassword("student123"), role: "student" },
+      data: { name: "Obaidullah", email: "student3@nearnest.test", password: studentPasswordHash, role: "student" },
     }),
     kota1: await prisma.user.create({
-      data: { name: "Raj Malhotra", email: "student_kota_1@nearnest.com", password: hashPassword("student123"), role: "student" },
+      data: { name: "Raj Malhotra", email: "student_kota_1@nearnest.com", password: studentPasswordHash, role: "student" },
     }),
     kota2: await prisma.user.create({
-      data: { name: "Priya Sharma", email: "student_kota_2@nearnest.com", password: hashPassword("student123"), role: "student" },
+      data: { name: "Priya Sharma", email: "student_kota_2@nearnest.com", password: studentPasswordHash, role: "student" },
     }),
     kota3: await prisma.user.create({
-      data: { name: "Amit Kumar", email: "student_kota_3@nearnest.com", password: hashPassword("student123"), role: "student" },
+      data: { name: "Amit Kumar", email: "student_kota_3@nearnest.com", password: studentPasswordHash, role: "student" },
     }),
     delhi1: await prisma.user.create({
-      data: { name: "Arjun Singh", email: "student_delhi_1@nearnest.com", password: hashPassword("student123"), role: "student" },
+      data: { name: "Arjun Singh", email: "student_delhi_1@nearnest.com", password: studentPasswordHash, role: "student" },
     }),
     delhi2: await prisma.user.create({
-      data: { name: "Meera Devi", email: "student_delhi_2@nearnest.com", password: hashPassword("student123"), role: "student" },
+      data: { name: "Meera Devi", email: "student_delhi_2@nearnest.com", password: studentPasswordHash, role: "student" },
     }),
   };
 
@@ -621,9 +641,9 @@ async function main() {
     message: "Minor hygiene issue in common wash area.",
     incidentType: "other",
     incidentFlag: false,
-    createdAt: daysBefore(BASE_TIME, 40),
+    createdAt: complaintDay(2),
     resolved: true,
-    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 40), 20),
+    resolvedAt: hoursAfter(complaintDay(2), 20),
   });
 
   await createComplaint({
@@ -634,9 +654,9 @@ async function main() {
     message: "Water leakage from upper pipeline.",
     incidentType: "water",
     incidentFlag: false,
-    createdAt: daysBefore(BASE_TIME, 20),
+    createdAt: complaintDay(20),
     resolved: true,
-    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 20), 70), // resolved late
+    resolvedAt: hoursAfter(complaintDay(20), 70), // resolved late
   });
   await createComplaint({
     unitId: unitKota1.id,
@@ -646,9 +666,9 @@ async function main() {
     message: "Low water pressure in morning hours.",
     incidentType: "water",
     incidentFlag: false,
-    createdAt: daysBefore(BASE_TIME, 12),
+    createdAt: complaintDay(28),
     resolved: true,
-    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 12), 24), // on time
+    resolvedAt: hoursAfter(complaintDay(28), 24), // on time
   });
   await createComplaint({
     unitId: unitKota1.id,
@@ -658,7 +678,7 @@ async function main() {
     message: "Water quality issue remains unresolved.",
     incidentType: "water",
     incidentFlag: false,
-    createdAt: daysBefore(BASE_TIME, 3),
+    createdAt: complaintDay(45),
     resolved: false,
   });
 
@@ -670,7 +690,7 @@ async function main() {
     message: "Fire hazard near electrical panel.",
     incidentType: "fire",
     incidentFlag: true,
-    createdAt: daysBefore(BASE_TIME, 5),
+    createdAt: complaintDay(50),
     resolved: false,
   });
 
@@ -681,9 +701,9 @@ async function main() {
     message: "Electrical fluctuation in room sockets.",
     incidentType: "other",
     incidentFlag: false,
-    createdAt: daysBefore(BASE_TIME, 35),
+    createdAt: complaintDay(12),
     resolved: true,
-    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 35), 18),
+    resolvedAt: hoursAfter(complaintDay(12), 18),
   });
 
   await createComplaint({
@@ -693,9 +713,9 @@ async function main() {
     message: "Lift not working in common area.",
     incidentType: "common_area",
     incidentFlag: false,
-    createdAt: daysBefore(BASE_TIME, 15),
+    createdAt: complaintDay(35),
     resolved: true,
-    resolvedAt: hoursAfter(daysBefore(BASE_TIME, 15), 30),
+    resolvedAt: hoursAfter(complaintDay(35), 30),
   });
 
   console.log("Stage 10: Audit logs");
@@ -793,8 +813,9 @@ async function main() {
   console.log("Stage 12: Validation");
   const allUnits = await prisma.unit.findMany({ include: { complaints: true } });
   const suspendedCount = allUnits.filter((u) => u.status === "suspended").length;
-  const healthyCount = allUnits.filter((u) => u.status === "approved" && u.structuralApproved && u.operationalBaselineApproved && u.trustScore >= 70).length;
-  const nearThresholdCount = allUnits.filter((u) => u.trustScore >= 50 && u.trustScore <= 65).length;
+  const nearThresholdCount = allUnits.filter((u) => u.trustScore >= 50 && u.trustScore <= 55).length;
+  const healthyCount = allUnits.filter((u) => u.trustScore > 80).length;
+  const auditRequiredCount = allUnits.filter((u) => u.auditRequired).length;
   const openAuditCount = await prisma.auditLog.count({ where: { resolved: false } });
   const resolvedAuditCount = await prisma.auditLog.count({ where: { resolved: true } });
   const complaintRows = await prisma.complaint.findMany({
@@ -806,16 +827,19 @@ async function main() {
     throw new Error("Validation failed: complaint foreign key orphan detected.");
   }
   if (suspendedCount < 1) {
-    throw new Error("Validation failed: expected at least one suspended unit.");
+    throw new Error(`Validation failed: expected at least one suspended unit, found ${suspendedCount}.`);
   }
   if (nearThresholdCount < 1) {
-    throw new Error("Validation failed: expected at least one near-threshold unit (50-65).");
+    throw new Error(`Validation failed: expected at least one near-threshold unit (trustScore 50-55), found ${nearThresholdCount}.`);
   }
   if (healthyCount < 1) {
-    throw new Error("Validation failed: expected at least one healthy approved unit.");
+    throw new Error(`Validation failed: expected at least one healthy unit (trustScore > 80), found ${healthyCount}.`);
+  }
+  if (auditRequiredCount < 1) {
+    throw new Error(`Validation failed: expected at least one auditRequired unit, found ${auditRequiredCount}.`);
   }
   if (openAuditCount < 1 || resolvedAuditCount < 1) {
-    throw new Error("Validation failed: expected both open and resolved audits.");
+    throw new Error(`Validation failed: expected both open and resolved audits, found open=${openAuditCount}, resolved=${resolvedAuditCount}.`);
   }
 
   // Dawn data richness checks.
@@ -844,8 +868,8 @@ async function main() {
 
   console.log("Seed complete.");
   console.log(`Admin: admin@nearnest.com / admin123`);
-  console.log(`Landlords: landlord1@nearnest.com, landlord2@nearnest.com / landlord123`);
-  console.log(`Students: student_*@nearnest.com / student123`);
+  console.log(`Landlords: landlord@nearnest.com, landlord2@nearnest.test / landlord123`);
+  console.log(`Students: student@nearnest.com, student2@nearnest.test, student3@nearnest.test / student123`);
   console.log(`Units: ${allUnits.length}, suspended: ${suspendedCount}, near-threshold: ${nearThresholdCount}, healthy: ${healthyCount}`);
   console.log(`Audits open/resolved: ${openAuditCount}/${resolvedAuditCount}`);
 }
