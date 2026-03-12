@@ -39,6 +39,13 @@ function inferIntent(role, message) {
       text.includes("water") ||
       text.includes("lift") ||
       text.includes("elevator") ||
+      text.includes("electric") ||
+      text.includes("electrical") ||
+      text.includes("wiring") ||
+      text.includes("fire") ||
+      text.includes("smoke") ||
+      text.includes("plumbing") ||
+      text.includes("bathroom") ||
       text.includes("issue")
     ) {
       return "student_complaint";

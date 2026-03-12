@@ -62,6 +62,90 @@ function DataView({ data }) {
     return <p className="text-xs text-slate-600">No data</p>;
   }
 
+  if (data && typeof data === "object" && Array.isArray(data.recommendations)) {
+    const top = data.recommendations[0];
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-800">Recommendations ({data.totalMatched || data.recommendations.length} matched)</p>
+        {data.contextChained && (
+          <p className="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] text-indigo-700">
+            Context chaining applied from your previous search.
+          </p>
+        )}
+        {top && (
+          <div className="rounded border border-emerald-200 bg-emerald-50 p-2">
+            <p className="text-xs font-semibold text-emerald-900">Top Recommendation: Unit #{top.id}</p>
+            <p className="text-[11px] text-emerald-800">
+              Rs {top.rent} • Trust {top.trustScore} • {top.distanceKm} km • {top.availableSlots} slots
+            </p>
+            {Array.isArray(top.recommendationReasons) && (
+              <ul className="mt-1 list-disc pl-4 text-[11px] text-emerald-800">
+                {top.recommendationReasons.slice(0, 4).map((reason) => (
+                  <li key={reason}>{reason}</li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+        <div className="space-y-2">
+          {data.recommendations.slice(0, 5).map((item) => (
+            <DataCard item={item} key={`rec-${item.id}`} />
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (data && typeof data === "object" && Array.isArray(data.topIssues)) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-800">Recurring Issues</p>
+        {Array.isArray(data.suggestions) && data.suggestions.length > 0 && (
+          <div className="space-y-1">
+            {data.suggestions.map((item) => (
+              <p key={item} className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+                {item}
+              </p>
+            ))}
+          </div>
+        )}
+        {data.topIssues.slice(0, 5).map((item) => (
+          <DataCard item={item} key={`issue-${item.incidentType}-${item.complaintCount}`} />
+        ))}
+      </div>
+    );
+  }
+
+  if (data && typeof data === "object" && Array.isArray(data.corridors)) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-800">Corridor Analytics</p>
+        {data.corridors.slice(0, 5).map((item) => (
+          <div className="space-y-1" key={`corridor-${item.corridorId}`}>
+            <DataCard item={item} />
+            {Array.isArray(item.warnings) &&
+              item.warnings.map((warning) => (
+                <p key={`${item.corridorId}-${warning}`} className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
+                  {warning}
+                </p>
+              ))}
+          </div>
+        ))}
+      </div>
+    );
+  }
+
+  if (data && typeof data === "object" && data.draft && typeof data.draft === "object") {
+    return (
+      <div className="space-y-2">
+        <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
+          Draft prepared. Confirm to submit this complaint.
+        </p>
+        <DataCard item={data.draft} />
+      </div>
+    );
+  }
+
   if (Array.isArray(data)) {
     if (data.length === 0) return <p className="text-xs text-slate-600">No records found.</p>;
     return (
