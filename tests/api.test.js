@@ -461,6 +461,7 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
   let adminAccount = null;
   let safeUnitId = null;
   let riskyUnitId = null;
+  let mediumUnitId = null;
   let otherCorridorUnitId = null;
 
   try {
@@ -530,6 +531,24 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
           ac: true,
           capacity: 2,
           auditRequired: true,
+        },
+      })
+    ).id;
+
+    mediumUnitId = (
+      await prisma.unit.create({
+        data: {
+          corridorId: corridorIdA,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 72,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          rent: 7600,
+          distanceKm: 0.8,
+          ac: true,
+          capacity: 4,
+          auditRequired: false,
         },
       })
     ).id;
@@ -642,8 +661,25 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     });
     assert.equal(studentSearch.status, 200);
     assert.equal(studentSearch.data.intent, "student_search");
-    assert.ok(Array.isArray(studentSearch.data.data.data));
-    assert.equal(studentSearch.data.data.data[0].id, safeUnitId);
+    assert.ok(Array.isArray(studentSearch.data.data.recommendations));
+    assert.ok(studentSearch.data.data.recommendations.length >= 2);
+    for (let i = 1; i < studentSearch.data.data.recommendations.length; i += 1) {
+      assert.ok(
+        Number(studentSearch.data.data.recommendations[i - 1].rankingScore) >=
+          Number(studentSearch.data.data.recommendations[i].rankingScore)
+      );
+    }
+
+    const chainedSearch = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Only within 1 km" },
+    });
+    assert.equal(chainedSearch.status, 200);
+    assert.equal(chainedSearch.data.intent, "student_search");
+    assert.equal(chainedSearch.data.data.filters.maxDistance, 1);
+    assert.equal(chainedSearch.data.data.filters.maxRent, 8000);
+    assert.equal(chainedSearch.data.data.filters.ac, true);
 
     const studentDraft = await api("/dawn/query", {
       method: "POST",
@@ -654,6 +690,17 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     assert.equal(studentDraft.data.intent, "student_complaint");
     assert.equal(studentDraft.data.requiresConfirmation, true);
     assert.equal(studentDraft.data.action.payload.incidentType, "common_area");
+
+    const electricalDraft = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Electrical sparks from switch board in my room" },
+    });
+    assert.equal(electricalDraft.status, 200);
+    assert.equal(electricalDraft.data.intent, "student_complaint");
+    assert.equal(electricalDraft.data.requiresConfirmation, true);
+    assert.equal(electricalDraft.data.action.payload.incidentType, "electrical");
+    assert.ok(Number(electricalDraft.data.action.payload.severity) >= 4);
 
     const studentSubmit = await api("/dawn/query", {
       method: "POST",
@@ -693,6 +740,11 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
         String(item).toLowerCase().includes("plumbing")
       )
     );
+    assert.ok(
+      landlordRecurring.data.data.suggestions.some((item) =>
+        String(item).toLowerCase().includes("faster resolution")
+      )
+    );
 
     const landlordRisk = await api("/dawn/query", {
       method: "POST",
@@ -716,9 +768,17 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     const corridorBEntry = adminDensity.data.data.corridors.find((item) => item.corridorId === corridorIdB);
     assert.ok(corridorAEntry);
     assert.ok(corridorBEntry);
-    assert.ok(corridorAEntry.complaintCount > corridorBEntry.complaintCount);
+    assert.ok(corridorAEntry.complaintDensity > corridorBEntry.complaintDensity);
+    assert.ok(Object.prototype.hasOwnProperty.call(corridorAEntry, "trustTrend"));
+    assert.ok(Object.prototype.hasOwnProperty.call(corridorAEntry, "unitsNearSuspension"));
+    assert.ok(Array.isArray(corridorAEntry.warnings));
+    assert.ok(
+      corridorAEntry.warnings.some((item) =>
+        String(item).toLowerCase().includes("approaching enforcement threshold")
+      )
+    );
   } finally {
-    for (const unitId of [safeUnitId, riskyUnitId, otherCorridorUnitId]) {
+    for (const unitId of [safeUnitId, riskyUnitId, mediumUnitId, otherCorridorUnitId]) {
       if (!unitId) continue;
       await prisma.complaint.deleteMany({ where: { unitId } });
       await prisma.occupancy.deleteMany({ where: { unitId } });

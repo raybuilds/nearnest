@@ -14,7 +14,7 @@ function resolveStudentContext(profile) {
 module.exports = async function studentComplaintDraft({ req, context }) {
   ensureRole(req, ["student"]);
 
-  const { callApi, message, text, confirm, action } = context;
+  const { callApi, message, text, confirm, action, memory, updateMemory, clearMemory } = context;
   const profile = await callApi("/profile");
   const studentContext = resolveStudentContext(profile);
 
@@ -31,13 +31,26 @@ module.exports = async function studentComplaintDraft({ req, context }) {
     severity,
     incidentType,
     message: message.trim(),
+    requiresConfirmation: true,
   };
 
   if (!confirm) {
+    updateMemory({
+      lastIntent: "student_complaint",
+      lastUnitId: studentContext.unitId,
+      lastComplaintDraft: draft,
+    });
+
     return {
       requiresConfirmation: true,
       assistant: "Complaint draft prepared. Confirm to submit.",
       data: {
+        draft: {
+          severity: draft.severity,
+          incidentType: draft.incidentType,
+          message: draft.message,
+          requiresConfirmation: true,
+        },
         preview: {
           unitId: studentContext.unitId,
           occupantBound: Boolean(studentContext.occupantId),
@@ -53,10 +66,22 @@ module.exports = async function studentComplaintDraft({ req, context }) {
     };
   }
 
-  const finalPayload = action?.payload || draft;
+  const finalPayload = action?.payload || memory?.lastComplaintDraft || draft;
+  if (!finalPayload || !finalPayload.severity || !finalPayload.incidentType) {
+    return {
+      assistant: "No complaint draft was found. Please describe the issue first so I can prepare it.",
+    };
+  }
+
   const created = await callApi("/complaint", {
     method: "POST",
     body: finalPayload,
+  });
+  clearMemory("lastComplaintDraft");
+  updateMemory({
+    lastIntent: "student_complaint",
+    lastUnitId: studentContext.unitId,
+    lastComplaintDraft: null,
   });
 
   return {

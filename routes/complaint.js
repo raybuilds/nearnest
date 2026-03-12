@@ -9,7 +9,7 @@ const router = express.Router();
 const AUDIT_WINDOW_DAYS = 60;
 const AUDIT_THRESHOLD = 5;
 const SLA_BREACH_AUDIT_THRESHOLD = 3;
-const INCIDENT_TYPES = new Set(["safety", "injury", "fire", "harassment", "water", "common_area", "other"]);
+const INCIDENT_TYPES = new Set(["safety", "injury", "fire", "harassment", "water", "common_area", "electrical", "other"]);
 const SLA_HOURS = 48;
 const DENSITY_WARNING_THRESHOLD = 3;
 const COMPLAINT_STATUS_FILTERS = new Set(["open", "resolved", "late", "sla_breached"]);
@@ -240,7 +240,7 @@ router.post("/complaint", verifyToken, requireRole("student"), complaintLimiter,
     if (incidentType !== undefined && incidentType !== null && String(incidentType).trim() !== "") {
       normalizedIncidentType = String(incidentType).trim().toLowerCase();
       if (!INCIDENT_TYPES.has(normalizedIncidentType)) {
-        return res.status(400).json({ error: "incidentType must be one of safety, injury, fire, harassment, water, common_area, other" });
+        return res.status(400).json({ error: "incidentType must be one of safety, injury, fire, harassment, water, common_area, electrical, other" });
       }
     }
     const incidentFlag = Boolean(normalizedIncidentType && normalizedIncidentType !== "other");

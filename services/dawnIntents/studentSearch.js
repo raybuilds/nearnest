@@ -1,11 +1,12 @@
 const { ensureRole, parseAcFilter, parseMaxDistance, parseMaxRent } = require("./utils");
+const { rankUnits } = require("../dawnRanking");
 
 module.exports = async function studentSearch({ req, context }) {
   ensureRole(req, ["student"]);
 
-  const { callApi, text } = context;
+  const { callApi, text, memory, updateMemory } = context;
   const profile = await callApi("/profile");
-  const corridorId = profile?.identity?.corridor?.id;
+  const corridorId = profile?.identity?.corridor?.id || memory?.lastCorridorId || null;
 
   if (!corridorId) {
     return {
@@ -13,10 +14,16 @@ module.exports = async function studentSearch({ req, context }) {
     };
   }
 
-  const filters = {
+  const parsedFilters = {
     maxRent: parseMaxRent(text),
     maxDistance: parseMaxDistance(text),
     ac: parseAcFilter(text),
+  };
+  const previous = memory?.lastSearchFilters || {};
+  const filters = {
+    maxRent: parsedFilters.maxRent !== null ? parsedFilters.maxRent : previous.maxRent ?? null,
+    maxDistance: parsedFilters.maxDistance !== null ? parsedFilters.maxDistance : previous.maxDistance ?? null,
+    ac: parsedFilters.ac !== null ? parsedFilters.ac : previous.ac ?? null,
   };
 
   const params = new URLSearchParams();
@@ -26,16 +33,23 @@ module.exports = async function studentSearch({ req, context }) {
 
   const path = `/units/${corridorId}${params.toString() ? `?${params.toString()}` : ""}`;
   const units = await callApi(path);
-  const sorted = Array.isArray(units)
-    ? [...units].sort((a, b) => Number(b.trustScore || 0) - Number(a.trustScore || 0))
-    : [];
+  const ranked = rankUnits(Array.isArray(units) ? units : [], filters);
+  const recommendations = ranked.slice(0, 5);
+
+  updateMemory({
+    lastIntent: "student_search",
+    lastCorridorId: corridorId,
+    lastSearchFilters: filters,
+    lastUnitId: recommendations[0]?.id || null,
+  });
 
   return {
-    assistant: `Found ${sorted.length} matching units in your corridor. Showing top ${Math.min(sorted.length, 10)} by trust score.`,
+    assistant: `Found ${ranked.length} matching units in your corridor. Showing top ${Math.min(ranked.length, 5)} recommendations.`,
     data: {
       filters,
-      totalMatched: sorted.length,
-      data: sorted.slice(0, 10),
+      totalMatched: ranked.length,
+      recommendations,
+      data: recommendations,
     },
   };
 };
