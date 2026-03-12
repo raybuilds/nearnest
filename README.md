@@ -253,7 +253,6 @@ Dawn:
 ## Operational Notes
 
 - Backend has no `npm run dev` script; run with `node index.js` (or add your own nodemon script).
-- `routes/index.js` is legacy and not mounted by `index.js`.
 - `.next` should never be committed; cleanup is enforced in `.gitignore`.
 
 ## Test Coverage

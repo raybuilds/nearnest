@@ -1,7 +1,7 @@
 const express = require("express");
 const prisma = require("../prismaClient");
 const { verifyToken, requireRole } = require("../middlewares/auth");
-const { generateOccupantId } = require("../services/occupantIdService");
+const { generateOccupantId, isValidOccupantId } = require("../services/occupantIdService");
 
 const router = express.Router();
 
@@ -126,6 +126,17 @@ router.post("/occupancy/check-in", verifyToken, requireRole("landlord"), async (
           roomNumber,
           occupantIndex,
         });
+        if (!isValidOccupantId(publicId)) {
+          throw createCheckInError("INVALID_OCCUPANT_ID_FORMAT", "Generated occupant ID format is invalid");
+        }
+
+        const existingPublicId = await tx.occupant.findUnique({
+          where: { publicId },
+          select: { id: true },
+        });
+        if (existingPublicId) {
+          throw createCheckInError("DUPLICATE_OCCUPANT_ID", "Duplicate occupant ID generated");
+        }
 
         const createdOccupancy = await tx.occupancy.create({
           data: {
@@ -160,6 +171,10 @@ router.post("/occupancy/check-in", verifyToken, requireRole("landlord"), async (
         break;
       } catch (error) {
         if (error?.code === "P2002") {
+          const target = Array.isArray(error?.meta?.target) ? error.meta.target : [];
+          if (target.includes("publicId")) {
+            throw createCheckInError("DUPLICATE_OCCUPANT_ID", "Duplicate occupant ID generated");
+          }
           attempt += 1;
           if (attempt >= maxRetries) {
             throw createCheckInError("CHECKIN_CONFLICT", "Check-in conflict. Please retry.");
@@ -218,6 +233,9 @@ router.post("/occupancy/check-in", verifyToken, requireRole("landlord"), async (
       return res.status(400).json({ error: error.message });
     }
     if (error?.code === "NO_SLOT_AVAILABLE" || error?.code === "CHECKIN_CONFLICT") {
+      return res.status(409).json({ error: error.message });
+    }
+    if (error?.code === "DUPLICATE_OCCUPANT_ID" || error?.code === "INVALID_OCCUPANT_ID_FORMAT") {
       return res.status(409).json({ error: error.message });
     }
     console.error(error);
