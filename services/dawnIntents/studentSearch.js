@@ -20,6 +20,11 @@ module.exports = async function studentSearch({ req, context }) {
     ac: parseAcFilter(text),
   };
   const previous = memory?.lastSearchFilters || {};
+  const contextChained =
+    (parsedFilters.maxRent === null && previous.maxRent !== undefined && previous.maxRent !== null) ||
+    (parsedFilters.maxDistance === null && previous.maxDistance !== undefined && previous.maxDistance !== null) ||
+    (parsedFilters.ac === null && previous.ac !== undefined && previous.ac !== null);
+
   const filters = {
     maxRent: parsedFilters.maxRent !== null ? parsedFilters.maxRent : previous.maxRent ?? null,
     maxDistance: parsedFilters.maxDistance !== null ? parsedFilters.maxDistance : previous.maxDistance ?? null,
@@ -47,6 +52,7 @@ module.exports = async function studentSearch({ req, context }) {
     assistant: `Found ${ranked.length} matching units in your corridor. Showing top ${Math.min(ranked.length, 5)} recommendations.`,
     data: {
       filters,
+      contextChained,
       totalMatched: ranked.length,
       recommendations,
       data: recommendations,
