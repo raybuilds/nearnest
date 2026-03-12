@@ -6,7 +6,8 @@ const { uploadFile } = require("../services/storageService");
 
 const router = express.Router();
 const EXPLAIN_WINDOW_DAYS = 30;
-const UNIT_STATUSES = new Set(["draft", "submitted", "admin_review", "approved", "rejected", "suspended", "archived"]);
+const UNIT_LIFECYCLE = ["draft", "submitted", "admin_review", "approved", "suspended", "rejected", "archived"];
+const UNIT_STATUSES = new Set(UNIT_LIFECYCLE);
 const DEFAULT_RANDOM_AUDIT_SAMPLE = 3;
 const MAX_RANDOM_AUDIT_SAMPLE = 20;
 const MEDIA_TYPES = new Set(["photo", "document", "walkthrough360"]);
@@ -834,7 +835,7 @@ router.patch("/admin/unit/:id/review", verifyToken, requireRole("admin"), async 
     if (status !== undefined) {
       const normalizedStatus = String(status).trim();
       if (!UNIT_STATUSES.has(normalizedStatus)) {
-        return res.status(400).json({ error: "Invalid unit status" });
+        return res.status(400).json({ error: `Invalid unit status. Allowed: ${UNIT_LIFECYCLE.join(", ")}` });
       }
 
       if (normalizedStatus === "approved") {
@@ -904,7 +905,7 @@ router.patch("/admin/unit/:id/status", verifyToken, requireRole("admin"), async 
     }
     const normalizedStatus = String(status).trim();
     if (!UNIT_STATUSES.has(normalizedStatus)) {
-      return res.status(400).json({ error: "Invalid unit status" });
+      return res.status(400).json({ error: `Invalid unit status. Allowed: ${UNIT_LIFECYCLE.join(", ")}` });
     }
 
     const unit = await prisma.unit.findUnique({

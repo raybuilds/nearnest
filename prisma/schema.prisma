@@ -54,7 +54,7 @@ model Landlord {
 
 model Unit {
   id                          Int        @id @default(autoincrement())
-  status                      String     @default("draft")
+  status                      UnitStatus @default(draft)
   trustScore                  Float      @default(75)
   rent                        Int        @default(0)
   distanceKm                  Float      @default(0)
@@ -82,6 +82,16 @@ model Unit {
   operationalChecklist        OperationalChecklist?
   media                       UnitMedia[]
   auditLogs                   AuditLog[]
+}
+
+enum UnitStatus {
+  draft
+  submitted
+  admin_review
+  approved
+  suspended
+  rejected
+  archived
 }
 
 model Complaint {
