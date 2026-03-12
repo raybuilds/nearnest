@@ -205,23 +205,23 @@ async function main() {
   });
 
   const landlordUser1 = await prisma.user.create({
-    data: { name: "Ramesh Kumar", email: "landlord1@nearnest.com", password: landlordPasswordHash, role: "landlord" },
+    data: { name: "Ramesh Kumar", email: "landlord@nearnest.com", password: landlordPasswordHash, role: "landlord" },
   });
   const landlordUser2 = await prisma.user.create({
-    data: { name: "Suresh Gupta", email: "landlord2@nearnest.com", password: landlordPasswordHash, role: "landlord" },
+    data: { name: "Suresh Gupta", email: "landlord2@nearnest.test", password: landlordPasswordHash, role: "landlord" },
   });
   const landlord1 = await prisma.landlord.create({ data: { userId: landlordUser1.id } });
   const landlord2 = await prisma.landlord.create({ data: { userId: landlordUser2.id } });
 
   const studentUsers = {
     amu1: await prisma.user.create({
-      data: { name: "Ahmad Farooq", email: "student_amu_1@nearnest.com", password: studentPasswordHash, role: "student" },
+      data: { name: "Ahmad Farooq", email: "student@nearnest.com", password: studentPasswordHash, role: "student" },
     }),
     amu2: await prisma.user.create({
-      data: { name: "Fatima Zehra", email: "student_amu_2@nearnest.com", password: studentPasswordHash, role: "student" },
+      data: { name: "Fatima Zehra", email: "student2@nearnest.test", password: studentPasswordHash, role: "student" },
     }),
     amu3: await prisma.user.create({
-      data: { name: "Obaidullah", email: "student_amu_3@nearnest.com", password: studentPasswordHash, role: "student" },
+      data: { name: "Obaidullah", email: "student3@nearnest.test", password: studentPasswordHash, role: "student" },
     }),
     kota1: await prisma.user.create({
       data: { name: "Raj Malhotra", email: "student_kota_1@nearnest.com", password: studentPasswordHash, role: "student" },
@@ -868,8 +868,8 @@ async function main() {
 
   console.log("Seed complete.");
   console.log(`Admin: admin@nearnest.com / admin123`);
-  console.log(`Landlords: landlord1@nearnest.com, landlord2@nearnest.com / landlord123`);
-  console.log(`Students: student_*@nearnest.com / student123`);
+  console.log(`Landlords: landlord@nearnest.com, landlord2@nearnest.test / landlord123`);
+  console.log(`Students: student@nearnest.com, student2@nearnest.test, student3@nearnest.test / student123`);
   console.log(`Units: ${allUnits.length}, suspended: ${suspendedCount}, near-threshold: ${nearThresholdCount}, healthy: ${healthyCount}`);
   console.log(`Audits open/resolved: ${openAuditCount}/${resolvedAuditCount}`);
 }
