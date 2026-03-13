@@ -4,10 +4,10 @@
   "postgresVersion": null,
   "database": {
     "type": "postgresql",
-    "connection": "postgresql://postgres:<password>@localhost:5432/nearnest"
+    "connection": "postgresql://postgres:nanoray1729@localhost:5432/nearnest"
   },
   "backend": {
-    "JWT_SECRET": "<set-a-team-dev-secret>",
+    "JWT_SECRET": "dev-secret",
     "PORT": null
   },
   "frontend": {
