@@ -1,146 +1,130 @@
-﻿# Architecture
+# NearNest System Architecture
 
-## 1. System Philosophy
+NearNest is a corridor-based student housing governance platform built to make housing discovery safer, more transparent, and more accountable. Instead of treating housing like a simple marketplace, NearNest structures access through verified demand, calculates trust from real behavioral signals, and uses governance workflows to enforce quality. Dawn acts as a conversational interface on top of the system, helping users query and act through natural language without bypassing platform rules.
 
-NearNest is a corridor-scoped student housing governance system.
-Trust is enforced through measurable visibility rules, not manual authority.
-Occupancy is identity-bound through a location-encoded public occupant ID.
-Behavioral events (complaints, SLA outcomes, incident flags) continuously influence trust.
-Governance combines baseline compliance, behavioral scoring, and audit escalation.
-Dawn is an interaction layer that executes existing APIs, not a policy override.
-Data integrity is enforced at both transaction and database constraint levels.
+## Architecture Diagram
 
-## 2. Core Architectural Layers
+```text
+Students / Landlords / Admins
+            │
+            ▼
+      Dawn Assistant
+ (Conversational Query Layer)
+            │
+            ▼
+  Backend API (Node.js + Express)
+            │
+   ├── Trust Engine
+   ├── Governance Layer
+   └── Demand System (VDP)
+            │
+            ▼
+         Prisma ORM
+            │
+            ▼
+   PostgreSQL Database
+```
 
-### A. Geographic Layer (Corridors)
+## System Architecture Diagram
 
-- `Corridor` is the smallest enforcement boundary for discovery, complaints, and governance.
-- Student demand verification (`VDPEntry`) and unit visibility are corridor-scoped.
-- Occupant IDs encode location using `cityCode -> corridorCode -> unit/room mapping`.
-- Most cross-role operations enforce corridor consistency before processing.
+```mermaid
+flowchart TD
 
-### B. Identity Layer
+Students[Students]
+Landlords[Landlords]
+Admins[Admins]
 
-- `User` is role-bearing (`student`, `landlord`, `admin`) and JWT-authenticated.
-- Role profiles (`Student`, `Landlord`) are separated from auth credentials.
-- Occupancy identity is represented by `Occupant.publicId` (12-digit location-bound token).
-- Occupancy lifecycle is immutable: check-in creates `Occupancy` + active `Occupant`; check-out closes occupancy and archives occupant (`active=false`).
-- Occupant ID is never mutated in-place; each occupancy period gets its own record.
-- Slot allocation is concurrency-safe and bounded by capacity + encodable slot limits.
+Dawn[Dawn Assistant\nIntent Parsing & Query Layer]
 
-### C. Governance Layer
+API[Backend API\nNode.js + Express]
 
-- Structural baseline: binary approval (`structuralApproved`) backed by checklist truthiness.
-- Operational baseline: binary approval (`operationalBaselineApproved`) backed by checklist truthiness.
-- Behavioral trust: numeric `trustScore` recalculated from complaint history.
-- Visibility gate for student discovery is strict:
-  - `status = approved`
-  - `structuralApproved = true`
-  - `operationalBaselineApproved = true`
-  - `trustScore >= 50`
-- Audit escalation can force `auditRequired=true` and suspend units on trigger conditions.
+Trust[Trust Engine\nComplaint-driven scoring]
+Governance[Governance Layer\nAudits & Unit Status]
+Demand[Demand Layer\nVerified Demand Pools]
 
-### D. Behavioral Engine
+Prisma[Prisma ORM]
+DB[(PostgreSQL Database)]
 
-Trust logic is deterministic and penalty-based:
+Students --> Dawn
+Landlords --> Dawn
+Admins --> Dawn
 
-- Base score starts at `75`.
-- Severity penalty: `severity * 2` per complaint.
-- Unresolved penalty: `-5` for unresolved complaints.
-- SLA breach penalty: `-3` when resolved after SLA deadline.
-- Recurrence penalty (rolling 30-day window): after 3 complaints, each extra complaint applies additional penalty.
-- Score is floored at `0`.
+Dawn --> API
 
-This produces explainable, repeatable trust outcomes from behavioral history.
+API --> Trust
+API --> Governance
+API --> Demand
 
-### E. Complaint System
+Trust --> Prisma
+Governance --> Prisma
+Demand --> Prisma
 
-- Complaints are append-only behavioral records; no edit/delete endpoints are exposed.
-- Complaint creation can target `unitId` directly or resolve via `occupantId` to `occupantRecordId`.
-- Ownership enforcement: students can only file as themselves and within their corridor.
-- Enumeration resistance: invalid/unowned occupant IDs return generic invalid responses.
-- Resolution is timestamped (`resolvedAt`) and role-gated (landlord/admin).
-- Student-facing unit complaint views are aggregate/sanitized while preserving own-history visibility.
+Prisma --> DB
+```
 
-### F. Concurrency and Data Integrity
+* Dawn acts as a conversational interface translating natural queries into deterministic API calls.
+* The backend enforces trust through complaint-driven scoring and governance rules.
+* Verified Demand Pools structure housing demand by corridor and institution.
+* The database layer stores behavioral history including complaints, trust scores, occupancy records, and audit logs.
 
-- Database constraints:
-  - `Occupant.publicId` unique globally.
-  - `@@unique([unitId, roomNumber, occupantIndex, active])` prevents duplicate active slot assignment.
-- Check-in is transactional with row-level unit lock (`FOR UPDATE`).
-- Capacity enforcement occurs inside the transaction (no over-capacity race window).
-- Conflict handling retries on unique conflict (`P2002`) before failing.
-- Backfill integrity script (`scripts/backfillOccupants.js`) repairs legacy active occupancies with occupant records using the same transactional strategy.
-- Occupancy lifecycle remains immutable and auditable over time.
+## Core Components
 
-### G. Media Storage
+### 1. Dawn Assistant
 
-- Storage is abstracted through `services/storageService.js` (local disk implementation with normalized storage keys).
-- Media metadata is stored in `UnitMedia` and served through API, not raw public filesystem paths.
-- Submission flow locks evidence (`locked=true`) to prevent post-submission mutation.
-- Streaming is RBAC-gated via `/media/:id` with corridor/visibility checks for students.
-- Design is local-first with S3-compatible abstraction boundary at service layer.
+Dawn is a deterministic conversational layer that converts user intent into existing API actions. It helps students, landlords, and admins interact with the system through natural language, but it does not directly access the database and does not override governance, validation, or access-control rules.
 
-### H. AI Layer (Dawn)
+### 2. Backend API
 
-Dawn is a role-scoped assistant that executes existing routes.
-It does not override governance logic.
-It does not mutate trust directly.
-It does not bypass RBAC.
+The backend is built with Node.js and Express. It handles authentication, role-based access control, complaint workflows, unit discovery, profile access, occupancy actions, and administrative governance operations. All business rules flow through this layer so the system remains consistent across UI and Dawn-driven actions.
 
-Additional constraints:
+### 3. Trust Engine
 
-- Dawn requires valid JWT context and infers intents per role.
-- Dawn route is modular and intent-mapped (no giant switch):
-  - `student_search` -> `studentSearch`
-  - `student_complaint` -> `studentComplaintDraft`
-  - `student_complaint_summary` -> `studentComplaintSummary`
-  - `landlord_recurring` -> `landlordRecurringIssues`
-  - `landlord_risk` -> `landlordRiskSummary`
-  - `admin_density` -> `adminCorridorAnalytics`
-- It delegates actions through the same backend endpoints used by the product UI.
-- All validation, trust recalculation, and policy enforcement still happen in underlying routes/services.
-- Dawn is non-authoritative:
-  - no direct DB writes from Dawn handlers
-  - no direct trustScore writes
-  - no direct unit status updates
-  - no automatic audit triggers
-  - no structural/operational approval actions
-- Mutation operations are confirmation-gated (draft -> explicit confirm -> API call).
-- Soft recommendations are deterministic and rule-based:
-  - water complaints >= 3 (30d) -> suggest plumbing review
-  - SLA breaches >= 2 -> suggest response-process review
-  - rising 14d complaint trend -> suggest monitoring
-- Complaint intent supports common-area reporting by tagging `incidentType="common_area"` while still binding to an active unit context.
+Trust scores are calculated from behavioral signals such as complaint severity, repeated incidents, SLA breaches, and unresolved issues. The score is system-generated rather than manually assigned. Units that fall below the visibility threshold are hidden from student discovery, making trust an enforceable platform rule instead of a cosmetic badge.
 
-## 3. Security Principles
+### 4. Governance Layer
 
-- Role-based access control (`requireRole`) on protected routes.
-- JWT authentication (`verifyToken`) for identity propagation.
-- Environment-based secret enforcement (`JWT_SECRET` required at startup).
-- No public admin registration (`/auth/register` allows only `student` and `landlord`).
-- No public anonymous complaint submission (complaint route requires authenticated student role).
-- Enumeration-safe error behavior for occupant-bound complaint submission.
-- Complaint records are immutable after creation (resolve-only mutation path).
-- Data-level integrity constraints are enforced in PostgreSQL via Prisma schema constraints.
+The governance layer gives admins operational control over quality and safety. Admins can review unit submissions, trigger audits, suspend unsafe listings, and enforce structural or operational compliance requirements. This ensures that housing access is governed through measurable checks rather than landlord self-claims alone.
 
-## 4. System Guarantees
+### 5. Demand Layer (VDP)
 
-- No over-capacity check-in under concurrent requests.
-- No duplicate active occupant slot for the same unit/room/index tuple.
-- No complaint spoofing across student identities.
-- No cross-corridor complaint filing by students.
-- No structural/operational approval without checklist truth conditions.
-- No student visibility without approved status + both baselines + trust threshold.
-- No direct trust override endpoint; trust changes through governed flows.
+Verified Demand Pools (VDP) control who can access corridor housing. Only verified students tied to the relevant institution or corridor context are allowed to discover eligible units. This creates structured demand and prevents unrestricted listing visibility.
 
-## 5. Deployment Notes
+### 6. Occupancy and Privacy
 
-- Backend requires environment configuration, including:
-  - `DATABASE_URL` (PostgreSQL)
-  - `JWT_SECRET` (mandatory)
-- Frontend API base URL is environment-driven (`NEXT_PUBLIC_API_URL`).
-- Apply migrations before runtime (`npx prisma migrate deploy`) and generate client.
-- PostgreSQL is required as primary relational store.
-- Media is stored locally by default under upload root with abstraction ready for object storage migration.
-- Optional integrity repair script available for legacy occupancy backfill (`node scripts/backfillOccupants.js`).
+NearNest uses an occupant ID system that encodes corridor, building, room, and slot information. This allows complaint tracking and occupancy-linked issue reporting without exposing student identities publicly. The design supports operational traceability while preserving user privacy.
+
+### 7. Media Evidence Layer
+
+Unit photos, documents, and walkthrough media are uploaded as part of the listing and review workflow. After submission, evidence can be locked so it cannot be silently changed, helping preserve the integrity of compliance and governance records.
+
+## Technology Stack
+
+Backend:
+
+* Node.js
+* Express.js
+* Prisma ORM
+* PostgreSQL
+
+Frontend:
+
+* Next.js 14
+* React
+* Tailwind CSS
+
+Infrastructure:
+
+* Local development environment with environment variables
+* GitHub CI tests
+
+## Development Workflow
+
+NearNest follows a layered branch workflow:
+
+* `team-dev` -> contributor development
+* `dev` -> integration branch
+* `main` -> stable demo branch
+
+Protected branches help enforce controlled merges, reduce accidental instability, and keep the demo environment reliable for reviews and presentations.
+
+NearNest enforces trust through visibility, structured demand, and transparent governance rather than marketplace incentives.

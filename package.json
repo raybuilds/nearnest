@@ -8,7 +8,8 @@
     "test": "node --test tests/*.test.js",
     "demo:reset": "npx prisma migrate reset --force && node seed.js",
     "demo:validate": "node scripts/validateDemoState.js",
-    "export:setup": "node exportLocalSetup.js"
+    "export:setup": "node exportLocalSetup.js",
+    "setup:team": "node setupTeamEnvironment.js"
   },
   "keywords": [],
   "author": "",

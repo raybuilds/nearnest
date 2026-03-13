@@ -814,7 +814,7 @@ async function main() {
   const allUnits = await prisma.unit.findMany({ include: { complaints: true } });
   const suspendedCount = allUnits.filter((u) => u.status === "suspended").length;
   const nearThresholdCount = allUnits.filter((u) => u.trustScore >= 50 && u.trustScore <= 55).length;
-  const healthyCount = allUnits.filter((u) => u.trustScore > 80).length;
+  const healthyCount = allUnits.filter((u) => u.trustScore >= 75).length;
   const auditRequiredCount = allUnits.filter((u) => u.auditRequired).length;
   const openAuditCount = await prisma.auditLog.count({ where: { resolved: false } });
   const resolvedAuditCount = await prisma.auditLog.count({ where: { resolved: true } });
@@ -833,7 +833,7 @@ async function main() {
     throw new Error(`Validation failed: expected at least one near-threshold unit (trustScore 50-55), found ${nearThresholdCount}.`);
   }
   if (healthyCount < 1) {
-    throw new Error(`Validation failed: expected at least one healthy unit (trustScore > 80), found ${healthyCount}.`);
+    throw new Error(`Validation failed: expected at least one healthy unit (trustScore >= 75), found ${healthyCount}.`);
   }
   if (auditRequiredCount < 1) {
     throw new Error(`Validation failed: expected at least one auditRequired unit, found ${auditRequiredCount}.`);
