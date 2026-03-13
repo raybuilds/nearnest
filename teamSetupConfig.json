@@ -1,0 +1,16 @@
+{
+  "nodeVersion": "v24.14.0",
+  "npmVersion": "11.9.0",
+  "postgresVersion": null,
+  "database": {
+    "type": "postgresql",
+    "connection": "postgresql://postgres:nanoray1729@localhost:5432/nearnest"
+  },
+  "backend": {
+    "JWT_SECRET": "dev-secret",
+    "PORT": null
+  },
+  "frontend": {
+    "NEXT_PUBLIC_API_URL": "http://localhost:5000"
+  }
+}
