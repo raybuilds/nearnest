@@ -98,6 +98,7 @@ Additional constraints:
   - `landlord_recurring` -> `landlordRecurringIssues`
   - `landlord_risk` -> `landlordRiskSummary`
   - `admin_density` -> `adminCorridorAnalytics`
+  - `explain_unit_trust` -> `explainUnitTrust`
 - It delegates actions through the same backend endpoints used by the product UI.
 - All validation, trust recalculation, and policy enforcement still happen in underlying routes/services.
 - Dawn is non-authoritative:
@@ -112,6 +113,82 @@ Additional constraints:
   - SLA breaches >= 2 -> suggest response-process review
   - rising 14d complaint trend -> suggest monitoring
 - Complaint intent supports common-area reporting by tagging `incidentType="common_area"` while still binding to an active unit context.
+
+### I. NearNest Intelligence Layer
+
+NearNest Intelligence is a dedicated deterministic reasoning layer under `services/intelligence/`.
+It separates business intelligence and decision engines from route handlers, UI-facing orchestration, and infrastructure services.
+
+- This layer contains the engines Dawn uses to:
+  - analyze housing behavior
+  - rank housing options
+  - generate corridor and unit insights
+  - explain trust changes
+  - recommend operational remediation priorities
+- Core modules in this layer include:
+  - `services/intelligence/dawnInsightsEngine.js`
+  - `services/intelligence/dawnRanking.js`
+  - `services/intelligence/dawnCorridorInsightService.js`
+  - `services/intelligence/dawnRemediationService.js`
+  - `services/intelligence/dawnUnitHealthService.js`
+  - `services/intelligence/trustExplanationService.js`
+- This keeps the architecture cleanly separated into:
+  - interface logic
+  - decision intelligence
+  - infrastructure services
+- Infrastructure services such as storage, occupant identity generation, and Prisma wiring remain outside the intelligence layer.
+
+### Dawn Insight Engine
+
+NearNest uses a rule-based Dawn insight engine rather than an ML model for operational intelligence.
+This keeps proactive guidance transparent, deterministic, and easy to audit.
+
+- `services/intelligence/dawnInsightsEngine.js` evaluates current role context and returns explainable situational insights.
+- `GET /dawn/insights` builds that context through existing authenticated APIs only.
+- Student insights focus on active unit trust decline and unresolved complaints.
+- Landlord insights focus on recurring complaints and SLA delay patterns.
+- Admin insights focus on rising corridor complaint density and units nearing suspension.
+- `services/intelligence/trustExplanationService.js` explains trust using visible drivers such as complaint recurrence, SLA breaches, unresolved complaints, and severity.
+- Dawn does not query Prisma directly for these flows and does not perform trust or audit mutations.
+
+### Dawn System Health Query
+
+Dawn also supports a student-facing system health query for the currently occupied unit.
+This feature summarizes housing conditions using existing authenticated APIs only, combining trust score, complaint volume, unresolved issues, and SLA performance into a read-only operational report.
+
+- `services/intelligence/dawnUnitHealthService.js` builds a deterministic unit health report from `/profile`, `/unit/:id/complaints`, and `/units/:corridorId`.
+- The report classifies the unit into `healthy`, `watch`, or `risk` bands using trust score thresholds and highlights recurring complaints or response delays as risk signals.
+- The feature is informational only:
+  - no trust score recalculation
+  - no governance state mutation
+  - no audit or enforcement side effects
+- Dawn returns this as a structured `healthReport` payload so the frontend can render a dedicated card for operational transparency.
+
+### Dawn Corridor Insight Engine
+
+NearNest also supports corridor-wide behavioral insight generation through Dawn.
+This capability analyzes recent complaint patterns, unit trust distribution, and SLA delay signals across a corridor to identify emerging housing risks before they become governance incidents.
+
+- `services/intelligence/dawnCorridorInsightService.js` reads corridor context from existing APIs and applies deterministic insight rules.
+- Corridor behavioral metrics are exposed through the existing corridor overview surface so Dawn can remain API-only and read-only.
+- Insight generation focuses on:
+  - recurring incident categories such as water complaints
+  - units approaching the trust visibility threshold
+  - increasing SLA breach patterns across the corridor
+- The feature is observational only and does not trigger audits, trust recalculations, or suspension state changes.
+
+### Dawn Remediation Advisor
+
+NearNest also includes a landlord-facing Dawn remediation advisor.
+This module analyzes behavioral housing data for the landlord's own units and recommends which operational issues should be fixed first.
+
+- `services/intelligence/dawnRemediationService.js` computes a deterministic unit risk score from recent complaint volume, SLA breaches, unresolved complaints, and low trust score penalties.
+- Dawn ranks units by remediation priority and returns the top items with specific operational recommendations.
+- Recommendation logic is rule-based and explainable:
+  - recurring complaints -> inspect infrastructure
+  - repeated SLA breaches -> improve complaint response handling
+  - unresolved complaints -> clear pending issues to stabilize trust
+- The advisor is read-only and does not modify trust, governance, or enforcement state.
 
 ## 3. Security Principles
 
