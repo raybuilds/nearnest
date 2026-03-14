@@ -505,7 +505,7 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
           corridorId: corridorIdA,
           landlordId: landlordAccount.landlord.id,
           status: "approved",
-          trustScore: 82,
+          trustScore: 60,
           structuralApproved: true,
           operationalBaselineApproved: true,
           rent: 7800,
@@ -541,7 +541,7 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
           corridorId: corridorIdA,
           landlordId: landlordAccount.landlord.id,
           status: "approved",
-          trustScore: 72,
+          trustScore: 55,
           structuralApproved: true,
           operationalBaselineApproved: true,
           rent: 7600,
@@ -777,6 +777,64 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
         String(item).toLowerCase().includes("approaching enforcement threshold")
       )
     );
+
+    const studentInsights = await api("/dawn/insights", {
+      token: studentLogin.data.token,
+    });
+    assert.equal(studentInsights.status, 200);
+    assert.ok(Array.isArray(studentInsights.data.insights));
+    assert.ok(
+      studentInsights.data.insights.includes("Your unit trust score is declining due to recurring complaints.")
+    );
+    assert.ok(
+      studentInsights.data.insights.includes("You currently have unresolved complaints affecting trust score.")
+    );
+
+    const landlordInsights = await api("/dawn/insights", {
+      token: landlordLogin.data.token,
+    });
+    assert.equal(landlordInsights.status, 200);
+    assert.ok(Array.isArray(landlordInsights.data.insights));
+    assert.ok(
+      landlordInsights.data.insights.includes("Recurring complaints detected. Consider operational inspection.")
+    );
+    assert.ok(
+      landlordInsights.data.insights.includes("Response delays detected. Faster resolution may improve trust score.")
+    );
+
+    const adminInsights = await api("/dawn/insights", {
+      token: adminLogin.data.token,
+    });
+    assert.equal(adminInsights.status, 200);
+    assert.ok(Array.isArray(adminInsights.data.insights));
+    assert.ok(adminInsights.data.insights.includes("Complaint density rising in this corridor."));
+    assert.ok(adminInsights.data.insights.includes("Multiple units approaching suspension threshold."));
+
+    const trustExplanation = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Explain trust score" },
+    });
+    assert.equal(trustExplanation.status, 200);
+    assert.equal(trustExplanation.data.intent, "explain_unit_trust");
+    assert.equal(trustExplanation.data.data.unitId, safeUnitId);
+    assert.equal(trustExplanation.data.data.trustScore, 0);
+    assert.ok(Array.isArray(trustExplanation.data.data.drivers));
+    assert.ok(
+      trustExplanation.data.data.drivers.some((item) =>
+        String(item).toLowerCase().includes("water")
+      )
+    );
+    assert.ok(
+      trustExplanation.data.data.drivers.some((item) =>
+        String(item).toLowerCase().includes("sla breach")
+      )
+    );
+    assert.ok(
+      trustExplanation.data.data.drivers.some((item) =>
+        String(item).toLowerCase().includes("unresolved complaint")
+      )
+    );
   } finally {
     for (const unitId of [safeUnitId, riskyUnitId, mediumUnitId, otherCorridorUnitId]) {
       if (!unitId) continue;
@@ -808,6 +866,506 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     }
     if (corridorIdB) {
       await prisma.corridor.deleteMany({ where: { id: corridorIdB } });
+    }
+  }
+});
+
+test("dawn student unit health report", async () => {
+  const tag = createTag("dawn-health");
+  const password = "pass123";
+
+  let corridorId = null;
+  let studentAccount = null;
+  let landlordAccount = null;
+  let unitId = null;
+
+  try {
+    const corridor = await prisma.corridor.create({
+      data: { name: `${tag}-corridor`, cityCode: 12 },
+    });
+    corridorId = corridor.id;
+
+    landlordAccount = await createLandlord({
+      name: `${tag}-landlord`,
+      email: `${tag}-landlord@example.test`,
+      password,
+    });
+    studentAccount = await createStudent({
+      name: `${tag}-student`,
+      email: `${tag}-student@example.test`,
+      password,
+      corridorId,
+    });
+
+    await prisma.vDPEntry.create({
+      data: {
+        studentId: studentAccount.student.id,
+        corridorId,
+        intake: "2026A",
+        verified: true,
+        status: "verified",
+      },
+    });
+
+    unitId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 74,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+          rent: 8200,
+          distanceKm: 1.1,
+          ac: true,
+        },
+      })
+    ).id;
+
+    const occupantPublicId = generateOccupantId({
+      cityCode: 12,
+      corridorCode: corridorId,
+      hostelCode: unitId,
+      roomNumber: unitId,
+      occupantIndex: 1,
+    });
+
+    await prisma.occupancy.create({
+      data: {
+        studentId: studentAccount.student.id,
+        unitId,
+        startDate: new Date(),
+      },
+    });
+
+    await prisma.occupant.create({
+      data: {
+        publicId: occupantPublicId,
+        cityCode: 12,
+        corridorCode: corridorId,
+        hostelCode: unitId,
+        roomNumber: unitId,
+        occupantIndex: 1,
+        studentId: studentAccount.student.id,
+        unitId,
+        active: true,
+      },
+    });
+
+    const now = Date.now();
+    const seededComplaints = [
+      { createdOffsetDays: 2, resolved: false, late: false, incidentType: "water" },
+      { createdOffsetDays: 5, resolved: false, late: false, incidentType: "water" },
+      { createdOffsetDays: 8, resolved: true, late: true, incidentType: "electrical" },
+      { createdOffsetDays: 12, resolved: true, late: true, incidentType: "common_area" },
+    ];
+
+    for (const item of seededComplaints) {
+      const createdAt = new Date(now - item.createdOffsetDays * 24 * 60 * 60 * 1000);
+      const slaDeadline = new Date(createdAt.getTime() + 48 * 60 * 60 * 1000);
+      const resolvedAt = item.resolved
+        ? new Date(slaDeadline.getTime() + (item.late ? 6 : -6) * 60 * 60 * 1000)
+        : null;
+
+      await prisma.complaint.create({
+        data: {
+          unitId,
+          studentId: studentAccount.student.id,
+          severity: 3,
+          message: `${tag}-${item.incidentType}`,
+          incidentType: item.incidentType,
+          incidentFlag: item.incidentType !== "other",
+          createdAt,
+          slaDeadline,
+          resolved: item.resolved,
+          resolvedAt,
+        },
+      });
+    }
+
+    const studentLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-student@example.test`, password },
+    });
+    assert.equal(studentLogin.status, 200);
+
+    const response = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "How is my housing doing?" },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.data.intent, "student_unit_health");
+    assert.equal(response.data.message, "Here is the health report for your housing:");
+    assert.equal(response.data.healthReport.trustScore, 74);
+    assert.equal(response.data.healthReport.complaintTrend, "declining");
+    assert.equal(response.data.data.trustScore, 74);
+    assert.equal(response.data.data.trend, "declining");
+    assert.ok(Array.isArray(response.data.data.riskSignals));
+    assert.ok(response.data.data.riskSignals.includes("Recurring complaints detected"));
+    assert.ok(response.data.data.riskSignals.includes("Response delays detected"));
+    assert.ok(typeof response.data.data.summary === "string");
+    assert.equal(response.data.data.healthReport.trustScore, 74);
+    assert.equal(response.data.data.healthReport.complaintTrend, "declining");
+    assert.equal(response.data.data.healthReport.responsePerformance, "delayed");
+    assert.ok(Array.isArray(response.data.data.healthReport.riskSignals));
+    assert.ok(typeof response.data.data.healthReport.summary === "string");
+  } finally {
+    if (unitId) {
+      await prisma.complaint.deleteMany({ where: { unitId } });
+      await prisma.occupancy.deleteMany({ where: { unitId } });
+      await prisma.occupant.deleteMany({ where: { unitId } });
+      await prisma.shortlist.deleteMany({ where: { unitId } });
+      await prisma.auditLog.deleteMany({ where: { unitId } });
+      await prisma.structuralChecklist.deleteMany({ where: { unitId } });
+      await prisma.operationalChecklist.deleteMany({ where: { unitId } });
+      await prisma.unitMedia.deleteMany({ where: { unitId } });
+      await prisma.unit.deleteMany({ where: { id: unitId } });
+    }
+    if (studentAccount) {
+      await prisma.vDPEntry.deleteMany({ where: { studentId: studentAccount.student.id } });
+      await prisma.student.deleteMany({ where: { id: studentAccount.student.id } });
+      await prisma.user.deleteMany({ where: { id: studentAccount.user.id } });
+    }
+    if (landlordAccount) {
+      await prisma.landlord.deleteMany({ where: { id: landlordAccount.landlord.id } });
+      await prisma.user.deleteMany({ where: { id: landlordAccount.user.id } });
+    }
+    if (corridorId) {
+      await prisma.corridor.deleteMany({ where: { id: corridorId } });
+    }
+  }
+});
+
+test("corridor behavioral insights", async () => {
+  const tag = createTag("corridor-insights");
+  const password = "pass123";
+
+  let corridorId = null;
+  let studentAccount = null;
+  let landlordAccount = null;
+  let unitAId = null;
+  let unitBId = null;
+  let unitCId = null;
+
+  try {
+    const corridor = await prisma.corridor.create({
+      data: { name: `${tag}-corridor`, cityCode: 12 },
+    });
+    corridorId = corridor.id;
+
+    landlordAccount = await createLandlord({
+      name: `${tag}-landlord`,
+      email: `${tag}-landlord@example.test`,
+      password,
+    });
+    studentAccount = await createStudent({
+      name: `${tag}-student`,
+      email: `${tag}-student@example.test`,
+      password,
+      corridorId,
+    });
+
+    await prisma.vDPEntry.create({
+      data: {
+        studentId: studentAccount.student.id,
+        corridorId,
+        intake: "2026A",
+        verified: true,
+        status: "verified",
+      },
+    });
+
+    unitAId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 52,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    unitBId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 54,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    unitCId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 70,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    const now = Date.now();
+    const seededComplaints = [
+      { unitId: unitAId, incidentType: "water", createdOffsetDays: 2, resolved: true, late: true },
+      { unitId: unitAId, incidentType: "water", createdOffsetDays: 4, resolved: true, late: true },
+      { unitId: unitBId, incidentType: "water", createdOffsetDays: 6, resolved: false, late: false },
+      { unitId: unitCId, incidentType: "common_area", createdOffsetDays: 8, resolved: false, late: false },
+    ];
+
+    for (const item of seededComplaints) {
+      const createdAt = new Date(now - item.createdOffsetDays * 24 * 60 * 60 * 1000);
+      const slaDeadline = new Date(createdAt.getTime() + 48 * 60 * 60 * 1000);
+      const resolvedAt = item.resolved
+        ? new Date(slaDeadline.getTime() + (item.late ? 5 : -5) * 60 * 60 * 1000)
+        : null;
+
+      await prisma.complaint.create({
+        data: {
+          unitId: item.unitId,
+          studentId: studentAccount.student.id,
+          severity: 3,
+          message: `${tag}-${item.incidentType}`,
+          incidentType: item.incidentType,
+          incidentFlag: item.incidentType !== "other",
+          createdAt,
+          slaDeadline,
+          resolved: item.resolved,
+          resolvedAt,
+        },
+      });
+    }
+
+    const studentLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-student@example.test`, password },
+    });
+    assert.equal(studentLogin.status, 200);
+
+    const response = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "corridor issues" },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.data.intent, "corridor_behavioral_insight");
+    assert.equal(response.data.message, "Here are the current corridor insights:");
+    assert.ok(Array.isArray(response.data.insights));
+    assert.ok(
+      response.data.insights.includes("Recurring water complaints detected in this corridor.")
+    );
+    assert.ok(
+      response.data.insights.includes("2 units near suspension threshold.")
+    );
+    assert.ok(
+      response.data.insights.includes("Response delays increasing across corridor.")
+    );
+    assert.equal(response.data.data.unitsNearSuspension, 2);
+    assert.equal(response.data.data.slaBreaches, 2);
+    assert.equal(response.data.data.incidentFrequency.water, 3);
+  } finally {
+    for (const unitId of [unitAId, unitBId, unitCId]) {
+      if (!unitId) continue;
+      await prisma.complaint.deleteMany({ where: { unitId } });
+      await prisma.occupancy.deleteMany({ where: { unitId } });
+      await prisma.occupant.deleteMany({ where: { unitId } });
+      await prisma.shortlist.deleteMany({ where: { unitId } });
+      await prisma.auditLog.deleteMany({ where: { unitId } });
+      await prisma.structuralChecklist.deleteMany({ where: { unitId } });
+      await prisma.operationalChecklist.deleteMany({ where: { unitId } });
+      await prisma.unitMedia.deleteMany({ where: { unitId } });
+      await prisma.unit.deleteMany({ where: { id: unitId } });
+    }
+    if (studentAccount) {
+      await prisma.vDPEntry.deleteMany({ where: { studentId: studentAccount.student.id } });
+      await prisma.student.deleteMany({ where: { id: studentAccount.student.id } });
+      await prisma.user.deleteMany({ where: { id: studentAccount.user.id } });
+    }
+    if (landlordAccount) {
+      await prisma.landlord.deleteMany({ where: { id: landlordAccount.landlord.id } });
+      await prisma.user.deleteMany({ where: { id: landlordAccount.user.id } });
+    }
+    if (corridorId) {
+      await prisma.corridor.deleteMany({ where: { id: corridorId } });
+    }
+  }
+});
+
+test("landlord remediation advisor", async () => {
+  const tag = createTag("remediation");
+  const password = "pass123";
+
+  let corridorId = null;
+  let studentAccount = null;
+  let landlordAccount = null;
+  let unitAId = null;
+  let unitBId = null;
+  let unitCId = null;
+
+  try {
+    const corridor = await prisma.corridor.create({
+      data: { name: `${tag}-corridor`, cityCode: 12 },
+    });
+    corridorId = corridor.id;
+
+    landlordAccount = await createLandlord({
+      name: `${tag}-landlord`,
+      email: `${tag}-landlord@example.test`,
+      password,
+    });
+    studentAccount = await createStudent({
+      name: `${tag}-student`,
+      email: `${tag}-student@example.test`,
+      password,
+      corridorId,
+    });
+
+    unitAId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 52,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    unitBId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 58,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    unitCId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 75,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    const now = Date.now();
+    const seededComplaints = [
+      { unitId: unitAId, createdOffsetDays: 2, resolved: false, late: false },
+      { unitId: unitAId, createdOffsetDays: 4, resolved: false, late: false },
+      { unitId: unitAId, createdOffsetDays: 7, resolved: true, late: true },
+      { unitId: unitAId, createdOffsetDays: 10, resolved: true, late: true },
+      { unitId: unitBId, createdOffsetDays: 3, resolved: false, late: false },
+      { unitId: unitBId, createdOffsetDays: 6, resolved: true, late: true },
+      { unitId: unitCId, createdOffsetDays: 5, resolved: false, late: false },
+    ];
+
+    for (const item of seededComplaints) {
+      const createdAt = new Date(now - item.createdOffsetDays * 24 * 60 * 60 * 1000);
+      const slaDeadline = new Date(createdAt.getTime() + 48 * 60 * 60 * 1000);
+      const resolvedAt = item.resolved
+        ? new Date(slaDeadline.getTime() + (item.late ? 6 : -6) * 60 * 60 * 1000)
+        : null;
+
+      await prisma.complaint.create({
+        data: {
+          unitId: item.unitId,
+          studentId: studentAccount.student.id,
+          severity: 3,
+          message: `${tag}-complaint-${item.unitId}`,
+          incidentType: "water",
+          incidentFlag: true,
+          createdAt,
+          slaDeadline,
+          resolved: item.resolved,
+          resolvedAt,
+        },
+      });
+    }
+
+    const landlordLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-landlord@example.test`, password },
+    });
+    assert.equal(landlordLogin.status, 200);
+
+    const response = await api("/dawn/query", {
+      method: "POST",
+      token: landlordLogin.data.token,
+      body: { message: "What should I fix?" },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.data.intent, "landlord_remediation_advisor");
+    assert.equal(response.data.message, "Here are the highest priority issues to address:");
+    assert.ok(Array.isArray(response.data.priorities));
+    assert.equal(response.data.priorities.length, 3);
+    assert.equal(response.data.priorities[0].unitId, unitAId);
+    assert.equal(response.data.data.priorities[0].unitId, unitAId);
+    assert.ok(response.data.data.priorities[0].riskScore > response.data.data.priorities[1].riskScore);
+    assert.ok(
+      String(response.data.priorities[0].recommendation).includes("Inspect infrastructure")
+    );
+    assert.ok(
+      String(response.data.data.priorities[0].recommendations.join(" ")).includes("Improve complaint response time")
+    );
+    assert.ok(
+      String(response.data.data.priorities[0].recommendations.join(" ")).includes("Resolve pending complaints")
+    );
+  } finally {
+    for (const unitId of [unitAId, unitBId, unitCId]) {
+      if (!unitId) continue;
+      await prisma.complaint.deleteMany({ where: { unitId } });
+      await prisma.occupancy.deleteMany({ where: { unitId } });
+      await prisma.occupant.deleteMany({ where: { unitId } });
+      await prisma.shortlist.deleteMany({ where: { unitId } });
+      await prisma.auditLog.deleteMany({ where: { unitId } });
+      await prisma.structuralChecklist.deleteMany({ where: { unitId } });
+      await prisma.operationalChecklist.deleteMany({ where: { unitId } });
+      await prisma.unitMedia.deleteMany({ where: { unitId } });
+      await prisma.unit.deleteMany({ where: { id: unitId } });
+    }
+    if (studentAccount) {
+      await prisma.vDPEntry.deleteMany({ where: { studentId: studentAccount.student.id } });
+      await prisma.student.deleteMany({ where: { id: studentAccount.student.id } });
+      await prisma.user.deleteMany({ where: { id: studentAccount.user.id } });
+    }
+    if (landlordAccount) {
+      await prisma.landlord.deleteMany({ where: { id: landlordAccount.landlord.id } });
+      await prisma.user.deleteMany({ where: { id: landlordAccount.user.id } });
+    }
+    if (corridorId) {
+      await prisma.corridor.deleteMany({ where: { id: corridorId } });
     }
   }
 });

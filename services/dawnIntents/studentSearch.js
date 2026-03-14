@@ -1,5 +1,5 @@
 const { ensureRole, parseAcFilter, parseMaxDistance, parseMaxRent } = require("./utils");
-const { rankUnits } = require("../dawnRanking");
+const { rankUnits } = require("../intelligence/dawnRanking");
 
 module.exports = async function studentSearch({ req, context }) {
   ensureRole(req, ["student"]);

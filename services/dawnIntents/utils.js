@@ -81,6 +81,13 @@ function parseRequestedLandlordId(text) {
   return Number.isNaN(value) ? null : value;
 }
 
+function parseRequestedUnitId(text) {
+  const match = String(text || "").match(/\bunit\s*#?\s*(\d+)\b/);
+  if (!match) return null;
+  const value = Number(match[1]);
+  return Number.isNaN(value) ? null : value;
+}
+
 function detectIncidentType(text) {
   if (/\b(lift|elevator|stair|corridor light|common area|hallway)\b/.test(text)) return "common_area";
   if (/\b(water|leak|leakage|plumbing|drain|bathroom)\b/.test(text)) return "water";
@@ -141,5 +148,6 @@ module.exports = {
   parseMaxDistance,
   parseMaxRent,
   parseRequestedLandlordId,
+  parseRequestedUnitId,
   parseSeverity,
 };

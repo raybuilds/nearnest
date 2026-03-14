@@ -1,4 +1,5 @@
 require("dotenv").config();
+require("./services/intelligence/governanceEventListeners");
 const express = require("express");
 const cors = require("cors");
 const { verifyToken, requireRole } = require("./middlewares/auth");

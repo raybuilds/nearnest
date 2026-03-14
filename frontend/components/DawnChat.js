@@ -16,6 +16,7 @@ function pickDisplayFields(item) {
     "unitId",
     "unitLabel",
     "status",
+    "riskLevel",
     "trustScore",
     "trustBand",
     "rent",
@@ -28,7 +29,9 @@ function pickDisplayFields(item) {
     "slaStatus",
     "trustImpactHint",
     "complaintsLast30Days",
+    "complaintDensity",
     "complaintCount",
+    "severeIncidents",
     "corridorId",
   ];
 
@@ -57,9 +60,201 @@ function DataCard({ item }) {
   );
 }
 
+function HealthReportCard({ report }) {
+  const riskSignals = Array.isArray(report?.riskSignals) ? report.riskSignals : [];
+
+  return (
+    <article className="space-y-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Unit Health Report</p>
+        {report?.summary && <p className="mt-1 text-xs text-emerald-900">{report.summary}</p>}
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Trust Score</p>
+          <p className="text-sm font-semibold text-emerald-950">
+            {formatValue(report?.trustScore)} {report?.trustBand ? `(${report.trustBand})` : ""}
+          </p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Complaint Trend</p>
+          <p className="text-sm text-emerald-950">{formatValue(report?.complaintTrend)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Response Performance</p>
+          <p className="text-sm text-emerald-950">{formatValue(report?.responsePerformance)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-emerald-700">Risk Signals</p>
+          {riskSignals.length === 0 ? (
+            <p className="text-sm text-emerald-950">None</p>
+          ) : (
+            <ul className="list-disc pl-4 text-sm text-emerald-950">
+              {riskSignals.map((signal) => (
+                <li key={signal}>{signal}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function RiskForecastCard({ forecast }) {
+  const indicators = Array.isArray(forecast?.indicators) ? forecast.indicators : [];
+
+  return (
+    <article className="space-y-3 rounded-xl border border-rose-200 bg-rose-50 p-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wide text-rose-800">Predictive Risk Signal</p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-700">Risk Signal</p>
+          <p className="text-sm font-semibold text-rose-950">{formatValue(forecast?.riskSignal || forecast?.riskLevel)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-700">Risk Score</p>
+          <p className="text-sm text-rose-950">{formatValue(forecast?.riskScore)}</p>
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-700">Indicators</p>
+          {indicators.length === 0 ? (
+            <p className="text-sm text-rose-950">None</p>
+          ) : (
+            <ul className="list-disc pl-4 text-sm text-rose-950">
+              {indicators.map((indicator) => (
+                <li key={indicator}>{indicator}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+        <div>
+          <p className="text-[10px] font-semibold uppercase tracking-wide text-rose-700">Recommendation</p>
+          <p className="text-sm text-rose-950">{formatValue(forecast?.recommendation)}</p>
+        </div>
+      </div>
+    </article>
+  );
+}
+
+function InsightCardsView({ insights }) {
+  return (
+    <div className="space-y-2">
+      <p className="text-xs font-semibold text-slate-800">Proactive Insights</p>
+      {insights.map((insight, index) => (
+        <article
+          className={`rounded-lg border p-3 ${
+            insight.riskLevel === "HIGH"
+              ? "border-rose-200 bg-rose-50"
+              : insight.riskLevel === "MEDIUM"
+                ? "border-amber-200 bg-amber-50"
+                : "border-emerald-200 bg-emerald-50"
+          }`}
+          key={`${insight.type || "insight"}-${index}`}
+        >
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{formatValue(insight.type)}</p>
+              <p className="text-sm font-semibold text-slate-900">{formatValue(insight.title || insight.message)}</p>
+            </div>
+            {insight.riskLevel && (
+              <span className="rounded-full border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700">
+                {formatValue(insight.riskLevel)}
+              </span>
+            )}
+          </div>
+          {insight.message && <p className="mt-2 text-xs text-slate-700">{formatValue(insight.message)}</p>}
+          {Array.isArray(insight.indicators) && insight.indicators.length > 0 && (
+            <div className="mt-2 flex flex-wrap gap-1">
+              {insight.indicators.map((indicator) => (
+                <span key={indicator} className="rounded-full bg-white px-2 py-1 text-[10px] text-slate-700">
+                  {indicator}
+                </span>
+              ))}
+            </div>
+          )}
+          {Array.isArray(insight.affectedUnits) && insight.affectedUnits.length > 0 && (
+            <p className="mt-2 text-[11px] text-slate-600">Affected units: {insight.affectedUnits.join(", ")}</p>
+          )}
+        </article>
+      ))}
+    </div>
+  );
+}
+
 function DataView({ data }) {
   if (data === null || data === undefined) {
     return <p className="text-xs text-slate-600">No data</p>;
+  }
+
+  if (data && typeof data === "object" && Array.isArray(data.priorities)) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-800">Remediation Priorities</p>
+        {data.priorities.map((item) => (
+          <article className="rounded-lg border border-amber-200 bg-amber-50 p-3" key={`priority-${item.unitId}`}>
+            <p className="text-xs font-semibold text-amber-900">Unit #{item.unitId}</p>
+            <p className="mt-1 text-[11px] text-amber-800">{item.issue}</p>
+            <p className="mt-1 text-[11px] text-amber-700">{item.recommendation}</p>
+          </article>
+        ))}
+      </div>
+    );
+  }
+
+  if (data && typeof data === "object" && Array.isArray(data.insights)) {
+    return (
+      <div className="space-y-2">
+        <p className="text-xs font-semibold text-slate-800">Corridor Insights</p>
+        {(data.riskLevel || data.complaintDensity !== undefined) && (
+          <article className="rounded-lg border border-sky-200 bg-sky-50 p-3">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">Risk Level</p>
+                <p className="text-sm font-semibold text-sky-950">{formatValue(data.riskLevel)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">Complaint Density</p>
+                <p className="text-sm text-sky-950">{formatValue(data.complaintDensity)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">Severe Incidents</p>
+                <p className="text-sm text-sky-950">{formatValue(data.severeIncidents)}</p>
+              </div>
+              <div>
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-sky-700">Units Near Suspension</p>
+                <p className="text-sm text-sky-950">{formatValue(data.unitsNearSuspension)}</p>
+              </div>
+            </div>
+          </article>
+        )}
+        <div className="space-y-1">
+          {data.insights.map((item) => (
+            <p key={item} className="rounded border border-sky-200 bg-sky-50 px-2 py-1 text-[11px] text-sky-800">
+              {item}
+            </p>
+          ))}
+        </div>
+      </div>
+    );
+  }
+
+  if (data && typeof data === "object" && data.healthReport && typeof data.healthReport === "object") {
+    return <HealthReportCard report={data.healthReport} />;
+  }
+
+  if (data && typeof data === "object" && data.riskForecast && typeof data.riskForecast === "object") {
+    return <RiskForecastCard forecast={data.riskForecast} />;
+  }
+
+  if (
+    Array.isArray(data) &&
+    data.length > 0 &&
+    data.every((item) => item && typeof item === "object" && typeof item.message === "string" && typeof item.type === "string")
+  ) {
+    return <InsightCardsView insights={data} />;
   }
 
   if (data && typeof data === "object" && Array.isArray(data.recommendations)) {

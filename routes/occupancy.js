@@ -2,6 +2,7 @@ const express = require("express");
 const prisma = require("../prismaClient");
 const { verifyToken, requireRole } = require("../middlewares/auth");
 const { generateOccupantId, isValidOccupantId } = require("../services/occupantIdService");
+const governanceEvents = require("../services/governanceEvents");
 
 const router = express.Router();
 
@@ -228,6 +229,21 @@ router.post("/occupancy/check-in", verifyToken, requireRole("landlord"), async (
               },
             });
           });
+
+          governanceEvents.emit("OVER_CAPACITY_DETECTED", {
+            unitId: parsedUnitId,
+            attemptedStudentId: req.body?.studentId ? Number(req.body.studentId) : null,
+            reason: "Capacity breach attempt: landlord tried to check in beyond approved unit capacity",
+          });
+
+          if (currentUnit.status !== "archived") {
+            governanceEvents.emit("UNIT_STATUS_CHANGED", {
+              unitId: parsedUnitId,
+              previousStatus: currentUnit.status,
+              nextStatus: "suspended",
+              source: "occupancy_capacity_guard",
+            });
+          }
         }
       }
       return res.status(400).json({ error: error.message });
