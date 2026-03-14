@@ -1,9 +1,10 @@
 const express = require("express");
 const prisma = require("../prismaClient");
-const { calculateTrustScore } = require("../engines/trustEngine");
+const { calculateTrustScore } = require("../services/intelligence/trustEngine");
 const { verifyToken, requireRole } = require("../middlewares/auth");
 const { complaintLimiter } = require("../middlewares/rateLimiter");
 const { isValidOccupantId } = require("../services/occupantIdService");
+const governanceEvents = require("../services/governanceEvents");
 
 const router = express.Router();
 const AUDIT_WINDOW_DAYS = 60;
@@ -220,6 +221,15 @@ async function recalculateUnitTrustScore(unitId) {
     }
   });
 
+  if (newlyTriggered && unit.status !== "archived") {
+    governanceEvents.emit("UNIT_STATUS_CHANGED", {
+      unitId,
+      previousStatus: unit.status,
+      nextStatus: "suspended",
+      source: "complaint_governance",
+    });
+  }
+
   return trustScore;
 }
 
@@ -327,6 +337,12 @@ router.post("/complaint", verifyToken, requireRole("student"), complaintLimiter,
     });
 
     const trustScore = await recalculateUnitTrustScore(resolvedUnitId);
+    governanceEvents.emit("COMPLAINT_CREATED", {
+      complaintId: complaint.id,
+      unitId: resolvedUnitId,
+      severity: parsedSeverity,
+      incidentType: normalizedIncidentType || "other",
+    });
 
     res.status(201).json({
       message: "Complaint recorded",
@@ -379,6 +395,24 @@ router.patch("/complaint/:complaintId/resolve", verifyToken, requireRole("landlo
     });
 
     const trustScore = await recalculateUnitTrustScore(updatedComplaint.unitId);
+    governanceEvents.emit("COMPLAINT_RESOLVED", {
+      complaintId: updatedComplaint.id,
+      unitId: updatedComplaint.unitId,
+      resolvedAt: updatedComplaint.resolvedAt,
+    });
+
+    if (updatedComplaint.slaDeadline && updatedComplaint.resolvedAt) {
+      const resolvedAt = new Date(updatedComplaint.resolvedAt);
+      const slaDeadline = new Date(updatedComplaint.slaDeadline);
+      if (!Number.isNaN(resolvedAt.getTime()) && !Number.isNaN(slaDeadline.getTime()) && resolvedAt > slaDeadline) {
+        governanceEvents.emit("SLA_BREACH_DETECTED", {
+          complaintId: updatedComplaint.id,
+          unitId: updatedComplaint.unitId,
+          resolvedAt: updatedComplaint.resolvedAt,
+          slaDeadline: updatedComplaint.slaDeadline,
+        });
+      }
+    }
 
     res.json({
       message: "Complaint resolved",
@@ -646,6 +680,11 @@ router.get("/unit/:unitId/complaints", verifyToken, async (req, res) => {
         acc[key] = (acc[key] || 0) + 1;
         return acc;
       }, {});
+      const severityTrend = complaints.reduce((acc, item) => {
+        const key = String(item.severity);
+        acc[key] = (acc[key] || 0) + 1;
+        return acc;
+      }, {});
 
       const complaints30d = complaints.filter((item) => getCreatedWithinDays(item.createdAt, 30));
       const resolved = complaints.filter((item) => item.resolved);
@@ -668,6 +707,7 @@ router.get("/unit/:unitId/complaints", verifyToken, async (req, res) => {
           trustScore: unit.trustScore,
           trustBand: getTrustBand(unit.trustScore),
           incidentBreakdown,
+          severityTrend,
           slaCompliance,
         },
         ownComplaints: ownComplaints.map((item) => mapComplaintForList(item, false)),

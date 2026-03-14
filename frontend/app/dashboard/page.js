@@ -939,6 +939,97 @@ function AdminDashboard() {
   );
 }
 
+function DawnInsightsPanel({ role }) {
+  const [insights, setInsights] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    let active = true;
+
+    (async () => {
+      setLoading(true);
+      setError("");
+      try {
+        const payload = await apiRequest("/dawn/insights");
+        if (!active) return;
+        setInsights(Array.isArray(payload?.insights) ? payload.insights : []);
+      } catch (err) {
+        if (!active) return;
+        setError(err.message);
+        setInsights([]);
+      } finally {
+        if (active) {
+          setLoading(false);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [role]);
+
+  return (
+    <section className="rounded-xl border bg-white p-5 shadow-sm">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-xl font-bold text-slate-900">Dawn Insights</h2>
+          <p className="text-sm text-slate-600">Rule-based operational guidance generated from your current context.</p>
+        </div>
+      </div>
+      {loading && <p className="mt-3 text-sm text-slate-600">Loading situational insights...</p>}
+      {!loading && error && <p className="mt-3 rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {!loading && !error && insights.length === 0 && (
+        <p className="mt-3 rounded border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+          No immediate Dawn insights for this account right now.
+        </p>
+      )}
+      {!loading && !error && insights.length > 0 && (
+        <div className="mt-3 space-y-3">
+          {insights.map((insight, index) => (
+            <article
+              key={`${insight.type || "insight"}-${index}`}
+              className={`rounded-lg border px-4 py-3 ${
+                insight.riskLevel === "HIGH"
+                  ? "border-rose-200 bg-rose-50"
+                  : insight.riskLevel === "MEDIUM"
+                    ? "border-amber-200 bg-amber-50"
+                    : "border-emerald-200 bg-emerald-50"
+              }`}
+            >
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{insight.type || "insight"}</p>
+                  <p className="text-sm font-semibold text-slate-900">{insight.title || insight.message}</p>
+                </div>
+                {insight.riskLevel && (
+                  <span className="rounded-full border border-slate-300 bg-white px-2 py-1 text-[11px] font-semibold text-slate-700">
+                    {insight.riskLevel}
+                  </span>
+                )}
+              </div>
+              {insight.message && <p className="mt-2 text-sm text-slate-700">{insight.message}</p>}
+              {Array.isArray(insight.indicators) && insight.indicators.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-2">
+                  {insight.indicators.map((indicator) => (
+                    <span key={indicator} className="rounded-full bg-white px-2 py-1 text-[11px] text-slate-700">
+                      {indicator}
+                    </span>
+                  ))}
+                </div>
+              )}
+              {Array.isArray(insight.affectedUnits) && insight.affectedUnits.length > 0 && (
+                <p className="mt-2 text-xs text-slate-600">Affected units: {insight.affectedUnits.join(", ")}</p>
+              )}
+            </article>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function DashboardPage() {
   const [role, setRole] = useState("");
 
@@ -958,6 +1049,7 @@ export default function DashboardPage() {
   return (
     <div className="space-y-6">
       <h1 className="text-3xl font-bold">Dashboard</h1>
+      <DawnInsightsPanel role={role} />
       {role === "student" && <StudentDashboard />}
       {role === "landlord" && <LandlordDashboard />}
       {role === "admin" && <AdminDashboard />}

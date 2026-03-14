@@ -1,5 +1,6 @@
 const prisma = require("../prismaClient");
-const { calculateTrustScore } = require("../engines/trustEngine");
+const { calculateTrustScore } = require("./intelligence/trustEngine");
+const governanceEvents = require("./governanceEvents");
 
 async function recalculateUnitTrustScore(unitId) {
   const unit = await prisma.unit.findUnique({
@@ -18,6 +19,11 @@ async function recalculateUnitTrustScore(unitId) {
   await prisma.unit.update({
     where: { id: unitId },
     data: { trustScore },
+  });
+
+  governanceEvents.emit("TRUST_SCORE_UPDATED", {
+    unitId,
+    trustScore,
   });
 
   return trustScore;
