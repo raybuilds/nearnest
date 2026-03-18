@@ -28,8 +28,16 @@ function isSlaBreached(complaint) {
 
 function toRiskLevel(riskScore) {
   if (riskScore >= 2.5) return "CRITICAL";
-  if (riskScore >= 1.2) return "EARLY_WARNING";
+  if (riskScore >= 1.1) return "EARLY_WARNING";
   return "STABLE";
+}
+
+function getComplaintBurden(complaints) {
+  return complaints.reduce((total, complaint) => {
+    const severity = Number(complaint?.severity || 0);
+    const breachPenalty = isSlaBreached(complaint) ? 1 : 0;
+    return total + severity + breachPenalty;
+  }, 0);
 }
 
 async function forecastUnitRisk(unitId) {
@@ -56,6 +64,15 @@ async function forecastUnitRisk(unitId) {
         where: { endDate: null },
         select: { id: true },
       },
+      auditLogs: {
+        where: {
+          createdAt: {
+            gte: getWindowCutoff(30),
+          },
+          resolved: false,
+        },
+        select: { id: true },
+      },
     },
   });
 
@@ -67,30 +84,34 @@ async function forecastUnitRisk(unitId) {
 
   const now = new Date();
   const cutoff30 = getWindowCutoff(30);
-  const cutoff14 = getWindowCutoff(14);
-  const cutoff28 = getWindowCutoff(28);
+  const cutoff15 = getWindowCutoff(15);
 
   const complaints30d = unit.complaints.filter((item) => isWithinRange(item.createdAt, cutoff30, now));
-  const current14d = complaints30d.filter((item) => isWithinRange(item.createdAt, cutoff14, now)).length;
-  const previous14d = complaints30d.filter((item) => isWithinRange(item.createdAt, cutoff28, cutoff14)).length;
-  const complaintTrend = Math.max(0, current14d - previous14d);
+  const current15dComplaints = complaints30d.filter((item) => isWithinRange(item.createdAt, cutoff15, now));
+  const previous15dComplaints = complaints30d.filter((item) => isWithinRange(item.createdAt, cutoff30, cutoff15));
+  const complaintTrend = Math.max(0, current15dComplaints.length - previous15dComplaints.length);
 
-  const severeComplaints30d = complaints30d.filter((item) => Number(item.severity || 0) >= 4).length;
-  const severityTrend = severeComplaints30d;
+  const current15dSevere = current15dComplaints.filter((item) => Number(item.severity || 0) >= 4).length;
+  const previous15dSevere = previous15dComplaints.filter((item) => Number(item.severity || 0) >= 4).length;
+  const severityTrend = Math.max(0, current15dSevere - previous15dSevere);
   const slaBreaches = complaints30d.filter(isSlaBreached).length;
 
   const activeOccupancy = Array.isArray(unit.occupancies) ? unit.occupancies.length : 0;
   const occupancyPressure =
     Number(unit.capacity || 0) > 0 ? Number((activeOccupancy / Number(unit.capacity)).toFixed(2)) : 0;
 
-  const trustScoreTrend = Math.max(0, Number((75 - Number(unit.trustScore || 0)) / 10).toFixed(2));
+  const currentTrustPressure = getComplaintBurden(current15dComplaints);
+  const previousTrustPressure = getComplaintBurden(previous15dComplaints);
+  const trustScoreTrend = Math.max(
+    0,
+    Number(((currentTrustPressure - previousTrustPressure) / 5).toFixed(2))
+  );
 
   const rawRiskScore =
     complaintTrend * 0.4 +
     slaBreaches * 0.3 +
     severityTrend * 0.2 +
-    occupancyPressure * 0.1 +
-    trustScoreTrend * 0.2;
+    occupancyPressure * 0.1;
   const riskScore = Number(rawRiskScore.toFixed(2));
   const riskLevel = toRiskLevel(riskScore);
 
@@ -104,11 +125,14 @@ async function forecastUnitRisk(unitId) {
   if (severityTrend >= 2) {
     indicators.push("Severe complaints increasing");
   }
-  if (trustScoreTrend >= 1.5 || Number(unit.trustScore || 0) < 60) {
+  if (trustScoreTrend > 0 || Number(unit.trustScore || 0) < 60) {
     indicators.push("Trust score trending downward");
   }
   if (occupancyPressure >= 0.9) {
     indicators.push("Occupancy pressure is high");
+  }
+  if (Array.isArray(unit.auditLogs) && unit.auditLogs.length > 0) {
+    indicators.push("Open audit actions remain unresolved");
   }
 
   let recommendation = "Continue monitoring this unit through standard health checks.";
@@ -124,6 +148,13 @@ async function forecastUnitRisk(unitId) {
     riskScore,
     indicators,
     recommendation,
+    metrics: {
+      complaintTrend,
+      severityTrend,
+      slaBreaches,
+      occupancyPressure,
+      trustScoreTrend,
+    },
     complaintTrend,
     severityTrend,
     slaBreaches,

@@ -1040,6 +1040,152 @@ test("dawn student unit health report", async () => {
   }
 });
 
+test("predict unit risk surfaces deterministic risk signal details for student housing safety checks", async () => {
+  const tag = createTag("unit-risk");
+  const password = "pass123";
+
+  let corridorId = null;
+  let studentAccount = null;
+  let landlordAccount = null;
+  let unitId = null;
+
+  try {
+    const corridor = await prisma.corridor.create({
+      data: { name: `${tag}-corridor`, cityCode: 12 },
+    });
+    corridorId = corridor.id;
+
+    landlordAccount = await createLandlord({
+      name: `${tag}-landlord`,
+      email: `${tag}-landlord@example.test`,
+      password,
+    });
+    studentAccount = await createStudent({
+      name: `${tag}-student`,
+      email: `${tag}-student@example.test`,
+      password,
+      corridorId,
+    });
+
+    await prisma.vDPEntry.create({
+      data: {
+        studentId: studentAccount.student.id,
+        corridorId,
+        intake: "2026A",
+        verified: true,
+        status: "verified",
+      },
+    });
+
+    unitId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 58,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    await prisma.occupancy.create({
+      data: {
+        studentId: studentAccount.student.id,
+        unitId,
+        startDate: new Date(),
+      },
+    });
+
+    const now = Date.now();
+    const seededComplaints = [
+      { createdOffsetDays: 2, resolved: false, late: false, severity: 4, incidentType: "electrical" },
+      { createdOffsetDays: 4, resolved: false, late: false, severity: 4, incidentType: "safety" },
+      { createdOffsetDays: 6, resolved: true, late: true, severity: 4, incidentType: "water" },
+      { createdOffsetDays: 18, resolved: true, late: false, severity: 2, incidentType: "common_area" },
+    ];
+
+    for (const item of seededComplaints) {
+      const createdAt = new Date(now - item.createdOffsetDays * 24 * 60 * 60 * 1000);
+      const slaDeadline = new Date(createdAt.getTime() + 48 * 60 * 60 * 1000);
+      const resolvedAt = item.resolved
+        ? new Date(slaDeadline.getTime() + (item.late ? 6 : -6) * 60 * 60 * 1000)
+        : null;
+
+      await prisma.complaint.create({
+        data: {
+          unitId,
+          studentId: studentAccount.student.id,
+          severity: item.severity,
+          message: `${tag}-${item.incidentType}`,
+          incidentType: item.incidentType,
+          incidentFlag: true,
+          createdAt,
+          slaDeadline,
+          resolved: item.resolved,
+          resolvedAt,
+        },
+      });
+    }
+
+    const studentLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-student@example.test`, password },
+    });
+    assert.equal(studentLogin.status, 200);
+
+    const response = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Is my housing safe?" },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.data.intent, "predict_unit_risk");
+    assert.equal(response.data.message, "Here is the current risk forecast for your housing:");
+    assert.equal(response.data.riskSignal.unitId, unitId);
+    assert.equal(response.data.riskSignal.riskSignal, "EARLY_WARNING");
+    assert.ok(response.data.assistant.includes("Risk Signal: EARLY_WARNING."));
+    assert.ok(response.data.assistant.includes("Indicators:"));
+    assert.ok(response.data.assistant.includes("Recommendation:"));
+    assert.ok(Array.isArray(response.data.data.indicators));
+    assert.ok(response.data.data.indicators.includes("Complaint frequency rising"));
+    assert.ok(response.data.data.indicators.includes("Multiple SLA breaches detected"));
+    assert.ok(response.data.data.indicators.includes("Trust score trending downward"));
+    assert.equal(response.data.data.riskSignal.riskSignal, "EARLY_WARNING");
+    assert.equal(response.data.data.metrics.complaintTrend, 2);
+    assert.equal(response.data.data.metrics.severityTrend, 3);
+    assert.equal(response.data.data.metrics.slaBreaches, 3);
+    assert.ok(response.data.data.riskScore >= 1.7);
+  } finally {
+    if (unitId) {
+      await prisma.complaint.deleteMany({ where: { unitId } });
+      await prisma.occupancy.deleteMany({ where: { unitId } });
+      await prisma.occupant.deleteMany({ where: { unitId } });
+      await prisma.shortlist.deleteMany({ where: { unitId } });
+      await prisma.auditLog.deleteMany({ where: { unitId } });
+      await prisma.structuralChecklist.deleteMany({ where: { unitId } });
+      await prisma.operationalChecklist.deleteMany({ where: { unitId } });
+      await prisma.unitMedia.deleteMany({ where: { unitId } });
+      await prisma.unit.deleteMany({ where: { id: unitId } });
+    }
+    if (studentAccount) {
+      await prisma.vDPEntry.deleteMany({ where: { studentId: studentAccount.student.id } });
+      await prisma.student.deleteMany({ where: { id: studentAccount.student.id } });
+      await prisma.user.deleteMany({ where: { id: studentAccount.user.id } });
+    }
+    if (landlordAccount) {
+      await prisma.landlord.deleteMany({ where: { id: landlordAccount.landlord.id } });
+      await prisma.user.deleteMany({ where: { id: landlordAccount.user.id } });
+    }
+    if (corridorId) {
+      await prisma.corridor.deleteMany({ where: { id: corridorId } });
+    }
+  }
+});
+
 test("corridor behavioral insights", async () => {
   const tag = createTag("corridor-insights");
   const password = "pass123";

@@ -60,7 +60,12 @@ function formatStudentUnitHealth(result) {
 }
 
 function formatPredictUnitRisk(result) {
-  const forecast = result?.data?.riskForecast || result?.riskForecast || result?.data;
+  const forecast =
+    result?.data?.riskSignal ||
+    result?.riskSignal ||
+    result?.data?.riskForecast ||
+    result?.riskForecast ||
+    result?.data;
   if (!forecast) {
     return result?.message || "I could not prepare a unit risk forecast right now.";
   }
@@ -69,7 +74,7 @@ function formatPredictUnitRisk(result) {
   const indicators = Array.isArray(forecast.indicators) ? forecast.indicators : [];
   const recommendation = forecast.recommendation || "Continue monitoring this unit.";
   const indicatorText = indicators.length > 0 ? indicators.join("; ") : "No major early warning indicators right now";
-  return `Risk signal: ${riskSignal}. Indicators: ${indicatorText}. Recommendation: ${recommendation}`;
+  return `Risk Signal: ${riskSignal}. Indicators: ${indicatorText}. Recommendation: ${recommendation}`;
 }
 
 function formatCorridorBehavioralInsight(result) {

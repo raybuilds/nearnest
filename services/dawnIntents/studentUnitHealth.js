@@ -42,23 +42,23 @@ module.exports = async function studentUnitHealth({ req, context }) {
   };
 
   if (context.intent === "predict_unit_risk") {
+    const riskSignal = {
+      unitId,
+      riskSignal: riskForecast.riskLevel,
+      indicators: riskForecast.indicators,
+      recommendation: riskForecast.recommendation,
+      riskScore: riskForecast.riskScore,
+    };
+
     return {
       message: "Here is the current risk forecast for your housing:",
       assistant: `Unit #${unitId} risk forecast prepared.`,
-      riskForecast: {
-        riskSignal: riskForecast.riskLevel,
-        indicators: riskForecast.indicators,
-        recommendation: riskForecast.recommendation,
-        riskScore: riskForecast.riskScore,
-      },
+      riskSignal,
+      riskForecast: riskSignal,
       data: {
         ...riskForecast,
-        riskForecast: {
-          riskSignal: riskForecast.riskLevel,
-          indicators: riskForecast.indicators,
-          recommendation: riskForecast.recommendation,
-          riskScore: riskForecast.riskScore,
-        },
+        riskSignal,
+        riskForecast: riskSignal,
         healthReport,
       },
     };
