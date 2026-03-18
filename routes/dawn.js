@@ -16,6 +16,7 @@ const { formatDawnResponse } = require("../services/dawnResponseFormatter");
 const { getUnitHealthReport } = require("../services/intelligence/dawnUnitHealthService");
 const { getCorridorInsights } = require("../services/intelligence/dawnCorridorInsightService");
 const { forecastUnitRisk } = require("../services/intelligence/dawnRiskForecastService");
+const { generateOperationalInsights } = require("../services/intelligence/dawnOperationsAdvisor");
 
 const router = express.Router();
 
@@ -25,6 +26,23 @@ const intentMap = {
   student_complaint_summary: studentComplaintSummary,
   student_unit_health: studentUnitHealth,
   predict_unit_risk: studentUnitHealth,
+  operations_advisor: async ({ req, context }) => {
+    const alerts = await generateOperationalInsights(req.user.role, req.user.id, {
+      callApi: context.callApi,
+    });
+
+    context.updateMemory({
+      lastIntent: "operations_advisor",
+      lastUnitId: alerts[0]?.affectedUnits?.[0] || null,
+    });
+
+    return {
+      message: "Here is the current operational advisory summary:",
+      assistant: `Prepared ${alerts.length} operational insight alert(s).`,
+      alerts,
+      data: alerts,
+    };
+  },
   corridor_behavioral_insight: corridorBehavioralInsight,
   landlord_recurring: landlordRecurringIssues,
   landlord_risk: landlordRiskSummary,
@@ -346,6 +364,12 @@ function inferIntent(role, message) {
 
   if (role === "student") {
     if (
+      text.includes("how is the housing system doing") ||
+      text.includes("any operational problems")
+    ) {
+      return "operations_advisor";
+    }
+    if (
       text.includes("problems in my corridor") ||
       text.includes("corridor issues") ||
       text.includes("corridor health") ||
@@ -410,6 +434,12 @@ function inferIntent(role, message) {
 
   if (role === "landlord") {
     if (
+      text.includes("how is the housing system doing") ||
+      text.includes("any operational problems")
+    ) {
+      return "operations_advisor";
+    }
+    if (
       text.includes("what should i fix") ||
       text.includes("what problems should i fix") ||
       text.includes("what problems should i address first") ||
@@ -422,6 +452,13 @@ function inferIntent(role, message) {
   }
 
   if (role === "admin") {
+    if (
+      text.includes("which units need attention") ||
+      text.includes("how is the housing system doing") ||
+      text.includes("any operational problems")
+    ) {
+      return "operations_advisor";
+    }
     if (text.includes("corridor") && text.includes("density")) return "admin_density";
     if (text.includes("highest complaint density")) return "admin_density";
   }
@@ -431,13 +468,13 @@ function inferIntent(role, message) {
 
 function unsupportedMessageForRole(role) {
   if (role === "student") {
-    return "Try: room search, complaint draft, unit health report, corridor issues, unit health summary, or trust explanation.";
+    return "Try: room search, complaint draft, unit health report, operations advisor, corridor issues, unit health summary, or trust explanation.";
   }
   if (role === "landlord") {
-    return "Try: what should I fix, corridor issues, top recurring issues, units at risk, or trust explanation.";
+    return "Try: operations advisor, corridor issues, top recurring issues, units at risk, or trust explanation.";
   }
   if (role === "admin") {
-    return "Try: corridor issues, corridor complaint density, or trust explanation.";
+    return "Try: operations advisor, corridor issues, corridor complaint density, or trust explanation.";
   }
   return "No supported intents for this role.";
 }

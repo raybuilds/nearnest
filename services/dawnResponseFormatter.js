@@ -106,11 +106,36 @@ function formatLandlordRemediationAdvisor(result) {
   return `Here are the highest priority issues to address: Unit ${top.unitId} should be reviewed first for ${String(top.issue || "").toLowerCase()}.`;
 }
 
+function formatOperationsAdvisor(result) {
+  const alerts = Array.isArray(result?.alerts)
+    ? result.alerts
+    : Array.isArray(result?.data)
+      ? result.data
+      : Array.isArray(result?.data?.alerts)
+        ? result.data.alerts
+        : [];
+
+  if (alerts.length === 0) {
+    return result?.message || "I could not prepare operational recommendations right now.";
+  }
+
+  const lead = alerts[0] || {};
+  const units = Array.isArray(lead.units) ? lead.units : [];
+  if (units.length > 0 && units[0]?.unitId) {
+    const top = units[0];
+    const indicators = Array.isArray(top.indicators) ? top.indicators : [];
+    return `Operational Alert: ${lead.title || "Operational review"}. Unit ${top.unitId} should be reviewed first. Indicators: ${indicators.join("; ") || "See advisory details"}. Recommendation: ${top.recommendation || lead.message || "Review current operational signals."}`;
+  }
+
+  return `Operational Alert: ${lead.title || "Operational review"}. ${lead.message || "Review current operational signals."}`;
+}
+
 function formatDawnResponse(intent, result) {
   if (intent === "student_search") return formatStudentSearch(result);
   if (intent === "student_complaint") return formatStudentComplaint(result);
   if (intent === "student_unit_health") return formatStudentUnitHealth(result);
   if (intent === "predict_unit_risk") return formatPredictUnitRisk(result);
+  if (intent === "operations_advisor") return formatOperationsAdvisor(result);
   if (intent === "corridor_behavioral_insight") return formatCorridorBehavioralInsight(result);
   if (intent === "landlord_remediation_advisor") return formatLandlordRemediationAdvisor(result);
   if (intent === "landlord_recurring") return formatLandlordRecurring(result);

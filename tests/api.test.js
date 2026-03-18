@@ -783,11 +783,19 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     });
     assert.equal(studentInsights.status, 200);
     assert.ok(Array.isArray(studentInsights.data.insights));
+    assert.equal(studentInsights.data.role, "student");
     assert.ok(
-      studentInsights.data.insights.includes("Your unit trust score is declining due to recurring complaints.")
+      studentInsights.data.insights.some(
+        (item) => item.type === "risk_alert" && Array.isArray(item.affectedUnits) && item.affectedUnits.includes(safeUnitId)
+      )
     );
     assert.ok(
-      studentInsights.data.insights.includes("You currently have unresolved complaints affecting trust score.")
+      studentInsights.data.insights.some(
+        (item) =>
+          item.type === "trend_alert" &&
+          Array.isArray(item.indicators) &&
+          item.indicators.includes("Multiple SLA breaches detected")
+      )
     );
 
     const landlordInsights = await api("/dawn/insights", {
@@ -795,11 +803,21 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     });
     assert.equal(landlordInsights.status, 200);
     assert.ok(Array.isArray(landlordInsights.data.insights));
+    assert.equal(landlordInsights.data.role, "landlord");
     assert.ok(
-      landlordInsights.data.insights.includes("Recurring complaints detected. Consider operational inspection.")
+      landlordInsights.data.insights.some(
+        (item) =>
+          item.type === "risk_alert" &&
+          Array.isArray(item.affectedUnits) &&
+          item.affectedUnits.includes(safeUnitId)
+      )
     );
     assert.ok(
-      landlordInsights.data.insights.includes("Response delays detected. Faster resolution may improve trust score.")
+      landlordInsights.data.insights.some(
+        (item) =>
+          item.type === "pattern_alert" &&
+          String(item.message).toLowerCase().includes("water complaints are recurring")
+      )
     );
 
     const adminInsights = await api("/dawn/insights", {
@@ -807,8 +825,20 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     });
     assert.equal(adminInsights.status, 200);
     assert.ok(Array.isArray(adminInsights.data.insights));
-    assert.ok(adminInsights.data.insights.includes("Complaint density rising in this corridor."));
-    assert.ok(adminInsights.data.insights.includes("Multiple units approaching suspension threshold."));
+    assert.equal(adminInsights.data.role, "admin");
+    assert.ok(
+      adminInsights.data.insights.some(
+        (item) => item.title === "Rising Complaint Density" && String(item.message).includes(corridorA.name)
+      )
+    );
+    assert.ok(
+      adminInsights.data.insights.some(
+        (item) =>
+          item.type === "risk_alert" &&
+          typeof item.message === "string" &&
+          Array.isArray(item.affectedUnits)
+      )
+    );
 
     const trustExplanation = await api("/dawn/query", {
       method: "POST",
@@ -1161,6 +1191,165 @@ test("predict unit risk surfaces deterministic risk signal details for student h
     assert.ok(response.data.data.riskScore >= 1.7);
   } finally {
     if (unitId) {
+      await prisma.complaint.deleteMany({ where: { unitId } });
+      await prisma.occupancy.deleteMany({ where: { unitId } });
+      await prisma.occupant.deleteMany({ where: { unitId } });
+      await prisma.shortlist.deleteMany({ where: { unitId } });
+      await prisma.auditLog.deleteMany({ where: { unitId } });
+      await prisma.structuralChecklist.deleteMany({ where: { unitId } });
+      await prisma.operationalChecklist.deleteMany({ where: { unitId } });
+      await prisma.unitMedia.deleteMany({ where: { unitId } });
+      await prisma.unit.deleteMany({ where: { id: unitId } });
+    }
+    if (studentAccount) {
+      await prisma.vDPEntry.deleteMany({ where: { studentId: studentAccount.student.id } });
+      await prisma.student.deleteMany({ where: { id: studentAccount.student.id } });
+      await prisma.user.deleteMany({ where: { id: studentAccount.user.id } });
+    }
+    if (landlordAccount) {
+      await prisma.landlord.deleteMany({ where: { id: landlordAccount.landlord.id } });
+      await prisma.user.deleteMany({ where: { id: landlordAccount.user.id } });
+    }
+    if (corridorId) {
+      await prisma.corridor.deleteMany({ where: { id: corridorId } });
+    }
+  }
+});
+
+test("operations advisor returns deterministic landlord recommendations", async () => {
+  const tag = createTag("ops-advisor");
+  const password = "pass123";
+
+  let corridorId = null;
+  let studentAccount = null;
+  let landlordAccount = null;
+  let unitAId = null;
+  let unitBId = null;
+
+  try {
+    const corridor = await prisma.corridor.create({
+      data: { name: `${tag}-corridor`, cityCode: 12 },
+    });
+    corridorId = corridor.id;
+
+    landlordAccount = await createLandlord({
+      name: `${tag}-landlord`,
+      email: `${tag}-landlord@example.test`,
+      password,
+    });
+    studentAccount = await createStudent({
+      name: `${tag}-student`,
+      email: `${tag}-student@example.test`,
+      password,
+      corridorId,
+    });
+
+    await prisma.vDPEntry.create({
+      data: {
+        studentId: studentAccount.student.id,
+        corridorId,
+        intake: "2026A",
+        verified: true,
+        status: "verified",
+      },
+    });
+
+    unitAId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 54,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    unitBId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 66,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    const now = Date.now();
+    const seededComplaints = [
+      { unitId: unitAId, createdOffsetDays: 2, resolved: false, late: false, severity: 4, incidentType: "water" },
+      { unitId: unitAId, createdOffsetDays: 4, resolved: false, late: false, severity: 4, incidentType: "water" },
+      { unitId: unitAId, createdOffsetDays: 7, resolved: true, late: true, severity: 4, incidentType: "electrical" },
+      { unitId: unitBId, createdOffsetDays: 5, resolved: true, late: true, severity: 3, incidentType: "water" },
+      { unitId: unitBId, createdOffsetDays: 11, resolved: false, late: false, severity: 3, incidentType: "common_area" },
+    ];
+
+    for (const item of seededComplaints) {
+      const createdAt = new Date(now - item.createdOffsetDays * 24 * 60 * 60 * 1000);
+      const slaDeadline = new Date(createdAt.getTime() + 48 * 60 * 60 * 1000);
+      const resolvedAt = item.resolved
+        ? new Date(slaDeadline.getTime() + (item.late ? 6 : -6) * 60 * 60 * 1000)
+        : null;
+
+      await prisma.complaint.create({
+        data: {
+          unitId: item.unitId,
+          studentId: studentAccount.student.id,
+          severity: item.severity,
+          message: `${tag}-${item.incidentType}`,
+          incidentType: item.incidentType,
+          incidentFlag: true,
+          createdAt,
+          slaDeadline,
+          resolved: item.resolved,
+          resolvedAt,
+        },
+      });
+    }
+
+    const landlordLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-landlord@example.test`, password },
+    });
+    assert.equal(landlordLogin.status, 200);
+
+    const response = await api("/dawn/query", {
+      method: "POST",
+      token: landlordLogin.data.token,
+      body: { message: "Any operational problems?" },
+    });
+
+    assert.equal(response.status, 200);
+    assert.equal(response.data.intent, "operations_advisor");
+    assert.equal(response.data.message, "Here is the current operational advisory summary:");
+    assert.ok(response.data.assistant.includes("Operational Alert:"));
+    assert.ok(Array.isArray(response.data.alerts));
+    assert.ok(Array.isArray(response.data.data));
+    assert.ok(
+      response.data.data.some(
+        (item) => item.title === "Units requiring attention" && Array.isArray(item.units) && item.units[0]?.unitId === unitAId
+      )
+    );
+    assert.ok(
+      response.data.data.some(
+        (item) => item.title === "SLA performance issues" && Array.isArray(item.affectedUnits) && item.affectedUnits.includes(unitAId)
+      )
+    );
+    assert.ok(
+      response.data.data.some(
+        (item) => item.title === "Recurring incident patterns" && String(item.message).includes("complaint types are repeating")
+      )
+    );
+  } finally {
+    for (const unitId of [unitAId, unitBId]) {
+      if (!unitId) continue;
       await prisma.complaint.deleteMany({ where: { unitId } });
       await prisma.occupancy.deleteMany({ where: { unitId } });
       await prisma.occupant.deleteMany({ where: { unitId } });

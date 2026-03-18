@@ -175,6 +175,9 @@ function InsightCardsView({ insights }) {
               ))}
             </div>
           )}
+          {insight.recommendation && (
+            <p className="mt-2 text-[11px] text-slate-700">Recommendation: {formatValue(insight.recommendation)}</p>
+          )}
           {Array.isArray(insight.affectedUnits) && insight.affectedUnits.length > 0 && (
             <p className="mt-2 text-[11px] text-slate-600">Affected units: {insight.affectedUnits.join(", ")}</p>
           )}
@@ -370,11 +373,62 @@ export default function DawnChat() {
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState([]);
   const [pendingAction, setPendingAction] = useState(null);
+  const [insightsLoaded, setInsightsLoaded] = useState(false);
 
   useEffect(() => {
     const currentRole = localStorage.getItem("role") || "";
     setRole(currentRole);
   }, []);
+
+  useEffect(() => {
+    setInsightsLoaded(false);
+  }, [role]);
+
+  useEffect(() => {
+    if (!open || !role || insightsLoaded) return;
+
+    let active = true;
+
+    (async () => {
+      try {
+        const payload = await apiRequest("/dawn/insights");
+        if (!active) return;
+
+        const cards = Array.isArray(payload?.insights) ? payload.insights : [];
+        if (cards.length > 0) {
+          setMessages((prev) => {
+            const retained = prev.filter(
+              (item) => item.meta !== "proactive_insights_intro" && item.meta !== "proactive_insights_cards"
+            );
+
+            return [
+              ...retained,
+              {
+                type: "assistant",
+                text: "Here are your proactive Dawn insights.",
+                meta: "proactive_insights_intro",
+              },
+              {
+                type: "data",
+                data: cards,
+                meta: "proactive_insights_cards",
+              },
+            ];
+          });
+        }
+      } catch (_) {
+        if (!active) return;
+      } finally {
+        if (active) {
+          setInsightsLoaded(true);
+        }
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [insightsLoaded, open, role]);
 
   const greeting = useMemo(() => {
     if (role === "student") return "Dawn: Ask about rooms, hidden reasons, or submit a complaint.";
