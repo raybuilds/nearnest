@@ -1,138 +1,154 @@
 "use client";
 
-import { useState } from "react";
-import { useEffect } from "react";
-import { apiRequest } from "@/lib/api";
+import { useMemo, useState } from "react";
+import { mockUnits } from "@/lib/mockData";
+import styles from "./ComplaintForm.module.css";
+
+const categories = ["Plumbing", "Electrical", "Structural", "Other"];
+const priorities = ["Low", "Medium", "High"];
 
 export default function ComplaintForm() {
-  const [unitId, setUnitId] = useState("");
-  const [occupantId, setOccupantId] = useState("");
-  const [studentId, setStudentId] = useState("");
-  const [severity, setSeverity] = useState("1");
-  const [incidentType, setIncidentType] = useState("");
-  const [complaintText, setComplaintText] = useState("");
-  const [resolveComplaintId, setResolveComplaintId] = useState("");
-  const [statusMessage, setStatusMessage] = useState("");
-  const [error, setError] = useState("");
-  const [submittingComplaint, setSubmittingComplaint] = useState(false);
-  const [resolvingComplaint, setResolvingComplaint] = useState(false);
-  const [role, setRole] = useState("");
+  const [form, setForm] = useState({
+    unitId: mockUnits[0].unitId,
+    category: categories[0],
+    priority: priorities[1],
+    description: "",
+    fileName: "",
+  });
+  const [loadingDraft, setLoadingDraft] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [result, setResult] = useState(null);
 
-  useEffect(() => {
-    setStudentId(localStorage.getItem("studentId") || "");
-    setRole(localStorage.getItem("role") || "");
-  }, []);
+  const selectedUnit = useMemo(
+    () => mockUnits.find((unit) => unit.unitId === form.unitId) || mockUnits[0],
+    [form.unitId]
+  );
 
-  async function submitComplaint(e) {
-    e.preventDefault();
-    setStatusMessage("");
-    setError("");
-    setSubmittingComplaint(true);
+  function updateField(field, value) {
+    setForm((prev) => ({ ...prev, [field]: value }));
+  }
+
+  async function requestDraft() {
+    setLoadingDraft(true);
+    setResult(null);
     try {
-      const result = await apiRequest("/complaint", {
+      const response = await fetch("/api/dawn/draft-complaint", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          unitId: unitId ? Number(unitId) : undefined,
-          occupantId: occupantId.trim() || undefined,
-          studentId: Number(studentId),
-          severity: Number(severity),
-          incidentType: incidentType || undefined,
-          message: complaintText.trim() || undefined,
+          unitId: form.unitId,
+          category: form.category,
+          priority: form.priority,
         }),
       });
-      setStatusMessage(`Complaint submitted. New trustScore: ${result.trustScore}`);
-      setComplaintText("");
-      setUnitId("");
-      setOccupantId("");
-    } catch (err) {
-      setError(err.message);
+      const payload = await response.json();
+      updateField("description", payload.draft || "");
     } finally {
-      setSubmittingComplaint(false);
+      setLoadingDraft(false);
     }
   }
 
-  async function resolveComplaint(e) {
-    e.preventDefault();
-    setStatusMessage("");
-    setError("");
-    setResolvingComplaint(true);
+  async function submitComplaint(event) {
+    event.preventDefault();
+    setSubmitting(true);
     try {
-      const result = await apiRequest(`/complaint/${Number(resolveComplaintId)}/resolve`, {
-        method: "PATCH",
+      const response = await fetch("/api/complaints", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
       });
-      setStatusMessage(`Complaint resolved. New trustScore: ${result.trustScore}`);
-    } catch (err) {
-      setError(err.message);
+      const payload = await response.json();
+      setResult(payload);
     } finally {
-      setResolvingComplaint(false);
+      setSubmitting(false);
     }
   }
 
   return (
-    <section className="space-y-4 rounded-xl border bg-white p-4 shadow-sm">
-      <h2 className="text-xl font-semibold">Complaints</h2>
-
-      <form onSubmit={submitComplaint} className="grid gap-2 md:grid-cols-6">
-        <input
-          className="rounded border p-2"
-          placeholder="unitId"
-          value={unitId}
-          onChange={(e) => setUnitId(e.target.value)}
-        />
-        <input
-          className="rounded border p-2"
-          placeholder="occupantId (12 digits)"
-          value={occupantId}
-          onChange={(e) => setOccupantId(e.target.value)}
-        />
-        <input
-          className="rounded border p-2"
-          placeholder="studentId"
-          value={studentId}
-          readOnly
-        />
-        <input
-          className="rounded border p-2"
-          placeholder="severity (1-5)"
-          value={severity}
-          onChange={(e) => setSeverity(e.target.value)}
-        />
-        <select className="rounded border p-2" value={incidentType} onChange={(e) => setIncidentType(e.target.value)}>
-          <option value="">Incident type (optional)</option>
-          <option value="safety">Safety</option>
-          <option value="injury">Injury</option>
-          <option value="fire">Fire</option>
-          <option value="harassment">Harassment</option>
-          <option value="other">Other</option>
-        </select>
-        <textarea
-          className="rounded border p-2 md:col-span-5"
-          placeholder="Describe the complaint (optional)"
-          value={complaintText}
-          onChange={(e) => setComplaintText(e.target.value)}
-          maxLength={1200}
-        />
-        <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60" type="submit" disabled={submittingComplaint}>
-          {submittingComplaint ? "Submitting..." : "Submit Complaint"}
+    <form className={styles.form} onSubmit={submitComplaint}>
+      <div className={styles.header}>
+        <div>
+          <p className={styles.kicker}>Dawn Assisted Intake</p>
+          <h3 className={styles.title}>Create a complaint</h3>
+        </div>
+        <button className={styles.draftButton} onClick={requestDraft} type="button">
+          {loadingDraft ? "Drafting..." : "Dawn AI Draft"}
         </button>
-      </form>
+      </div>
 
-      {(role === "admin" || role === "landlord") && (
-        <form onSubmit={resolveComplaint} className="grid gap-2 md:grid-cols-3">
-          <input
-            className="rounded border p-2 md:col-span-2"
-            placeholder="complaintId"
-            value={resolveComplaintId}
-            onChange={(e) => setResolveComplaintId(e.target.value)}
-          />
-          <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60" type="submit" disabled={resolvingComplaint}>
-            {resolvingComplaint ? "Resolving..." : "Resolve Complaint"}
-          </button>
-        </form>
+      <div className={styles.grid}>
+        <label className={styles.field}>
+          <span>Unit</span>
+          <select className="selectField" value={form.unitId} onChange={(event) => updateField("unitId", event.target.value)}>
+            {mockUnits.map((unit) => (
+              <option key={unit.unitId} value={unit.unitId}>
+                {unit.unitId} - {unit.name}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className={styles.field}>
+          <span>Category</span>
+          <select className="selectField" value={form.category} onChange={(event) => updateField("category", event.target.value)}>
+            {categories.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className={styles.field}>
+          <span>Priority</span>
+          <select className="selectField" value={form.priority} onChange={(event) => updateField("priority", event.target.value)}>
+            {priorities.map((item) => (
+              <option key={item} value={item}>
+                {item}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <label className={styles.field}>
+          <span>File upload</span>
+          <label className={styles.upload}>
+            <input
+              className={styles.hiddenInput}
+              type="file"
+              onChange={(event) => updateField("fileName", event.target.files?.[0]?.name || "")}
+            />
+            <span>{form.fileName || "Attach image or report"}</span>
+          </label>
+        </label>
+      </div>
+
+      <label className={styles.field}>
+        <span>Description</span>
+        <textarea
+          className="textAreaField"
+          placeholder={`Describe the issue in ${selectedUnit.name}...`}
+          value={form.description}
+          onChange={(event) => updateField("description", event.target.value)}
+        />
+      </label>
+
+      <div className={styles.footer}>
+        <div className={styles.context}>
+          <strong>{selectedUnit.unitId}</strong>
+          <span>{selectedUnit.address}</span>
+        </div>
+        <button className={styles.submitButton} disabled={submitting} type="submit">
+          {submitting ? <span className={styles.spinner} /> : null}
+          {submitting ? "Submitting..." : "Submit Complaint"}
+        </button>
+      </div>
+
+      {result && (
+        <div className={styles.result}>
+          Complaint {result.id} submitted for {form.unitId}. Dawn has queued it for review.
+        </div>
       )}
-
-      {statusMessage && <p className="rounded bg-green-50 px-3 py-2 text-sm text-green-700">{statusMessage}</p>}
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-    </section>
+    </form>
   );
 }

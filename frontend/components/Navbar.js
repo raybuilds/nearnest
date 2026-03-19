@@ -1,92 +1,82 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
+import { usePathname } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
+import styles from "./Navbar.module.css";
+
+const navItems = [
+  { href: "/dashboard", label: "Dashboard" },
+  { href: "/units", label: "Units" },
+  { href: "/complaints", label: "Complaints" },
+  { href: "/reports", label: "Reports" },
+];
 
 export default function Navbar() {
-  const [role, setRole] = useState("");
+  const pathname = usePathname();
+  const [scrolled, setScrolled] = useState(false);
+  const [role, setRole] = useState("admin");
+  const [userName, setUserName] = useState("Rohit Yadav");
 
   useEffect(() => {
-    setRole(localStorage.getItem("role") || "");
+    const syncIdentity = () => {
+      setRole(localStorage.getItem("role") || "admin");
+      setUserName(localStorage.getItem("userName") || "Rohit Yadav");
+    };
+
+    syncIdentity();
+    window.addEventListener("storage", syncIdentity);
+    return () => window.removeEventListener("storage", syncIdentity);
   }, []);
 
-  function logout() {
-    localStorage.removeItem("token");
-    localStorage.removeItem("role");
-    localStorage.removeItem("userId");
-    localStorage.removeItem("studentId");
-    localStorage.removeItem("landlordId");
-    localStorage.removeItem("corridorId");
-    window.location.href = "/login";
-  }
+  useEffect(() => {
+    const onScroll = () => setScrolled(window.scrollY > 12);
+    onScroll();
+    window.addEventListener("scroll", onScroll);
+    return () => window.removeEventListener("scroll", onScroll);
+  }, []);
+
+  const initials = useMemo(
+    () =>
+      userName
+        .split(" ")
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((chunk) => chunk[0]?.toUpperCase())
+        .join(""),
+    [userName]
+  );
 
   return (
-    <nav className="flex items-center justify-between">
-      <Link href="/" className="text-lg font-bold tracking-tight text-slate-900">
-        NearNest
-      </Link>
-      <div className="flex items-center gap-2">
-        {!role && (
-          <>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/login">
-              Login
-            </Link>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/register">
-              Register
-            </Link>
-          </>
-        )}
-        {role === "student" && (
-          <>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/dashboard">
-              Dashboard
-            </Link>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/profile">
-              Profile
-            </Link>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/complaints">
-              Complaints
-            </Link>
-          </>
-        )}
-        {role === "landlord" && (
-          <>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/dashboard">
-              Landlord
-            </Link>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/profile">
-              Profile
-            </Link>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/complaints">
-              Complaints
-            </Link>
-          </>
-        )}
-        {role === "admin" && (
-          <>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/dashboard">
-              Dashboard
-            </Link>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/profile">
-              Profile
-            </Link>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/complaints">
-              Complaints
-            </Link>
-            <Link className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" href="/admin">
-              Admin
-            </Link>
-          </>
-        )}
-        {role && (
-          <>
-            <span className="rounded-full bg-slate-100 px-2 py-1 text-xs font-semibold uppercase text-slate-700">{role}</span>
-            <button className="rounded-md px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-100" onClick={logout} type="button">
-              Logout
-            </button>
-          </>
-        )}
+    <header className={`${styles.header} ${scrolled ? styles.headerScrolled : ""}`}>
+      <div className={styles.inner}>
+        <Link className={styles.logo} href="/">
+          <span className={styles.logoDot} />
+          <span className={styles.logoText}>Dawn</span>
+        </Link>
+
+        <nav className={styles.nav}>
+          {navItems.map((item) => {
+            const active = pathname === item.href || pathname.startsWith(`${item.href}/`);
+            return (
+              <Link key={item.href} className={`${styles.navLink} ${active ? styles.navLinkActive : ""}`} href={item.href}>
+                {item.label}
+              </Link>
+            );
+          })}
+        </nav>
+
+        <div className={styles.actions}>
+          <div className={styles.badgeCluster}>
+            <span className={styles.notification}>7</span>
+            <div>
+              <p className={styles.roleLabel}>{role}</p>
+              <p className={styles.userLabel}>{userName}</p>
+            </div>
+          </div>
+          <div className={styles.avatar}>{initials || "D"}</div>
+        </div>
       </div>
-    </nav>
+    </header>
   );
 }

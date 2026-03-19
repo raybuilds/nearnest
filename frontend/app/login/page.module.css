@@ -1,0 +1,65 @@
+.page {
+  position: relative;
+  min-height: calc(100vh - 170px);
+  display: grid;
+  place-items: center;
+}
+
+.backdrop {
+  position: absolute;
+  inset: 0;
+  border-radius: 32px;
+  background:
+    radial-gradient(circle at top left, rgba(79, 127, 255, 0.18), transparent 28%),
+    radial-gradient(circle at bottom right, rgba(123, 92, 240, 0.18), transparent 24%),
+    radial-gradient(circle at center, rgba(0, 212, 170, 0.08), transparent 20%);
+  animation: fadeUp 0.8s ease both;
+}
+
+.card {
+  position: relative;
+  z-index: 1;
+  width: min(460px, 100%);
+  display: grid;
+  gap: 16px;
+  padding: 34px;
+  border-radius: 24px;
+  background: rgba(11, 18, 32, 0.72);
+  border: 1px solid var(--color-border);
+  box-shadow: var(--shadow-soft);
+  animation: fadeUp 0.75s ease both;
+}
+
+.logo {
+  display: grid;
+  place-items: center;
+  width: 56px;
+  height: 56px;
+  border-radius: 18px;
+  background: var(--gradient-primary);
+  color: #eef3ff;
+  font-family: var(--font-heading), serif;
+  font-size: 1.8rem;
+}
+
+.card h1,
+.card p {
+  margin: 0;
+}
+
+.card p {
+  color: var(--color-text-muted);
+}
+
+.card label {
+  display: grid;
+  gap: 10px;
+}
+
+.card span {
+  color: var(--color-text-soft);
+}
+
+.meta a {
+  color: var(--color-primary);
+}
