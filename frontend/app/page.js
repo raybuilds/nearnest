@@ -2,8 +2,14 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { dashboardStats } from "@/lib/mockData";
 import styles from "./page.module.css";
+
+const dashboardStats = [
+  { label: "Trust visibility", value: 50, suffix: "+", delta: "Minimum score for student visibility" },
+  { label: "Complaint SLA", value: 48, suffix: "h", delta: "Deadline tracked on every complaint" },
+  { label: "Audit triggers", value: 3, suffix: "", delta: "Capacity, trust, and complaint governance" },
+  { label: "User roles", value: 3, suffix: "", delta: "Student, landlord, and admin workflows" },
+];
 
 const featureCards = [
   {

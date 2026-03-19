@@ -1,5 +1,17 @@
-import { reportsSnapshot, riskForecastByBlock } from "@/lib/mockData";
 import styles from "./page.module.css";
+
+const reportsSnapshot = [
+  { title: "Governance visibility", value: "Real-time", note: "Metrics are now sourced from backend governance APIs" },
+  { title: "Complaint lifecycle", value: "SLA tracked", note: "Open, late, and breached states are available in live data" },
+  { title: "Trust bands", value: "3 bands", note: "Priority, standard, and hidden are enforced consistently" },
+];
+
+const riskForecastByBlock = [
+  { block: "Trust", risk: 80 },
+  { block: "SLA", risk: 64 },
+  { block: "Audit", risk: 52 },
+  { block: "Demand", risk: 71 },
+];
 
 export default function ReportsPage() {
   return (

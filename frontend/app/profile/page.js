@@ -1,12 +1,58 @@
 "use client";
 
-import { useState } from "react";
-import { profileRecord } from "@/lib/mockData";
+import { useEffect, useState } from "react";
+import { getProfile } from "@/lib/api";
 import styles from "./page.module.css";
 
+const defaultProfile = {
+  name: "",
+  email: "",
+  phone: "",
+  initials: "NN",
+  notifications: {
+    escalations: true,
+    riskDigests: true,
+    residentMessages: false,
+  },
+};
+
 export default function ProfilePage() {
-  const [profile, setProfile] = useState(profileRecord);
+  const [profile, setProfile] = useState(defaultProfile);
   const [saved, setSaved] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadProfile() {
+      try {
+        const payload = await getProfile();
+        const identity = payload?.identity || {};
+        const name = identity.name || "";
+        const email = identity.email || JSON.parse(localStorage.getItem("user") || "{}")?.email || "";
+
+        if (!active) return;
+        setProfile((prev) => ({
+          ...prev,
+          name,
+          email,
+          phone: identity.occupantIdDisplay || prev.phone,
+          initials: name
+            .split(" ")
+            .filter(Boolean)
+            .slice(0, 2)
+            .map((part) => part[0]?.toUpperCase() || "")
+            .join("") || "NN",
+        }));
+      } catch {
+        // Keep local editable defaults if profile loading fails.
+      }
+    }
+
+    loadProfile();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   function update(field, value) {
     setSaved(false);

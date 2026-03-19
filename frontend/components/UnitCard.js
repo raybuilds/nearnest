@@ -3,12 +3,19 @@ import styles from "./UnitCard.module.css";
 
 function toneForStatus(status) {
   const normalized = String(status || "").toLowerCase();
-  if (normalized === "occupied") return styles.statusSuccess;
-  if (normalized === "vacant") return styles.statusNeutral;
+  if (normalized === "approved" || normalized === "occupied") return styles.statusSuccess;
+  if (normalized === "vacant" || normalized === "draft") return styles.statusNeutral;
   return styles.statusWarning;
 }
 
-export default function UnitCard({ unitId, name, address, status, bhkType, openIssues }) {
+export default function UnitCard(props) {
+  const unitId = props.unitId || props.id;
+  const name = props.name || `Unit ${unitId}`;
+  const address = props.address || `${props.distanceKm ?? 0} km away`;
+  const status = props.status;
+  const bhkType = props.bhkType || props.occupancyType || "Unit";
+  const openIssues = props.openIssues ?? props.activeComplaints ?? 0;
+
   return (
     <Link className={styles.card} href={`/unit/${unitId}`}>
       <div className={styles.media}>

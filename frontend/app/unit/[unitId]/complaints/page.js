@@ -1,8 +1,55 @@
-import { getComplaintsByUnit } from "@/lib/mockData";
+"use client";
+
+import { useEffect, useState } from "react";
+import { getUnitComplaints } from "@/lib/api";
 import styles from "./page.module.css";
 
 export default function UnitComplaintsPage({ params }) {
-  const complaints = getComplaintsByUnit(params.unitId);
+  const [complaints, setComplaints] = useState([]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadComplaints() {
+      try {
+        const payload = await getUnitComplaints(params.unitId);
+        let nextComplaints = [];
+
+        if (Array.isArray(payload?.complaints)) {
+          nextComplaints = payload.complaints.map((complaint) => ({
+            id: complaint.id,
+            category: complaint.incidentType || "other",
+            status: complaint.slaStatus || (complaint.resolved ? "resolved" : "open"),
+            priority: complaint.severity >= 4 ? "High" : complaint.severity === 3 ? "Medium" : "Low",
+            createdAt: complaint.createdAt,
+            summary: complaint.message || "No summary provided.",
+          }));
+        } else if (Array.isArray(payload?.ownComplaints)) {
+          nextComplaints = payload.ownComplaints.map((complaint) => ({
+            id: complaint.id,
+            category: complaint.incidentType || "other",
+            status: complaint.slaStatus || (complaint.resolved ? "resolved" : "open"),
+            priority: complaint.severity >= 4 ? "High" : complaint.severity === 3 ? "Medium" : "Low",
+            createdAt: complaint.createdAt,
+            summary: complaint.message || "No summary provided.",
+          }));
+        }
+
+        if (active) {
+          setComplaints(nextComplaints);
+        }
+      } catch {
+        if (active) {
+          setComplaints([]);
+        }
+      }
+    }
+
+    loadComplaints();
+    return () => {
+      active = false;
+    };
+  }, [params.unitId]);
 
   return (
     <div className={`pageShell ${styles.page}`}>

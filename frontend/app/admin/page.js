@@ -1,13 +1,52 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { adminUsers } from "@/lib/mockData";
+import { useEffect, useMemo, useState } from "react";
+import { getAdminUnits, getCorridors } from "@/lib/api";
 import styles from "./page.module.css";
 
 export default function AdminPage() {
   const [selection, setSelection] = useState([]);
-  const [users, setUsers] = useState(adminUsers);
+  const [users, setUsers] = useState([]);
   const allSelected = useMemo(() => selection.length === users.length, [selection, users.length]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadAdminRows() {
+      try {
+        const corridors = await getCorridors();
+        const firstCorridorId = Array.isArray(corridors) ? corridors[0]?.id : null;
+        if (!firstCorridorId) {
+          if (active) setUsers([]);
+          return;
+        }
+
+        const units = await getAdminUnits(firstCorridorId);
+        const nextUsers = Array.isArray(units)
+          ? units.map((unit) => ({
+              id: unit.id,
+              name: `Unit ${unit.id}`,
+              email: `corridor-${unit.corridorId}@nearnest.local`,
+              role: unit.status,
+              status: unit.auditRequired ? "flagged" : "active",
+            }))
+          : [];
+
+        if (active) {
+          setUsers(nextUsers);
+        }
+      } catch {
+        if (active) {
+          setUsers([]);
+        }
+      }
+    }
+
+    loadAdminRows();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   function toggleUser(id) {
     setSelection((prev) => (prev.includes(id) ? prev.filter((item) => item !== id) : [...prev, id]));

@@ -1,15 +1,16 @@
 "use client";
 
-import { useMemo, useState } from "react";
-import { mockUnits } from "@/lib/mockData";
+import { useEffect, useMemo, useState } from "react";
+import { createComplaint, getLandlordUnits, getProfile, getUnits, queryDawn } from "@/lib/api";
 import styles from "./ComplaintForm.module.css";
 
 const categories = ["Plumbing", "Electrical", "Structural", "Other"];
 const priorities = ["Low", "Medium", "High"];
 
 export default function ComplaintForm() {
+  const [units, setUnits] = useState([]);
   const [form, setForm] = useState({
-    unitId: mockUnits[0].unitId,
+    unitId: "",
     category: categories[0],
     priority: priorities[1],
     description: "",
@@ -18,11 +19,63 @@ export default function ComplaintForm() {
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const fallbackUnit = useMemo(() => ({ unitId: "", name: "this unit", address: "" }), []);
 
   const selectedUnit = useMemo(
-    () => mockUnits.find((unit) => unit.unitId === form.unitId) || mockUnits[0],
-    [form.unitId]
+    () => units.find((unit) => String(unit.unitId) === String(form.unitId)) || units[0] || fallbackUnit,
+    [fallbackUnit, form.unitId, units]
   );
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadUnits() {
+      try {
+        const role = localStorage.getItem("role");
+        let nextUnits = [];
+
+        if (role === "student") {
+          const profile = await getProfile();
+          const corridorId = profile?.identity?.corridor?.id;
+          if (corridorId) {
+            const response = await getUnits(corridorId);
+            nextUnits = Array.isArray(response)
+              ? response.map((unit) => ({
+                  unitId: String(unit.id),
+                  name: `Unit ${unit.id}`,
+                  address: `${Number(unit.distanceKm || 0).toFixed(1)} km away`,
+                }))
+              : [];
+          }
+        } else if (role === "landlord") {
+          const response = await getLandlordUnits();
+          nextUnits = Array.isArray(response)
+            ? response.map((unit) => ({
+                unitId: String(unit.id),
+                name: `Unit ${unit.id}`,
+                address: `${unit.status || "unknown"} status`,
+              }))
+            : [];
+        }
+
+        if (!active) return;
+        setUnits(nextUnits);
+        setForm((current) => ({
+          ...current,
+          unitId: current.unitId || nextUnits[0]?.unitId || "",
+        }));
+      } catch {
+        if (active) {
+          setUnits([]);
+        }
+      }
+    }
+
+    loadUnits();
+    return () => {
+      active = false;
+    };
+  }, []);
 
   function updateField(field, value) {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -32,17 +85,11 @@ export default function ComplaintForm() {
     setLoadingDraft(true);
     setResult(null);
     try {
-      const response = await fetch("/api/dawn/draft-complaint", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          unitId: form.unitId,
-          category: form.category,
-          priority: form.priority,
-        }),
+      const payload = await queryDawn({
+        message: `Draft a complaint for unit ${form.unitId || "unknown"} about ${form.category} with ${form.priority} priority`,
+        intent: "student_complaint",
       });
-      const payload = await response.json();
-      updateField("description", payload.draft || "");
+      updateField("description", payload?.assistant || form.description);
     } finally {
       setLoadingDraft(false);
     }
@@ -52,12 +99,13 @@ export default function ComplaintForm() {
     event.preventDefault();
     setSubmitting(true);
     try {
-      const response = await fetch("/api/complaints", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
+      const severity =
+        form.priority === "Low" ? 2 : form.priority === "Medium" ? 3 : 5;
+      const payload = await createComplaint({
+        unitId: Number(form.unitId),
+        severity,
+        message: form.description || null,
       });
-      const payload = await response.json();
       setResult(payload);
     } finally {
       setSubmitting(false);
@@ -80,7 +128,7 @@ export default function ComplaintForm() {
         <label className={styles.field}>
           <span>Unit</span>
           <select className="selectField" value={form.unitId} onChange={(event) => updateField("unitId", event.target.value)}>
-            {mockUnits.map((unit) => (
+            {units.map((unit) => (
               <option key={unit.unitId} value={unit.unitId}>
                 {unit.unitId} - {unit.name}
               </option>
@@ -146,7 +194,7 @@ export default function ComplaintForm() {
 
       {result && (
         <div className={styles.result}>
-          Complaint {result.id} submitted for {form.unitId}. Dawn has queued it for review.
+          Complaint {result?.complaint?.id || result?.id} submitted for {form.unitId}. Dawn has queued it for review.
         </div>
       )}
     </form>

@@ -1,23 +1,63 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ComplaintForm from "@/components/ComplaintForm";
-import { mockComplaints } from "@/lib/mockData";
+import { getComplaints } from "@/lib/api";
 import styles from "./page.module.css";
 
 export default function ComplaintsPage() {
+  const [complaints, setComplaints] = useState([]);
   const [filters, setFilters] = useState({ unit: "all", status: "all", category: "all" });
   const [selected, setSelected] = useState(null);
 
+  useEffect(() => {
+    let active = true;
+
+    async function loadComplaints() {
+      try {
+        const payload = await getComplaints();
+        const nextComplaints = Array.isArray(payload?.complaints)
+          ? payload.complaints.map((complaint) => ({
+              id: complaint.id,
+              unitId: String(complaint.unitId),
+              category: complaint.incidentType || "other",
+              status: complaint.slaStatus || (complaint.resolved ? "resolved" : "open"),
+              priority: complaint.severity >= 4 ? "High" : complaint.severity === 3 ? "Medium" : "Low",
+              createdAt: complaint.createdAt,
+              summary: complaint.message || "No summary provided.",
+              description: complaint.message || "No description provided.",
+              timeline: [
+                { time: String(complaint.createdAt || ""), label: "Complaint submitted" },
+                complaint.resolvedAt ? { time: String(complaint.resolvedAt), label: "Complaint resolved" } : null,
+              ].filter(Boolean),
+            }))
+          : [];
+
+        if (active) {
+          setComplaints(nextComplaints);
+        }
+      } catch {
+        if (active) {
+          setComplaints([]);
+        }
+      }
+    }
+
+    loadComplaints();
+    return () => {
+      active = false;
+    };
+  }, []);
+
   const filtered = useMemo(
     () =>
-      mockComplaints.filter((complaint) => {
+      complaints.filter((complaint) => {
         if (filters.unit !== "all" && complaint.unitId !== filters.unit) return false;
         if (filters.status !== "all" && complaint.status !== filters.status) return false;
-        if (filters.category !== "all" && complaint.category !== filters.category) return false;
+        if (filters.category !== "all" && String(complaint.category).toLowerCase() !== String(filters.category).toLowerCase()) return false;
         return true;
       }),
-    [filters]
+    [complaints, filters]
   );
 
   return (
@@ -30,7 +70,7 @@ export default function ComplaintsPage() {
       <section className={styles.filters}>
         <select className="selectField" value={filters.unit} onChange={(event) => setFilters((prev) => ({ ...prev, unit: event.target.value }))}>
           <option value="all">All units</option>
-          {Array.from(new Set(mockComplaints.map((item) => item.unitId))).map((unitId) => (
+          {Array.from(new Set(complaints.map((item) => item.unitId))).map((unitId) => (
             <option key={unitId} value={unitId}>
               {unitId}
             </option>
@@ -44,10 +84,10 @@ export default function ComplaintsPage() {
         </select>
         <select className="selectField" value={filters.category} onChange={(event) => setFilters((prev) => ({ ...prev, category: event.target.value }))}>
           <option value="all">All categories</option>
-          <option value="Plumbing">Plumbing</option>
-          <option value="Electrical">Electrical</option>
-          <option value="Structural">Structural</option>
-          <option value="Other">Other</option>
+          <option value="water">water</option>
+          <option value="electrical">electrical</option>
+          <option value="safety">safety</option>
+          <option value="other">other</option>
         </select>
       </section>
 

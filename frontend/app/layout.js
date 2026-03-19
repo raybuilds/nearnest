@@ -1,30 +1,36 @@
-import { DM_Sans, Playfair_Display } from "next/font/google";
+import { Lora, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 import DawnChat from "@/components/DawnChat";
 
-const bodyFont = DM_Sans({
+const displayFont = Lora({
   subsets: ["latin"],
-  variable: "--font-body",
+  weight: ["500", "600", "700"],
 });
 
-const headingFont = Playfair_Display({
+const bodyFont = Plus_Jakarta_Sans({
   subsets: ["latin"],
-  variable: "--font-heading",
+  weight: ["400", "500", "600", "700"],
 });
 
 export const metadata = {
-  title: "Dawn Property OS",
-  description: "Intelligent property management, powered by Dawn AI",
+  title: "NearNest",
+  description: "Verified student housing with trust, transparency, and Dawn AI",
 };
 
 export default function RootLayout({ children }) {
   return (
-    <html lang="en">
-      <body className={`${bodyFont.variable} ${headingFont.variable}`}>
-        <div className="siteShell">
+    <html
+      lang="en"
+      style={{
+        "--font-display": displayFont.style.fontFamily,
+        "--font-body": bodyFont.style.fontFamily,
+      }}
+    >
+      <body>
+        <div className="app-shell">
           <Navbar />
-          <main className="siteMain">{children}</main>
+          <main className="app-main fade-up">{children}</main>
           <DawnChat />
         </div>
       </body>
