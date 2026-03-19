@@ -1,24 +1,33 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { createComplaint, getLandlordUnits, getProfile, getUnits, queryDawn } from "@/lib/api";
+import { createComplaint, getLandlordUnits, getProfile, getUnits, queryDawn, resolveComplaint } from "@/lib/api";
 import styles from "./ComplaintForm.module.css";
 
-const categories = ["Plumbing", "Electrical", "Structural", "Other"];
-const priorities = ["Low", "Medium", "High"];
+const incidentTypes = ["", "safety", "injury", "fire", "harassment", "water", "common_area", "electrical", "other"];
+const severityOptions = [1, 2, 3, 4, 5];
 
-export default function ComplaintForm() {
+function severityTone(severity) {
+  if (severity <= 2) return "ch-ok";
+  if (severity === 3) return "ch-warn";
+  return "ch-err";
+}
+
+export default function ComplaintForm({ complaintId }) {
   const [units, setUnits] = useState([]);
   const [form, setForm] = useState({
     unitId: "",
-    category: categories[0],
-    priority: priorities[1],
+    occupantId: "",
+    severity: 3,
+    incidentType: "",
     description: "",
-    fileName: "",
+    resolutionNotes: "",
   });
   const [loadingDraft, setLoadingDraft] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [result, setResult] = useState(null);
+  const [error, setError] = useState("");
+  const [studentId, setStudentId] = useState("");
   const fallbackUnit = useMemo(() => ({ unitId: "", name: "this unit", address: "" }), []);
 
   const selectedUnit = useMemo(
@@ -32,6 +41,7 @@ export default function ComplaintForm() {
     async function loadUnits() {
       try {
         const role = localStorage.getItem("role");
+        setStudentId(localStorage.getItem("studentId") || "");
         let nextUnits = [];
 
         if (role === "student") {
@@ -78,18 +88,23 @@ export default function ComplaintForm() {
   }, []);
 
   function updateField(field, value) {
+    setError("");
+    setResult(null);
     setForm((prev) => ({ ...prev, [field]: value }));
   }
 
   async function requestDraft() {
     setLoadingDraft(true);
     setResult(null);
+    setError("");
     try {
       const payload = await queryDawn({
-        message: `Draft a complaint for unit ${form.unitId || "unknown"} about ${form.category} with ${form.priority} priority`,
-        intent: "student_complaint",
+        message: `Draft a complaint for: ${form.description || form.incidentType || "general issue"}`,
+        intent: "complaint_draft",
       });
       updateField("description", payload?.assistant || form.description);
+    } catch (draftError) {
+      setError(draftError.message || "Draft request failed");
     } finally {
       setLoadingDraft(false);
     }
@@ -98,104 +113,153 @@ export default function ComplaintForm() {
   async function submitComplaint(event) {
     event.preventDefault();
     setSubmitting(true);
+    setError("");
+    setResult(null);
+
     try {
-      const severity =
-        form.priority === "Low" ? 2 : form.priority === "Medium" ? 3 : 5;
-      const payload = await createComplaint({
+      if (complaintId) {
+        const payload = await resolveComplaint(complaintId);
+        setResult(payload);
+        return;
+      }
+
+      if (!studentId) {
+        throw new Error("Student identity is missing. Please sign in again.");
+      }
+
+      const parsedSeverity = Number(form.severity);
+      if (!Number.isInteger(parsedSeverity) || parsedSeverity < 1 || parsedSeverity > 5) {
+        throw new Error("Severity must be an integer from 1 to 5.");
+      }
+
+      const body = {
         unitId: Number(form.unitId),
-        severity,
+        severity: parsedSeverity,
         message: form.description || null,
-      });
+        ...(form.occupantId ? { occupantId: form.occupantId } : {}),
+        ...(form.incidentType ? { incidentType: form.incidentType } : {}),
+      };
+
+      const payload = await createComplaint(body);
       setResult(payload);
+    } catch (submitError) {
+      setError(submitError.message || "Complaint submission failed");
     } finally {
       setSubmitting(false);
     }
   }
 
   return (
-    <form className={styles.form} onSubmit={submitComplaint}>
+    <form className={`${styles.form} panel`} onSubmit={submitComplaint}>
       <div className={styles.header}>
         <div>
-          <p className={styles.kicker}>Dawn Assisted Intake</p>
-          <h3 className={styles.title}>Create a complaint</h3>
+          <p className="label-caps">Dawn Assisted Intake</p>
+          <h3 className={styles.title}>{complaintId ? "Resolve complaint" : "Create a complaint"}</h3>
         </div>
-        <button className={styles.draftButton} onClick={requestDraft} type="button">
-          {loadingDraft ? "Drafting..." : "Dawn AI Draft"}
-        </button>
+        {!complaintId ? (
+          <button className="btn-soft blue" onClick={requestDraft} type="button">
+            {loadingDraft ? "Drafting..." : "Draft with Dawn"}
+          </button>
+        ) : null}
       </div>
 
-      <div className={styles.grid}>
-        <label className={styles.field}>
-          <span>Unit</span>
-          <select className="selectField" value={form.unitId} onChange={(event) => updateField("unitId", event.target.value)}>
-            {units.map((unit) => (
-              <option key={unit.unitId} value={unit.unitId}>
-                {unit.unitId} - {unit.name}
-              </option>
-            ))}
-          </select>
-        </label>
+      {error ? <div className="status-banner error">{error}</div> : null}
+      {result && !complaintId ? (
+        <div className="status-banner success">
+          {`Complaint submitted. Unit trust score updated to ${result?.trustScore ?? "unknown"}.`}
+        </div>
+      ) : null}
+      {result && complaintId ? (
+        <div className="status-banner success">
+          {`Complaint resolved. Unit trust score updated to ${result?.trustScore ?? "unknown"}.`}
+        </div>
+      ) : null}
 
-        <label className={styles.field}>
-          <span>Category</span>
-          <select className="selectField" value={form.category} onChange={(event) => updateField("category", event.target.value)}>
-            {categories.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        </label>
+      {!complaintId ? (
+        <>
+          <div className={styles.grid}>
+            <label className={styles.field}>
+              <span>Unit</span>
+              <select className="app-input" value={form.unitId} onChange={(event) => updateField("unitId", event.target.value)}>
+                {units.map((unit) => (
+                  <option key={unit.unitId} value={unit.unitId}>
+                    {unit.unitId} - {unit.name}
+                  </option>
+                ))}
+              </select>
+            </label>
 
-        <label className={styles.field}>
-          <span>Priority</span>
-          <select className="selectField" value={form.priority} onChange={(event) => updateField("priority", event.target.value)}>
-            {priorities.map((item) => (
-              <option key={item} value={item}>
-                {item}
-              </option>
-            ))}
-          </select>
-        </label>
+            <label className={styles.field}>
+              <span>Occupant ID (optional)</span>
+              <input className="app-input" onChange={(event) => updateField("occupantId", event.target.value)} type="text" value={form.occupantId} />
+            </label>
+          </div>
 
-        <label className={styles.field}>
-          <span>File upload</span>
-          <label className={styles.upload}>
-            <input
-              className={styles.hiddenInput}
-              type="file"
-              onChange={(event) => updateField("fileName", event.target.files?.[0]?.name || "")}
-            />
-            <span>{form.fileName || "Attach image or report"}</span>
+          <div className={styles.severityBlock}>
+            <span>Severity</span>
+            <div className={styles.severityRow}>
+              {severityOptions.map((severity) => (
+                <button
+                  key={severity}
+                  className={`${styles.severityButton} ${Number(form.severity) === severity ? styles.severityButtonActive : ""}`}
+                  onClick={() => updateField("severity", severity)}
+                  type="button"
+                >
+                  <span className={`chip ${severityTone(severity)}`}>{severity}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className={styles.field}>
+            <span>Incident type</span>
+            <select className="app-input" value={form.incidentType} onChange={(event) => updateField("incidentType", event.target.value)}>
+              {incidentTypes.map((item) => (
+                <option key={item || "blank"} value={item}>
+                  {item || "None"}
+                </option>
+              ))}
+            </select>
           </label>
-        </label>
-      </div>
 
-      <label className={styles.field}>
-        <span>Description</span>
-        <textarea
-          className="textAreaField"
-          placeholder={`Describe the issue in ${selectedUnit.name}...`}
-          value={form.description}
-          onChange={(event) => updateField("description", event.target.value)}
-        />
-      </label>
+          <label className={styles.field}>
+            <span>Description</span>
+            <textarea
+              className="textAreaField"
+              onChange={(event) => updateField("description", event.target.value)}
+              placeholder={`Describe the issue in ${selectedUnit.name}...`}
+              value={form.description}
+            />
+          </label>
 
-      <div className={styles.footer}>
-        <div className={styles.context}>
-          <strong>{selectedUnit.unitId}</strong>
-          <span>{selectedUnit.address}</span>
-        </div>
-        <button className={styles.submitButton} disabled={submitting} type="submit">
-          {submitting ? <span className={styles.spinner} /> : null}
-          {submitting ? "Submitting..." : "Submit Complaint"}
-        </button>
-      </div>
+          <div className={styles.footer}>
+            <div className={styles.context}>
+              <strong>{selectedUnit.unitId || "No unit selected"}</strong>
+              <span>{selectedUnit.address}</span>
+            </div>
+            <button className="btn-primary" disabled={submitting} type="submit">
+              {submitting ? "Submitting..." : "Submit"}
+            </button>
+          </div>
 
-      {result && (
-        <div className={styles.result}>
-          Complaint {result?.complaint?.id || result?.id} submitted for {form.unitId}. Dawn has queued it for review.
-        </div>
+          <p className="label-caps">Max 5 complaints per minute</p>
+        </>
+      ) : (
+        <>
+          <label className={styles.field}>
+            <span>Resolution notes</span>
+            <textarea
+              className="textAreaField"
+              onChange={(event) => updateField("resolutionNotes", event.target.value)}
+              placeholder="Add any notes before resolving this complaint..."
+              value={form.resolutionNotes}
+            />
+          </label>
+
+          <button className="btn-primary" disabled={submitting} type="submit">
+            {submitting ? "Resolving..." : "Mark resolved"}
+          </button>
+        </>
       )}
     </form>
   );

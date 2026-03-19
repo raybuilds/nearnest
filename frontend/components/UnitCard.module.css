@@ -1,136 +1,135 @@
 .card {
   display: block;
   overflow: hidden;
-  border-radius: 18px;
-  background: var(--color-surface);
-  border: 1px solid var(--color-border);
-  transition: transform 220ms ease, border-color 220ms ease, box-shadow 220ms ease;
-  animation: fadeUp 0.7s ease both;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-base);
+  background: rgba(255, 255, 255, 0.03);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .card:hover {
-  transform: translateY(-4px) scale(1.01);
-  border-color: rgba(79, 127, 255, 0.38);
-  box-shadow: 0 18px 54px rgba(79, 127, 255, 0.14);
+  transform: translateY(-2px);
+  border-color: rgba(108, 142, 245, 0.28);
+  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.28);
 }
 
-.media {
+.thumbnail {
+  position: relative;
+  min-height: 88px;
+  padding: 14px;
+  background: linear-gradient(135deg, var(--bg-surface), var(--bg-hover));
+  border-bottom: 1px solid var(--border-base);
+}
+
+.houseIcon {
+  position: absolute;
+  inset: 0;
   display: grid;
   place-items: center;
-  min-height: 158px;
-  background: var(--gradient-hero);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
 
-.blueprint {
-  position: relative;
-  width: 92px;
-  height: 92px;
-  border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 18px;
-}
-
-.blueprintLine,
-.blueprintLineShort,
-.blueprintSquare {
+.statusChip {
   position: absolute;
-  background: rgba(79, 127, 255, 0.65);
+  top: 12px;
+  right: 12px;
 }
 
-.blueprintLine {
-  left: 18px;
-  right: 18px;
-  top: 26px;
-  height: 2px;
+.typeChip {
+  position: absolute;
+  top: 12px;
+  left: 12px;
 }
 
-.blueprintLineShort {
-  left: 18px;
-  right: 34px;
-  bottom: 24px;
-  height: 2px;
+.auditChip {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
 }
 
-.blueprintSquare {
-  width: 20px;
-  height: 20px;
-  right: 16px;
-  top: 42px;
-  border-radius: 4px;
+.body {
+  padding: 14px;
+  display: grid;
+  gap: 14px;
 }
 
-.content {
-  padding: 18px;
-}
-
-.topRow {
+.headingRow {
   display: flex;
-  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
 }
 
-.eyebrow {
-  margin: 0 0 8px;
-  color: var(--color-text-muted);
-  font-size: 0.72rem;
-  text-transform: uppercase;
-  letter-spacing: 0.12em;
-}
-
 .title {
-  margin: 0;
-  color: var(--color-text);
-  font-size: 1.15rem;
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 1.08rem;
+  font-weight: 500;
 }
 
-.address {
-  margin: 12px 0 18px;
-  color: var(--color-text-muted);
-  line-height: 1.6;
+.priceBlock {
+  text-align: right;
+  min-width: fit-content;
 }
 
-.footer {
+.priceBlock strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.priceBlock span {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.metaRow,
+.signalRow,
+.amenities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trustSection {
+  display: grid;
+  gap: 8px;
+}
+
+.trustRow {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+}
+
+.trustValue {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
 }
 
-.meta {
-  color: var(--color-text-soft);
+.studentActions {
+  display: grid;
+  gap: 10px;
 }
 
-.issueBadge,
-.statusChip {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 999px;
-  padding: 8px 12px;
-  border: 1px solid var(--color-border);
-  font-size: 0.78rem;
+.studentActions button {
+  width: 100%;
+  min-height: 42px;
 }
 
-.issueBadge {
-  color: var(--color-text-soft);
-  background: rgba(255, 255, 255, 0.05);
-}
+@media (max-width: 640px) {
+  .headingRow {
+    flex-direction: column;
+  }
 
-.statusSuccess {
-  color: var(--color-success);
-  border-color: rgba(0, 212, 170, 0.3);
-  background: rgba(0, 212, 170, 0.12);
-}
-
-.statusNeutral {
-  color: var(--color-primary);
-  border-color: rgba(79, 127, 255, 0.26);
-  background: rgba(79, 127, 255, 0.12);
-}
-
-.statusWarning {
-  color: var(--color-warning);
-  border-color: rgba(248, 184, 78, 0.28);
-  background: rgba(248, 184, 78, 0.12);
+  .priceBlock {
+    text-align: left;
+  }
 }
