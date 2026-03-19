@@ -85,7 +85,7 @@ export default function UnitCard(props) {
             <h3 className={styles.title}>{name}</h3>
           </div>
           <div className={styles.priceBlock}>
-            <strong>{`£${rent}/mo`}</strong>
+            <strong>{`\u00A3${rent}/mo`}</strong>
             <span>{address}</span>
           </div>
         </div>

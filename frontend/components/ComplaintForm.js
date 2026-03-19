@@ -46,7 +46,7 @@ export default function ComplaintForm({ complaintId }) {
 
         if (role === "student") {
           const profile = await getProfile();
-          const corridorId = profile?.identity?.corridor?.id;
+          const corridorId = profile?.identity?.corridorId;
           if (corridorId) {
             const response = await getUnits(corridorId);
             nextUnits = Array.isArray(response)

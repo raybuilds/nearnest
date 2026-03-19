@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import ComplaintForm from "@/components/ComplaintForm";
 import UnitCard from "@/components/UnitCard";
 import {
+  createUnit,
   getAdminAuditQueue,
   getAdminUnits,
   getCorridorDemand,
@@ -191,7 +192,7 @@ function StudentDashboard({
   );
 }
 
-function LandlordDashboard({ units, demandSummary, insights, loading, error, pollingBanner, createForm, setCreateForm }) {
+function LandlordDashboard({ corridors, units, demandSummary, insights, loading, error, pollingBanner, createForm, setCreateForm, onCreateUnit, creatingUnit }) {
   const totalUnits = units.length;
   const occupied = units.reduce((sum, unit) => sum + Number(unit.occupancyCount || 0), 0);
   const pendingReview = units.filter((unit) => unit.status === "submitted").length;
@@ -293,29 +294,36 @@ function LandlordDashboard({ units, demandSummary, insights, loading, error, pol
         <article className="panel">
           <div className={styles.sectionLead}>
             <h2 className="section-heading">Create unit</h2>
-            <p className="mutedText">Form preview only in this phase. Creation wiring stays for the next page migration.</p>
+            <p className="mutedText">Create a draft unit directly from the live landlord workflow.</p>
           </div>
 
           <div className={styles.createGrid}>
             <label className={styles.filterField}>
-              <span>Corridor ID</span>
-              <input className="app-input" value={createForm.corridorId} onChange={(event) => setCreateForm((prev) => ({ ...prev, corridorId: event.target.value }))} />
+              <span>Corridor</span>
+              <select className="app-input" value={createForm.corridorId} onChange={(event) => setCreateForm((prev) => ({ ...prev, corridorId: event.target.value }))}>
+                <option value="">Select corridor</option>
+                {corridors.map((corridor) => (
+                  <option key={corridor.id} value={corridor.id}>
+                    {corridor.name}
+                  </option>
+                ))}
+              </select>
             </label>
             <label className={styles.filterField}>
               <span>Rent</span>
-              <input className="app-input" value={createForm.rent} onChange={(event) => setCreateForm((prev) => ({ ...prev, rent: event.target.value }))} />
+              <input className="app-input" type="number" value={createForm.rent} onChange={(event) => setCreateForm((prev) => ({ ...prev, rent: event.target.value }))} />
             </label>
             <label className={styles.filterField}>
               <span>Distance Km</span>
-              <input className="app-input" value={createForm.distanceKm} onChange={(event) => setCreateForm((prev) => ({ ...prev, distanceKm: event.target.value }))} />
+              <input className="app-input" type="number" value={createForm.distanceKm} onChange={(event) => setCreateForm((prev) => ({ ...prev, distanceKm: event.target.value }))} />
             </label>
             <label className={styles.filterField}>
               <span>Capacity</span>
-              <input className="app-input" value={createForm.capacity} onChange={(event) => setCreateForm((prev) => ({ ...prev, capacity: event.target.value }))} />
+              <input className="app-input" type="number" value={createForm.capacity} onChange={(event) => setCreateForm((prev) => ({ ...prev, capacity: event.target.value }))} />
             </label>
           </div>
-          <button className="btn-primary" disabled type="button">
-            Create unit
+          <button className="btn-primary" disabled={creatingUnit || !createForm.corridorId || !createForm.capacity} onClick={onCreateUnit} type="button">
+            {creatingUnit ? "Creating..." : "Create unit"}
           </button>
         </article>
       </section>
@@ -474,6 +482,7 @@ function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, unit
 export default function DashboardPage() {
   const [role, setRole] = useState("");
   const [loading, setLoading] = useState(true);
+  const [creatingUnit, setCreatingUnit] = useState(false);
   const [error, setError] = useState("");
 
   const [corridors, setCorridors] = useState([]);
@@ -575,7 +584,7 @@ export default function DashboardPage() {
       setError("");
       try {
         const profile = await getProfile();
-        const studentCorridorId = String(profile?.identity?.corridor?.id || "");
+        const studentCorridorId = String(profile?.identity?.corridorId || "");
         const nextCorridorId = corridorId || studentCorridorId;
 
         if (!active) return;
@@ -715,6 +724,40 @@ export default function DashboardPage() {
     };
   }, [role, selectedCorridor]);
 
+  async function handleCreateUnit() {
+    setCreatingUnit(true);
+    setError("");
+    setPollingBanner("");
+    try {
+      await createUnit({
+        corridorId: Number(createForm.corridorId),
+        rent: createForm.rent ? Number(createForm.rent) : undefined,
+        distanceKm: createForm.distanceKm ? Number(createForm.distanceKm) : undefined,
+        capacity: createForm.capacity ? Number(createForm.capacity) : undefined,
+      });
+      setCreateForm({
+        corridorId: createForm.corridorId,
+        rent: "",
+        distanceKm: "",
+        capacity: "",
+      });
+      latestLandlordUnitsRef.current = [];
+      const unitPayload = await getLandlordUnits();
+      const nextUnits = Array.isArray(unitPayload) ? unitPayload : [];
+      setUnits(nextUnits);
+      const defaultCorridorId = String(createForm.corridorId || nextUnits[0]?.corridorId || "");
+      if (defaultCorridorId) {
+        const nextDemandSummary = await getDemandSummary(defaultCorridorId).catch(() => null);
+        setDemandSummary(nextDemandSummary);
+      }
+      setPollingBanner("Draft unit created successfully.");
+    } catch (loadError) {
+      setError(loadError.message || "Failed to create unit.");
+    } finally {
+      setCreatingUnit(false);
+    }
+  }
+
   if (role === "student") {
     return (
       <StudentDashboard
@@ -737,11 +780,14 @@ export default function DashboardPage() {
   if (role === "landlord") {
     return (
       <LandlordDashboard
+        corridors={corridors}
         createForm={createForm}
+        creatingUnit={creatingUnit}
         demandSummary={demandSummary}
         error={error}
         insights={insights}
         loading={loading}
+        onCreateUnit={handleCreateUnit}
         pollingBanner={pollingBanner}
         setCreateForm={setCreateForm}
         units={units}
