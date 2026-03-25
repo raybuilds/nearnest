@@ -1,4 +1,6 @@
-const BACKEND_BASE = process.env.NEXT_PUBLIC_API_URL;
+const BACKEND_BASE = (process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "")
+  .trim()
+  .replace(/\/+$/, "");
 
 type BackendOptions = {
   method?: string;
@@ -31,15 +33,29 @@ export async function fetchBackend(path: string, options: BackendOptions = {}) {
     );
   }
 
-  const response = await fetch(`${BACKEND_BASE}${path}`, {
-    method: options.method ?? "GET",
-    headers: {
-      ...(options.body ? { "Content-Type": "application/json" } : {}),
-      ...(options.headers ?? {}),
-    },
-    body: options.formData ?? (options.body ? JSON.stringify(options.body) : undefined),
-    cache: "no-store",
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${BACKEND_BASE}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers ?? {}),
+      },
+      body: options.formData ?? (options.body ? JSON.stringify(options.body) : undefined),
+      cache: "no-store",
+    });
+  } catch {
+    return new Response(
+      JSON.stringify({
+        error: `Unable to reach backend service at ${BACKEND_BASE}.`,
+      }),
+      {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
 
   const contentType = response.headers.get("content-type") || "";
   const data = contentType.includes("application/json") ? await response.json() : null;
