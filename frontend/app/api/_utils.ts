@@ -1,4 +1,4 @@
-const BACKEND_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000";
+const BACKEND_BASE = process.env.NEXT_PUBLIC_API_URL;
 
 type BackendOptions = {
   method?: string;
@@ -18,6 +18,18 @@ export function getForwardHeaders(request: Request, extraHeaders: Record<string,
 }
 
 export async function fetchBackend(path: string, options: BackendOptions = {}) {
+  if (!BACKEND_BASE) {
+    return new Response(
+      JSON.stringify({
+        error: "NEXT_PUBLIC_API_URL is not configured for the frontend deployment.",
+      }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
   const response = await fetch(`${BACKEND_BASE}${path}`, {
     method: options.method ?? "GET",
     headers: {
@@ -45,4 +57,3 @@ export async function fetchBackend(path: string, options: BackendOptions = {}) {
 
   return Response.json(data);
 }
-

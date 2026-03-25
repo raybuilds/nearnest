@@ -1,4 +1,7 @@
-const API_BASE = process.env.API_BASE_URL || "http://localhost:5000";
+const API_BASE =
+  process.env.API_BASE_URL ||
+  process.env.INTERNAL_API_BASE_URL ||
+  `http://127.0.0.1:${process.env.PORT || 5000}`;
 
 const WATER_COMPLAINT_THRESHOLD = 3;
 const SLA_BREACH_REVIEW_THRESHOLD = 2;

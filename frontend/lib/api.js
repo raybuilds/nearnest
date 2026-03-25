@@ -1,6 +1,10 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000";
+const BASE = process.env.NEXT_PUBLIC_API_URL;
 
 export async function apiRequest(path, { method = "GET", body, isFormData = false } = {}) {
+  if (!BASE) {
+    throw new Error("NEXT_PUBLIC_API_URL is not configured for the frontend.");
+  }
+
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
   const headers = {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),

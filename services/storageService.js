@@ -2,7 +2,9 @@ const fs = require("fs");
 const fsp = require("fs/promises");
 const path = require("path");
 
-const UPLOAD_ROOT = path.join(process.cwd(), "uploads");
+const UPLOAD_ROOT = process.env.UPLOAD_ROOT
+  ? path.resolve(process.env.UPLOAD_ROOT)
+  : path.join(process.cwd(), "uploads");
 
 function sanitizeFileName(fileName) {
   return String(fileName || "file")

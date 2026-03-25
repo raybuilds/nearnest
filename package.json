@@ -5,10 +5,14 @@
   "main": "index.js",
   "scripts": {
     "dev": "nodemon index.js",
+    "start": "node index.js",
     "test": "node --test tests/*.test.js",
     "demo:reset": "npx prisma migrate reset --force && node seed.js",
     "demo:validate": "node scripts/validateDemoState.js",
-    "export:setup": "node exportLocalSetup.js"
+    "export:setup": "node exportLocalSetup.js",
+    "prisma:generate": "npx prisma generate",
+    "prisma:migrate:deploy": "npx prisma migrate deploy",
+    "seed": "node seed.js"
   },
   "keywords": [],
   "author": "",

@@ -130,7 +130,14 @@ Mutation safety:
 ```env
 DATABASE_URL="postgresql://postgres:password@localhost:5432/nearnest"
 JWT_SECRET="replace-with-strong-secret"
+PORT=5000
+FRONTEND_ORIGIN="http://localhost:3000"
+ALLOWED_ORIGINS="http://localhost:3000"
+API_BASE_URL="http://127.0.0.1:5000"
+UPLOAD_ROOT="./uploads"
 ```
+
+You can copy from [.env.example](c:\Users\ASUS\nearnest-backend\.env.example).
 
 ### 2) Frontend env (`frontend/.env.local`)
 
@@ -138,7 +145,9 @@ JWT_SECRET="replace-with-strong-secret"
 NEXT_PUBLIC_API_URL=http://localhost:5000
 ```
 
-`frontend/lib/api.js` reads `NEXT_PUBLIC_API_URL` with localhost fallback.
+For production frontend builds, use [frontend/.env.production.example](c:\Users\ASUS\nearnest-backend\frontend\.env.production.example) as the template source for `NEXT_PUBLIC_API_URL`.
+
+`frontend/lib/api.js` now requires `NEXT_PUBLIC_API_URL` explicitly.
 
 ## Install
 
@@ -186,6 +195,67 @@ npm run dev
 ```
 
 Optional (Windows): run `RUN_NEARNEST.bat` from repo root to start backend + frontend and open `http://localhost:3000`.
+
+## Production Deployment
+
+Recommended split:
+- Frontend: Vercel, deployed from `frontend/`
+- Backend: Render or Railway, deployed from repo root
+- Database: managed PostgreSQL such as Neon or Supabase
+
+### Frontend
+
+- Deploy only the `frontend/` directory as the Vercel project root.
+- Set:
+  - `NEXT_PUBLIC_API_URL=https://your-backend-url`
+- Build command:
+  - `next build`
+- Start command:
+  - `next start`
+
+### Backend
+
+- Deploy the repo root as a Node service.
+- Start command:
+  - `npm start`
+- Required environment variables:
+  - `DATABASE_URL`
+  - `JWT_SECRET`
+  - `PORT`
+  - `FRONTEND_ORIGIN`
+- Optional environment variables:
+  - `ALLOWED_ORIGINS`
+  - `API_BASE_URL`
+  - `UPLOAD_ROOT`
+
+Recommended preparation commands:
+
+```bash
+npm install
+npm run prisma:generate
+npm run prisma:migrate:deploy
+```
+
+### Database
+
+- Prisma reads `DATABASE_URL` from environment variables.
+- Apply migrations in production with:
+
+```bash
+npm run prisma:migrate:deploy
+```
+
+- Seed production-like demo data only if you explicitly want a seeded environment:
+
+```bash
+npm run seed
+```
+
+### Storage Note
+
+- `uploads/` is still local-disk storage through `services/storageService.js`.
+- This works locally, but most cloud runtimes treat local disk as ephemeral.
+- For production, either mount persistent disk storage on the backend host or replace the storage service implementation with S3/Cloudinary-compatible storage later.
 
 ## Repo Setup Improvements
 
@@ -297,6 +367,7 @@ Dawn:
 
 - `.next` should never be committed; cleanup is enforced in `.gitignore`.
 - `.local/` is reserved for local-only helpers and machine-specific setup files.
+- There is no root `vercel.json` in the repo, so the frontend can be deployed independently from `frontend/` without root-level Vercel routing conflicts.
 
 ## Test Coverage
 
