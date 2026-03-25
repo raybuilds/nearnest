@@ -19,4 +19,6 @@ build
 scripts/*.local.cmd
 scripts/*.local.sh
 scripts/*.local.ps1
+*.pem
+*.key
 
