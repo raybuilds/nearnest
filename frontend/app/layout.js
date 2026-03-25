@@ -1,7 +1,7 @@
 import { Lora, Plus_Jakarta_Sans } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
-import DawnChat from "@/components/DawnChat";
+import DawnLauncher from "@/components/dawn/DawnLauncher";
 
 const displayFont = Lora({
   subsets: ["latin"],
@@ -31,7 +31,7 @@ export default function RootLayout({ children }) {
         <div className="relative min-h-screen pb-20">
           <Navbar />
           <main className="page-shell pt-8 pb-8 sm:pt-10">{children}</main>
-          <DawnChat />
+          <DawnLauncher />
         </div>
       </body>
     </html>
