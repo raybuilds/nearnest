@@ -1,10 +1,6 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL;
+const BASE = "/api/proxy";
 
 export async function apiRequest(path, { method = "GET", body, isFormData = false } = {}) {
-  if (!BASE) {
-    throw new Error("NEXT_PUBLIC_API_URL is not configured for the frontend.");
-  }
-
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
   const headers = {
     ...(token ? { Authorization: `Bearer ${token}` } : {}),
@@ -21,7 +17,7 @@ export async function apiRequest(path, { method = "GET", body, isFormData = fals
     });
   } catch (error) {
     const networkError = new Error(
-      `NearNest could not reach the backend at ${BASE}. Please make sure the backend server is running.`
+      "NearNest could not reach the backend. Please make sure the backend server is running."
     );
     networkError.cause = error;
     networkError.code = "BACKEND_UNAVAILABLE";

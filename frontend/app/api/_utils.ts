@@ -4,6 +4,7 @@ type BackendOptions = {
   method?: string;
   body?: unknown;
   headers?: Record<string, string>;
+  formData?: FormData;
 };
 
 export function getForwardHeaders(request: Request, extraHeaders: Record<string, string> = {}) {
@@ -36,7 +37,7 @@ export async function fetchBackend(path: string, options: BackendOptions = {}) {
       ...(options.body ? { "Content-Type": "application/json" } : {}),
       ...(options.headers ?? {}),
     },
-    body: options.body ? JSON.stringify(options.body) : undefined,
+    body: options.formData ?? (options.body ? JSON.stringify(options.body) : undefined),
     cache: "no-store",
   });
 
