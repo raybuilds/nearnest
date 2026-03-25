@@ -187,6 +187,13 @@ npm run dev
 
 Optional (Windows): run `RUN_NEARNEST.bat` from repo root to start backend + frontend and open `http://localhost:3000`.
 
+## Repo Setup Improvements
+
+- Keep machine-specific helpers in `.local/` so they stay out of version control.
+- Use repo-local `git config user.name` and `git config user.email` when a project needs a specific commit identity.
+- Prefer SSH remotes over HTTPS for multi-account GitHub setups.
+- Treat `scripts/` as shared project automation only; personal setup helpers should stay local.
+
 ## Database and Seed
 
 ```bash
@@ -289,6 +296,7 @@ Dawn:
 ## Operational Notes
 
 - `.next` should never be committed; cleanup is enforced in `.gitignore`.
+- `.local/` is reserved for local-only helpers and machine-specific setup files.
 
 ## Test Coverage
 
