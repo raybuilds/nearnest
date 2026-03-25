@@ -1,40 +1,43 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import ComplaintForm from "@/components/ComplaintForm";
 import UnitCard from "@/components/UnitCard";
 import {
   createUnit,
   getAdminAuditQueue,
+  getAdminDemand,
   getAdminUnits,
   getCorridorDemand,
+  getCorridorOverview,
   getCorridors,
   getDawnInsights,
-  getDemandSummary,
   getHiddenReasons,
   getLandlordUnits,
   getProfile,
   getUnits,
 } from "@/lib/api";
-import styles from "./page.module.css";
+import { getRiskTone, getStatusTone, getTrustBand } from "@/lib/governance";
+import { getStoredRole } from "@/lib/session";
 
-function InsightStrip({ insights }) {
+function InsightCards({ insights }) {
   if (!insights.length) return null;
 
   return (
-    <section className={`${styles.insightStrip} fade-up-d1`}>
-      {insights.map((insight, index) => {
-        const severityClass =
-          insight.riskLevel === "HIGH" ? "ch-err" : insight.riskLevel === "MEDIUM" ? "ch-warn" : "ch-blue";
-        return (
-          <article key={`${insight.type}-${index}`} className={`${styles.insightCard} glass`}>
-            <span className={`chip ${severityClass}`}>{String(insight.type || "insight").replaceAll("_", " ")}</span>
-            <strong>{insight.title || "Operational insight"}</strong>
-            <p>{insight.message || insight.body || insight.summary || "No summary available."}</p>
-            {insight.recommendation ? <span className={styles.insightMeta}>{insight.recommendation}</span> : null}
-          </article>
-        );
-      })}
+    <section className="grid gap-4 lg:grid-cols-3">
+      {insights.slice(0, 3).map((insight, index) => (
+        <article key={`${insight.title || insight.type}-${index}`} className="glass-panel p-5">
+          <div className="flex items-center gap-2">
+            <span className={`signal-chip ${getRiskTone(insight.riskLevel || insight.severity)}`}>
+              {insight.type || "Insight"}
+            </span>
+          </div>
+          <h3 className="mt-4 text-lg font-semibold text-white">{insight.title || "Operational insight"}</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-300">{insight.message || insight.body || insight.summary}</p>
+          {insight.recommendation ? <p className="mt-3 text-sm text-emerald-200">Recommended action: {insight.recommendation}</p> : null}
+        </article>
+      ))}
     </section>
   );
 }
@@ -45,262 +48,33 @@ function StudentDashboard({
   setCorridorId,
   filters,
   setFilters,
-  units,
+  visibleUnits,
   hiddenReasons,
+  corridorOverview,
   demand,
+  reload,
   insights,
-  reloadStudentData,
   loading,
   error,
 }) {
-  const [showHidden, setShowHidden] = useState(false);
-
-  const demandLevel = useMemo(() => {
-    const totalVdpStudents = Number(demand?.totalVdpStudents || 0);
-    if (totalVdpStudents >= 30) return "High";
-    if (totalVdpStudents >= 10) return "Medium";
-    return "Low";
-  }, [demand]);
-
-  const visibleUnits = Array.isArray(units) ? units.filter((unit) => unit.visibleToStudents !== false) : [];
+  const averageTrust = corridorOverview?.stats?.averageTrustScore || 0;
+  const riskLevel = corridorOverview?.riskSummary?.riskLevel || "Stable";
 
   return (
-    <div className={`pageShell ${styles.page}`}>
-      <section className={`fade-up ${styles.hero}`}>
-        <div>
-          <span className="role-pill rp-student">student</span>
-          <h1 className="hero-heading">Discover housing</h1>
-          <p className="pageSubtitle">Browse verified corridor inventory with trust visibility, live governance signals, and complaint context.</p>
-        </div>
-      </section>
+    <div className="grid gap-6">
+      <section className="governance-grid">
+        <div className="glass-panel-strong blueprint-border lg:col-span-8 p-8 sm:p-10">
+          <div className="eyebrow">Student Governance View</div>
+          <h1 className="page-title mt-5 text-gradient">See only the units that still earn visibility.</h1>
+          <p className="subtle-copy mt-4 max-w-3xl">
+            NearNest does not surface every unit. It shows governed inventory that remains above trust thresholds, outside
+            critical audit pressure, and transparent about the reasons it is discoverable.
+          </p>
 
-      <section className={`panel-light ${styles.filterBar} fade-up-d1`}>
-        <label className={styles.filterField}>
-          <span>Corridor</span>
-          <select className="app-input" value={corridorId} onChange={(event) => setCorridorId(event.target.value)}>
-            <option value="">Select corridor</option>
-            {corridors.map((corridor) => (
-              <option key={corridor.id} value={corridor.id}>
-                {corridor.name}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className={styles.filterField}>
-          <span>Max rent</span>
-          <input className="app-input" type="number" value={filters.maxRent} onChange={(event) => setFilters((prev) => ({ ...prev, maxRent: event.target.value }))} />
-        </label>
-
-        <label className={styles.filterField}>
-          <span>AC</span>
-          <select className="app-input" value={filters.ac} onChange={(event) => setFilters((prev) => ({ ...prev, ac: event.target.value }))}>
-            <option value="">Any</option>
-            <option value="true">AC only</option>
-          </select>
-        </label>
-
-        <label className={styles.filterField}>
-          <span>Max distance</span>
-          <input
-            className="app-input"
-            type="number"
-            value={filters.maxDistance}
-            onChange={(event) => setFilters((prev) => ({ ...prev, maxDistance: event.target.value }))}
-          />
-        </label>
-
-        <button className="btn-primary" onClick={reloadStudentData} type="button">
-          Search
-        </button>
-      </section>
-
-      <InsightStrip insights={insights} />
-
-      <section className={`${styles.metricGrid} fade-up-d2`}>
-        <article className="metric-card">
-          <p className="label-caps">Visible units</p>
-          <strong>{visibleUnits.length}</strong>
-          <span>Currently discoverable</span>
-        </article>
-        <article className="metric-card">
-          <p className="label-caps">Demand level</p>
-          <strong>{demandLevel}</strong>
-          <span>{`${Number(demand?.totalVdpStudents || 0)} verified students in this corridor`}</span>
-        </article>
-        <article className="metric-card">
-          <p className="label-caps">Capacity</p>
-          <strong>{Number(demand?.occupancy?.totalCapacity || 0)}</strong>
-          <span>{`${Number(demand?.occupancy?.totalActiveOccupancies || 0)} active occupancies`}</span>
-        </article>
-        <article className="metric-card">
-          <p className="label-caps">Hidden units</p>
-          <strong>{Number(hiddenReasons?.hiddenCount || 0)}</strong>
-          <span>Blocked by visibility rules</span>
-        </article>
-      </section>
-
-      {error ? <div className="status-banner error fade-up-d2">{error}</div> : null}
-
-      <section className={`fade-up-d2 ${styles.unitGrid}`}>
-        {loading ? (
-          Array.from({ length: 4 }).map((_, index) => <div key={index} className="skeleton" />)
-        ) : visibleUnits.length > 0 ? (
-          visibleUnits.map((unit) => <UnitCard key={unit.id} onShortlist={reloadStudentData} showForStudent unit={unit} />)
-        ) : (
-          <div className="empty-state panel-light">No units found for this corridor and filters.</div>
-        )}
-      </section>
-
-      <section className={`panel-light fade-up-d3 ${styles.hiddenSection}`}>
-        <div className={styles.hiddenHeader}>
-          <div>
-            <h2 className="section-heading">{`${Number(hiddenReasons?.hiddenCount || 0)} units are hidden from your view`}</h2>
-            <p className="mutedText">Visibility is controlled by approval state, audit state, and trust thresholds.</p>
-          </div>
-          <button className="btn-secondary" onClick={() => setShowHidden((value) => !value)} type="button">
-            {showHidden ? "Hide" : "Show"}
-          </button>
-        </div>
-
-        {showHidden ? (
-          <div className={styles.hiddenList}>
-            {(hiddenReasons?.hiddenUnits || []).map((item) => (
-              <article key={item.unitId} className="panel">
-                <strong>{`Unit ${item.unitId}`}</strong>
-                <div className={styles.reasonList}>
-                  {(item.reasons || []).map((reason) => (
-                    <span key={reason} className="status-banner warn">
-                      {reason}
-                    </span>
-                  ))}
-                </div>
-              </article>
-            ))}
-          </div>
-        ) : null}
-      </section>
-
-      <section className="fade-up-d3">
-        <div className={styles.sectionLead}>
-          <h2 className="section-heading">File a complaint</h2>
-          <p className="mutedText">Complaint submission updates trust and SLA governance in real time.</p>
-        </div>
-        <ComplaintForm />
-      </section>
-    </div>
-  );
-}
-
-function LandlordDashboard({ corridors, units, demandSummary, insights, loading, error, pollingBanner, createForm, setCreateForm, onCreateUnit, creatingUnit }) {
-  const totalUnits = units.length;
-  const occupied = units.reduce((sum, unit) => sum + Number(unit.occupancyCount || 0), 0);
-  const pendingReview = units.filter((unit) => unit.status === "submitted").length;
-  const auditsRequired = units.filter((unit) => unit.auditRequired).length;
-
-  return (
-    <div className={`pageShell ${styles.page}`}>
-      <section className={`fade-up ${styles.hero}`}>
-        <div>
-          <span className="role-pill rp-landlord">landlord</span>
-          <h1 className="hero-heading">Portfolio command</h1>
-          <p className="pageSubtitle">Monitor trust signals, audit exposure, corridor demand, and active complaint pressure across your units.</p>
-        </div>
-      </section>
-
-      <InsightStrip insights={insights} />
-
-      {pollingBanner ? <div className="status-banner warn fade-up-d1">{pollingBanner}</div> : null}
-      {error ? <div className="status-banner error fade-up-d1">{error}</div> : null}
-
-      <section className={`${styles.metricGrid} fade-up-d1`}>
-        <article className="metric-card">
-          <p className="label-caps">Total units</p>
-          <strong>{totalUnits}</strong>
-          <span>Portfolio inventory</span>
-        </article>
-        <article className="metric-card">
-          <p className="label-caps">Occupied</p>
-          <strong>{occupied}</strong>
-          <span>Current active occupancies</span>
-        </article>
-        <article className="metric-card">
-          <p className="label-caps">Pending review</p>
-          <strong>{pendingReview}</strong>
-          <span>Submitted to governance</span>
-        </article>
-        <article className="metric-card">
-          <p className="label-caps">Audit required</p>
-          <strong>{auditsRequired}</strong>
-          <span>Units needing corrective action</span>
-        </article>
-      </section>
-
-      <section className={`${styles.twoColumn} fade-up-d2`}>
-        <article className="panel">
-          <div className={styles.sectionLead}>
-            <h2 className="section-heading">Corridor demand</h2>
-            <p className="mutedText">Verified demand, shortlists, occupancy, and conversion for your active corridor.</p>
-          </div>
-
-          <div className={styles.metricGrid}>
-            <div className="metric-card">
-              <p className="label-caps">VDP students</p>
-              <strong>{Number(demandSummary?.totalVdpStudents || 0)}</strong>
-              <span>Verified demand pool</span>
-            </div>
-            <div className="metric-card">
-              <p className="label-caps">Shortlists</p>
-              <strong>{Number(demandSummary?.shortlistCount || 0)}</strong>
-              <span>Unique interested students</span>
-            </div>
-            <div className="metric-card">
-              <p className="label-caps">Occupancy</p>
-              <strong>{Number(demandSummary?.currentOccupancy || 0)}</strong>
-              <span>{`${Number(demandSummary?.totalCapacity || 0)} total capacity`}</span>
-            </div>
-            <div className="metric-card">
-              <p className="label-caps">Conversion</p>
-              <strong>{`${Number(demandSummary?.conversionRatio || 0)}%`}</strong>
-              <span>Occupancy from shortlist demand</span>
-            </div>
-          </div>
-
-          <div className={styles.barList}>
-            {(demandSummary?.distributionByInstitution || []).map((item) => (
-              <div key={`${item.institutionId}-${item.name}`} className={styles.barRow}>
-                <div className={styles.barLabelRow}>
-                  <span>{item.name}</span>
-                  <strong>{item.shortlistCount}</strong>
-                </div>
-                <div className="trust-bar-track">
-                  <div
-                    className="trust-bar-fill priority"
-                    style={{
-                      width: `${Math.min(
-                        100,
-                        Number(demandSummary?.shortlistCount || 1) > 0
-                          ? (Number(item.shortlistCount || 0) / Number(demandSummary.shortlistCount || 1)) * 100
-                          : 0
-                      )}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </article>
-
-        <article className="panel">
-          <div className={styles.sectionLead}>
-            <h2 className="section-heading">Create unit</h2>
-            <p className="mutedText">Create a draft unit directly from the live landlord workflow.</p>
-          </div>
-
-          <div className={styles.createGrid}>
-            <label className={styles.filterField}>
-              <span>Corridor</span>
-              <select className="app-input" value={createForm.corridorId} onChange={(event) => setCreateForm((prev) => ({ ...prev, corridorId: event.target.value }))}>
+          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Corridor</span>
+              <select className="input-shell" onChange={(event) => setCorridorId(event.target.value)} value={corridorId}>
                 <option value="">Select corridor</option>
                 {corridors.map((corridor) => (
                   <option key={corridor.id} value={corridor.id}>
@@ -309,168 +83,355 @@ function LandlordDashboard({ corridors, units, demandSummary, insights, loading,
                 ))}
               </select>
             </label>
-            <label className={styles.filterField}>
-              <span>Rent</span>
-              <input className="app-input" type="number" value={createForm.rent} onChange={(event) => setCreateForm((prev) => ({ ...prev, rent: event.target.value }))} />
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Max rent</span>
+              <input className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, maxRent: event.target.value }))} type="number" value={filters.maxRent} />
             </label>
-            <label className={styles.filterField}>
-              <span>Distance Km</span>
-              <input className="app-input" type="number" value={createForm.distanceKm} onChange={(event) => setCreateForm((prev) => ({ ...prev, distanceKm: event.target.value }))} />
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Max distance</span>
+              <input className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, maxDistance: event.target.value }))} type="number" value={filters.maxDistance} />
             </label>
-            <label className={styles.filterField}>
-              <span>Capacity</span>
-              <input className="app-input" type="number" value={createForm.capacity} onChange={(event) => setCreateForm((prev) => ({ ...prev, capacity: event.target.value }))} />
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">AC filter</span>
+              <select className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, ac: event.target.value }))} value={filters.ac}>
+                <option value="">Any</option>
+                <option value="true">AC only</option>
+                <option value="false">No AC</option>
+              </select>
             </label>
           </div>
-          <button className="btn-primary" disabled={creatingUnit || !createForm.corridorId || !createForm.capacity} onClick={onCreateUnit} type="button">
-            {creatingUnit ? "Creating..." : "Create unit"}
-          </button>
-        </article>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button className="btn-primary" onClick={reload} type="button">
+              Refresh visibility
+            </button>
+            <div className="status-banner info">
+              Demand-gated inventory only. Units remain hidden when trust falls, audits open, or governance status changes.
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:col-span-4">
+          <div className="metric-tile">
+            <p>Units visible</p>
+            <strong>{visibleUnits.length}</strong>
+            <span>Current inventory above trust and governance threshold.</span>
+          </div>
+          <div className="metric-tile">
+            <p>Units hidden</p>
+            <strong>{hiddenReasons?.hiddenCount || 0}</strong>
+            <span>Excluded because trust, status, or audit posture blocked visibility.</span>
+          </div>
+          <div className="metric-tile">
+            <p>Avg corridor trust</p>
+            <strong>{averageTrust}</strong>
+            <span>Computed from all units in the selected corridor.</span>
+          </div>
+        </div>
       </section>
 
-      <section className={`fade-up-d3 ${styles.landlordList}`}>
-        {loading ? (
-          Array.from({ length: 3 }).map((_, index) => <div key={index} className="skeleton" />)
-        ) : units.length > 0 ? (
-          units.map((unit) => (
-            <div key={unit.id} className="panel-light">
-              <UnitCard showDetails unit={unit} />
+      {error ? <div className="status-banner error">{error}</div> : null}
+
+      <InsightCards insights={insights} />
+
+      <section className="grid gap-4 xl:grid-cols-[1.5fr,1fr]">
+        <article className="glass-panel p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow">Trust Visibility Panel</div>
+              <h2 className="section-title mt-4">Visible inventory</h2>
             </div>
-          ))
-        ) : (
-          <div className="empty-state panel-light">No landlord units found.</div>
-        )}
+            <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel} corridor risk</span>
+          </div>
+
+          <div className="mt-6 grid gap-5 md:grid-cols-2">
+            {loading ? (
+              Array.from({ length: 4 }).map((_, index) => <div key={index} className="surface-panel h-64 animate-pulse" />)
+            ) : visibleUnits.length ? (
+              visibleUnits.map((unit) => <UnitCard key={unit.id} onShortlist={reload} showForStudent unit={unit} />)
+            ) : (
+              <div className="empty-state md:col-span-2">No units meet trust threshold in this corridor.</div>
+            )}
+          </div>
+        </article>
+
+        <div className="grid gap-4">
+          <article className="glass-panel p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="eyebrow">Corridor Intelligence</div>
+                <h2 className="section-title mt-4">Behavior signals</h2>
+              </div>
+              <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel}</span>
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Complaint density</p>
+                <strong className="mt-2 block text-2xl text-white">{corridorOverview?.riskSummary?.complaintDensity || 0}</strong>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Visible vs hidden</p>
+                <strong className="mt-2 block text-2xl text-white">
+                  {(corridorOverview?.stats?.visibleUnits || 0)}/{(corridorOverview?.stats?.hiddenUnits || 0)}
+                </strong>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Verified demand pool</p>
+                <strong className="mt-2 block text-2xl text-white">{demand?.totalVdpStudents || 0}</strong>
+              </div>
+            </div>
+          </article>
+
+          <details className="glass-panel p-6" open={Boolean(hiddenReasons?.hiddenCount)}>
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="eyebrow">Hidden Units</div>
+                  <h2 className="section-title mt-4">Why supply is hidden</h2>
+                </div>
+                <span className="signal-chip signal-danger">{hiddenReasons?.hiddenCount || 0} hidden</span>
+              </div>
+            </summary>
+            <div className="mt-5 grid gap-3">
+              {(hiddenReasons?.hiddenUnits || []).map((item) => (
+                <div key={item.unitId} className="rounded-[24px] border border-white/8 bg-black/20 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <strong className="text-white">Unit {item.unitId}</strong>
+                    <span className="signal-chip signal-danger">Hidden</span>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {(item.reasons || []).map((reason) => (
+                      <div key={reason} className="text-sm leading-6 text-slate-300">
+                        {reason}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {!hiddenReasons?.hiddenUnits?.length ? <div className="empty-state">No hidden units in this corridor.</div> : null}
+            </div>
+          </details>
+        </div>
+      </section>
+
+      <ComplaintForm />
+    </div>
+  );
+}
+
+function LandlordDashboard({ units, corridors, createForm, setCreateForm, onCreateUnit, creatingUnit, insights, error }) {
+  const averageTrust =
+    units.length === 0 ? 0 : (units.reduce((sum, unit) => sum + Number(unit.trustScore || 0), 0) / units.length).toFixed(1);
+  const complaintDensity = units.reduce((sum, unit) => sum + Number(unit.activeComplaints || 0), 0);
+  const slaRiskUnits = units.filter((unit) => Number(unit.slaLateCount || 0) > 0).length;
+
+  return (
+    <div className="grid gap-6">
+      <section className="governance-grid">
+        <div className="glass-panel-strong blueprint-border lg:col-span-8 p-8 sm:p-10">
+          <div className="eyebrow">Landlord Governance View</div>
+          <h1 className="page-title mt-5 text-gradient">Portfolio trust is your operating system.</h1>
+          <p className="subtle-copy mt-4 max-w-3xl">
+            Evidence quality, complaint density, and SLA performance determine how your units appear to students and how
+            quickly governance pressure builds.
+          </p>
+
+          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Corridor</span>
+              <select className="input-shell" onChange={(event) => setCreateForm((current) => ({ ...current, corridorId: event.target.value }))} value={createForm.corridorId}>
+                <option value="">Select corridor</option>
+                {corridors.map((corridor) => (
+                  <option key={corridor.id} value={corridor.id}>
+                    {corridor.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Rent</span>
+              <input className="input-shell" onChange={(event) => setCreateForm((current) => ({ ...current, rent: event.target.value }))} type="number" value={createForm.rent} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Distance</span>
+              <input className="input-shell" onChange={(event) => setCreateForm((current) => ({ ...current, distanceKm: event.target.value }))} type="number" value={createForm.distanceKm} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Capacity</span>
+              <input className="input-shell" onChange={(event) => setCreateForm((current) => ({ ...current, capacity: event.target.value }))} type="number" value={createForm.capacity} />
+            </label>
+          </div>
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button className="btn-primary" disabled={creatingUnit || !createForm.corridorId} onClick={onCreateUnit} type="button">
+              {creatingUnit ? "Creating draft..." : "Create governed unit"}
+            </button>
+            <div className="status-banner info">Drafts remain invisible until checklists, evidence, and governance review are complete.</div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:col-span-4">
+          <div className="metric-tile">
+            <p>Portfolio trust</p>
+            <strong>{averageTrust}</strong>
+            <span>Average trust score across all managed units.</span>
+          </div>
+          <div className="metric-tile">
+            <p>Complaint density</p>
+            <strong>{complaintDensity}</strong>
+            <span>Total active complaint pressure across the portfolio.</span>
+          </div>
+          <div className="metric-tile">
+            <p>SLA at risk</p>
+            <strong>{slaRiskUnits}</strong>
+            <span>Units with late complaint resolution exposure.</span>
+          </div>
+        </div>
+      </section>
+
+      {error ? <div className="status-banner error">{error}</div> : null}
+      <InsightCards insights={insights} />
+
+      <section className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
+        {units.length ? units.map((unit) => <UnitCard key={unit.id} compact unit={unit} />) : <div className="empty-state lg:col-span-2 xl:col-span-3">No units have been created for this landlord yet.</div>}
       </section>
     </div>
   );
 }
 
-function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, units, auditQueue, loading, error }) {
-  const pendingUnits = units.filter((unit) => unit.status === "submitted" || unit.status === "admin_review").length;
-  const suspendedUnits = units.filter((unit) => unit.status === "suspended").length;
+function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, units, auditQueue, demand, insights, error }) {
+  const trustDistribution = [
+    units.filter((unit) => getTrustBand(unit.trustScore).key === "A").length,
+    units.filter((unit) => getTrustBand(unit.trustScore).key === "B").length,
+    units.filter((unit) => getTrustBand(unit.trustScore).key === "C").length,
+  ];
 
   return (
-    <div className={`pageShell ${styles.page}`}>
-      <section className={`fade-up ${styles.hero}`}>
-        <div>
-          <span className="role-pill rp-admin">admin</span>
-          <h1 className="hero-heading">Governance operations</h1>
-          <p className="pageSubtitle">Review incoming units, monitor audit queues, and track corridor-level governance signals.</p>
+    <div className="grid gap-6">
+      <section className="governance-grid">
+        <div className="glass-panel-strong blueprint-border lg:col-span-8 p-8 sm:p-10">
+          <div className="eyebrow">Admin Governance View</div>
+          <h1 className="page-title mt-5 text-gradient">Govern the reasons visibility exists.</h1>
+          <p className="subtle-copy mt-4 max-w-3xl">
+            Admins do not manage listings. They govern trust distribution, complaint clusters, and the system-triggered reasons
+            units are approved, suspended, or hidden.
+          </p>
+
+          <div className="mt-8 max-w-sm">
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Corridor</span>
+              <select className="input-shell" onChange={(event) => setSelectedCorridor(event.target.value)} value={selectedCorridor}>
+                <option value="">Select corridor</option>
+                {corridors.map((corridor) => (
+                  <option key={corridor.id} value={corridor.id}>
+                    {corridor.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <div className="mt-6 grid gap-4 md:grid-cols-3">
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Corridor heatmap</p>
+              <strong className="mt-2 block text-2xl text-white">{demand?.totalVdpStudents || 0}</strong>
+              <span className="mt-2 block text-sm leading-6 text-slate-400">Verified demand concentration in the selected corridor.</span>
+            </div>
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Complaint clusters</p>
+              <strong className="mt-2 block text-2xl text-white">{auditQueue.length}</strong>
+              <span className="mt-2 block text-sm leading-6 text-slate-400">Units already escalated into governance review.</span>
+            </div>
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Trust distribution</p>
+              <strong className="mt-2 block text-2xl text-white">{units.length}</strong>
+              <span className="mt-2 block text-sm leading-6 text-slate-400">Governed units included in the trust split below.</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:col-span-4">
+          <div className="metric-tile">
+            <p>Band A</p>
+            <strong>{trustDistribution[0]}</strong>
+            <span>Strong trust standing.</span>
+          </div>
+          <div className="metric-tile">
+            <p>Band B</p>
+            <strong>{trustDistribution[1]}</strong>
+            <span>Visible, but under active monitoring.</span>
+          </div>
+          <div className="metric-tile">
+            <p>Band C</p>
+            <strong>{trustDistribution[2]}</strong>
+            <span>Below threshold or at governance risk.</span>
+          </div>
         </div>
       </section>
 
-      <section className={`panel-light ${styles.filterBar} fade-up-d1`}>
-        <label className={styles.filterField}>
-          <span>Corridor</span>
-          <select className="app-input" value={selectedCorridor} onChange={(event) => setSelectedCorridor(event.target.value)}>
-            <option value="">Select corridor</option>
-            {corridors.map((corridor) => (
-              <option key={corridor.id} value={corridor.id}>
-                {corridor.name}
-              </option>
-            ))}
-          </select>
-        </label>
-      </section>
+      {error ? <div className="status-banner error">{error}</div> : null}
+      <InsightCards insights={insights} />
 
-      {error ? <div className="status-banner error fade-up-d1">{error}</div> : null}
-
-      <section className={`${styles.metricGrid} fade-up-d1`}>
-        <article className="metric-card">
-          <p className="label-caps">Corridors</p>
-          <strong>{corridors.length}</strong>
-          <span>Governance scope</span>
-        </article>
-        <article className="metric-card">
-          <p className="label-caps">Units pending</p>
-          <strong>{pendingUnits}</strong>
-          <span>Require review</span>
-        </article>
-        <article className="metric-card">
-          <p className="label-caps">Suspended</p>
-          <strong>{suspendedUnits}</strong>
-          <span>Currently blocked</span>
-        </article>
-        <article className="metric-card">
-          <p className="label-caps">Audits open</p>
-          <strong>{auditQueue.length}</strong>
-          <span>Unresolved audit queue</span>
-        </article>
-      </section>
-
-      <section className={`${styles.adminShortcutGrid} fade-up-d2`}>
-        {[
-          "Unit Review",
-          "Audit Queue",
-          "Corridor Analytics",
-          "Create Resources",
-        ].map((item) => (
-          <article key={item} className="glass panel">
-            <p className="label-caps">Admin action</p>
-            <strong>{item}</strong>
-            <span className="mutedText">Available in the admin workflow surface.</span>
-          </article>
-        ))}
-      </section>
-
-      <section className={`fade-up-d2 ${styles.twoColumn}`}>
-        <article className="panel">
-          <div className={styles.sectionLead}>
-            <h2 className="section-heading">Unit review queue</h2>
-            <p className="mutedText">Units awaiting governance approval in the selected corridor.</p>
+      <section className="grid gap-5 xl:grid-cols-[1.2fr,0.8fr]">
+        <article className="glass-panel p-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow">Governance Queue</div>
+              <h2 className="section-title mt-4">Units requiring decisions</h2>
+            </div>
           </div>
-
-          <div className={styles.adminList}>
-            {loading ? (
-              Array.from({ length: 3 }).map((_, index) => <div key={index} className="skeleton" />)
-            ) : units.length > 0 ? (
-              units
-                .filter((unit) => unit.status === "submitted" || unit.status === "admin_review" || unit.auditRequired)
-                .map((unit) => (
-                  <article key={unit.id} className="panel-light">
-                    <div className={styles.rowBetween}>
-                      <strong>{`Unit ${unit.id}`}</strong>
-                      <span className={`trust-band-badge ${unit.trustBand === "priority" ? "band-priority" : unit.trustBand === "standard" ? "band-standard" : "band-hidden"}`}>
-                        {unit.trustBand}
-                      </span>
+          <div className="mt-6 grid gap-4">
+            {units.length ? (
+              units.map((unit) => (
+                <Link
+                  key={unit.id}
+                  href={`/unit/${unit.id}`}
+                  className="rounded-[24px] border border-white/10 bg-white/5 p-4 transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/8"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div>
+                      <strong className="text-white">Unit {unit.id}</strong>
+                      <p className="mt-1 text-sm text-slate-400">System-triggered reason: {unit.auditRequired ? "Auto-flagged due to audit pressure" : `Status is ${unit.status}`}</p>
                     </div>
-                    <div className={styles.signalRow}>
-                      <span className={`chip ${unit.structuralApproved ? "ch-ok" : "ch-warn"}`}>Structural</span>
-                      <span className={`chip ${unit.operationalBaselineApproved ? "ch-ok" : "ch-warn"}`}>Operational</span>
-                      {unit.auditRequired ? <span className="chip ch-err">Audit required</span> : null}
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`signal-chip ${getStatusTone(unit.status)}`}>{unit.status}</span>
+                      <span className={`signal-chip ${getTrustBand(unit.trustScore).tone}`}>{getTrustBand(unit.trustScore).label}</span>
                     </div>
-                  </article>
-                ))
+                  </div>
+                </Link>
+              ))
             ) : (
-              <div className="empty-state panel-light">No units pending review.</div>
+              <div className="empty-state">No units currently require governance review.</div>
             )}
           </div>
         </article>
 
-        <article className="panel">
-          <div className={styles.sectionLead}>
-            <h2 className="section-heading">Audit queue</h2>
-            <p className="mutedText">Audit-triggered units in the selected corridor.</p>
-          </div>
-
-          <div className={styles.adminList}>
-            {loading ? (
-              Array.from({ length: 3 }).map((_, index) => <div key={index} className="skeleton" />)
-            ) : auditQueue.length > 0 ? (
+        <article className="glass-panel p-6">
+          <div className="eyebrow">Audit Queue</div>
+          <h2 className="section-title mt-4">Complaint and audit pressure</h2>
+          <div className="mt-6 grid gap-4">
+            {auditQueue.length ? (
               auditQueue.map((unit) => (
-                <article key={unit.id} className="glass panel">
-                  <div className={styles.rowBetween}>
-                    <strong>{`Unit ${unit.id}`}</strong>
-                    <span className="chip ch-err">Audit queue</span>
+                <Link
+                  key={unit.id}
+                  href={`/unit/${unit.id}`}
+                  className="rounded-[24px] border border-white/10 bg-black/20 p-4 transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-black/30"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <strong className="text-white">Unit {unit.id}</strong>
+                    <span className="signal-chip signal-danger">Audit required</span>
                   </div>
-                  <div className="trust-bar-track">
-                    <div className={`trust-bar-fill ${unit.trustBand === "priority" ? "priority" : unit.trustBand === "standard" ? "standard" : "hidden"}`} style={{ width: `${Number(unit.trustScore || 0)}%` }} />
+                  <div className="mt-3 trust-track">
+                    <div className={`trust-fill ${getTrustBand(unit.trustScore).fillClass}`} style={{ width: `${Number(unit.trustScore || 0)}%` }} />
                   </div>
-                  <p className="mutedText">{`Trust ${Number(unit.trustScore || 0)} | status ${unit.status}`}</p>
-                </article>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">
+                    Trust {unit.trustScore || 0} • Status {unit.status}
+                  </p>
+                </Link>
               ))
             ) : (
-              <div className="empty-state panel-light">No units currently in the audit queue.</div>
+              <div className="empty-state">No risk detected in this corridor.</div>
             )}
           </div>
         </article>
@@ -482,45 +443,41 @@ function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, unit
 export default function DashboardPage() {
   const [role, setRole] = useState("");
   const [loading, setLoading] = useState(true);
-  const [creatingUnit, setCreatingUnit] = useState(false);
   const [error, setError] = useState("");
-
   const [corridors, setCorridors] = useState([]);
+  const [insights, setInsights] = useState([]);
+
   const [corridorId, setCorridorId] = useState("");
   const [selectedCorridor, setSelectedCorridor] = useState("");
-  const [filters, setFilters] = useState({ maxRent: "", ac: "", maxDistance: "" });
-
-  const [units, setUnits] = useState([]);
+  const [filters, setFilters] = useState({ maxRent: "", maxDistance: "", ac: "" });
+  const [visibleUnits, setVisibleUnits] = useState([]);
   const [hiddenReasons, setHiddenReasons] = useState({ hiddenCount: 0, hiddenUnits: [] });
+  const [corridorOverview, setCorridorOverview] = useState(null);
   const [demand, setDemand] = useState(null);
-  const [demandSummary, setDemandSummary] = useState(null);
-  const [insights, setInsights] = useState([]);
+  const [landlordUnits, setLandlordUnits] = useState([]);
+  const [adminUnits, setAdminUnitsState] = useState([]);
   const [auditQueue, setAuditQueue] = useState([]);
-  const [pollingBanner, setPollingBanner] = useState("");
-  const [createForm, setCreateForm] = useState({
-    corridorId: "",
-    rent: "",
-    distanceKm: "",
-    capacity: "",
-  });
-  const latestLandlordUnitsRef = useRef([]);
+  const [creatingUnit, setCreatingUnit] = useState(false);
+  const [createForm, setCreateForm] = useState({ corridorId: "", rent: "", distanceKm: "", capacity: "" });
 
   const studentQuery = useMemo(() => {
     const params = new URLSearchParams();
     if (filters.maxRent) params.set("maxRent", filters.maxRent);
-    if (filters.ac) params.set("ac", filters.ac);
     if (filters.maxDistance) params.set("maxDistance", filters.maxDistance);
+    if (filters.ac) params.set("ac", filters.ac);
     return params.toString();
   }, [filters]);
 
   useEffect(() => {
-    setRole(localStorage.getItem("role") || "");
+    setRole(getStoredRole());
   }, []);
 
   useEffect(() => {
     let active = true;
 
-    async function loadSharedContext() {
+    async function bootstrap() {
+      if (!role) return;
+
       try {
         const [corridorPayload, dawnPayload] = await Promise.all([
           getCorridors().catch(() => []),
@@ -529,46 +486,43 @@ export default function DashboardPage() {
 
         if (!active) return;
 
-        const nextCorridors = Array.isArray(corridorPayload) ? corridorPayload : [];
-        setCorridors(nextCorridors);
+        const corridorList = Array.isArray(corridorPayload) ? corridorPayload : [];
+        setCorridors(corridorList);
         setInsights(Array.isArray(dawnPayload?.insights) ? dawnPayload.insights : []);
 
-        if (!selectedCorridor && nextCorridors[0] && role === "admin") {
-          setSelectedCorridor(String(nextCorridors[0].id));
+        if (role === "admin" && !selectedCorridor && corridorList[0]) {
+          setSelectedCorridor(String(corridorList[0].id));
         }
-      } catch (loadError) {
-        if (active) {
-          setError(loadError.message || "Failed to load dashboard context.");
-        }
+      } catch (requestError) {
+        if (active) setError(requestError.message || "Unable to load dashboard context.");
       }
     }
 
-    if (role) {
-      loadSharedContext();
-    }
-
+    bootstrap();
     return () => {
       active = false;
     };
-  }, [role]);
+  }, [role, selectedCorridor]);
 
-  async function reloadStudentData() {
-    if (!corridorId) return;
+  async function reloadStudentData(nextCorridorId = corridorId) {
+    if (!nextCorridorId) return;
 
     setLoading(true);
     setError("");
     try {
-      const [unitPayload, hiddenPayload, demandPayload] = await Promise.all([
-        getUnits(corridorId, studentQuery),
-        getHiddenReasons(corridorId),
-        getCorridorDemand(corridorId),
+      const [unitPayload, hiddenPayload, overviewPayload, demandPayload] = await Promise.all([
+        getUnits(nextCorridorId, studentQuery),
+        getHiddenReasons(nextCorridorId),
+        getCorridorOverview(nextCorridorId),
+        getCorridorDemand(nextCorridorId),
       ]);
 
-      setUnits(Array.isArray(unitPayload) ? unitPayload : []);
+      setVisibleUnits(Array.isArray(unitPayload) ? unitPayload : []);
       setHiddenReasons(hiddenPayload || { hiddenCount: 0, hiddenUnits: [] });
+      setCorridorOverview(overviewPayload || null);
       setDemand(demandPayload || null);
-    } catch (loadError) {
-      setError(loadError.message || "Failed to load student dashboard.");
+    } catch (requestError) {
+      setError(requestError.message || "Unable to load student visibility data.");
     } finally {
       setLoading(false);
     }
@@ -577,50 +531,29 @@ export default function DashboardPage() {
   useEffect(() => {
     let active = true;
 
-    async function bootstrapStudent() {
+    async function loadStudent() {
       if (role !== "student") return;
-
       setLoading(true);
       setError("");
       try {
         const profile = await getProfile();
-        const studentCorridorId = String(profile?.identity?.corridorId || "");
-        const nextCorridorId = corridorId || studentCorridorId;
-
+        const nextCorridorId = String(profile?.identity?.corridorId || "");
         if (!active) return;
-
         setCorridorId(nextCorridorId);
-
-        if (!nextCorridorId) {
-          setUnits([]);
-          setHiddenReasons({ hiddenCount: 0, hiddenUnits: [] });
-          setDemand(null);
+        if (nextCorridorId) {
+          await reloadStudentData(nextCorridorId);
+        } else {
           setLoading(false);
-          return;
         }
-
-        const [unitPayload, hiddenPayload, demandPayload] = await Promise.all([
-          getUnits(nextCorridorId, studentQuery),
-          getHiddenReasons(nextCorridorId),
-          getCorridorDemand(nextCorridorId),
-        ]);
-
-        if (!active) return;
-        setUnits(Array.isArray(unitPayload) ? unitPayload : []);
-        setHiddenReasons(hiddenPayload || { hiddenCount: 0, hiddenUnits: [] });
-        setDemand(demandPayload || null);
-      } catch (loadError) {
+      } catch (requestError) {
         if (active) {
-          setError(loadError.message || "Failed to load student dashboard.");
-        }
-      } finally {
-        if (active) {
+          setError(requestError.message || "Unable to load student dashboard.");
           setLoading(false);
         }
       }
     }
 
-    bootstrapStudent();
+    loadStudent();
     return () => {
       active = false;
     };
@@ -628,97 +561,57 @@ export default function DashboardPage() {
 
   useEffect(() => {
     let active = true;
-    let intervalId = null;
 
-    async function loadLandlordData(showDiff = false) {
+    async function loadLandlord() {
       if (role !== "landlord") return;
-
-      if (!showDiff) {
-        setLoading(true);
-      }
-
+      setLoading(true);
       setError("");
       try {
-        const unitPayload = await getLandlordUnits();
-        const nextUnits = Array.isArray(unitPayload) ? unitPayload : [];
-
-        let nextDemandSummary = null;
-        const defaultCorridorId = String(nextUnits[0]?.corridorId || "");
-        if (defaultCorridorId) {
-          nextDemandSummary = await getDemandSummary(defaultCorridorId).catch(() => null);
-        }
-
+        const payload = await getLandlordUnits();
         if (!active) return;
-
-        if (showDiff) {
-          const changedUnit = nextUnits.find((unit) => {
-            const previous = latestLandlordUnitsRef.current.find((item) => item.id === unit.id);
-            return previous && previous.status !== unit.status;
-          });
-          setPollingBanner(changedUnit ? `Unit ${changedUnit.id} changed status to ${changedUnit.status}.` : "");
+        const list = Array.isArray(payload) ? payload : [];
+        setLandlordUnits(list);
+        if (!createForm.corridorId && list[0]?.corridorId) {
+          setCreateForm((current) => ({ ...current, corridorId: String(list[0].corridorId) }));
         }
-
-        setCreateForm((current) => ({
-          ...current,
-          corridorId: current.corridorId || defaultCorridorId,
-        }));
-        latestLandlordUnitsRef.current = nextUnits;
-        setUnits(nextUnits);
-        setDemandSummary(nextDemandSummary);
-      } catch (loadError) {
-        if (active) {
-          setError(loadError.message || "Failed to load landlord dashboard.");
-        }
+      } catch (requestError) {
+        if (active) setError(requestError.message || "Unable to load landlord dashboard.");
       } finally {
-        if (active && !showDiff) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     }
 
-    if (role === "landlord") {
-      loadLandlordData(false);
-      intervalId = window.setInterval(() => {
-        loadLandlordData(true);
-      }, 30000);
-    }
-
+    loadLandlord();
     return () => {
       active = false;
-      if (intervalId) window.clearInterval(intervalId);
     };
   }, [role]);
 
   useEffect(() => {
     let active = true;
 
-    async function loadAdminData() {
+    async function loadAdmin() {
       if (role !== "admin" || !selectedCorridor) return;
-
       setLoading(true);
       setError("");
       try {
-        const [unitPayload, auditPayload] = await Promise.all([
+        const [unitsPayload, auditPayload, demandPayload] = await Promise.all([
           getAdminUnits(selectedCorridor),
           getAdminAuditQueue(selectedCorridor),
+          getAdminDemand(selectedCorridor).catch(() => null),
         ]);
-
         if (!active) return;
-
-        setUnits(Array.isArray(unitPayload) ? unitPayload : []);
+        setAdminUnitsState(Array.isArray(unitsPayload) ? unitsPayload : []);
         setAuditQueue(Array.isArray(auditPayload) ? auditPayload : []);
-      } catch (loadError) {
-        if (active) {
-          setError(loadError.message || "Failed to load admin dashboard.");
-        }
+        setDemand(demandPayload || null);
+      } catch (requestError) {
+        if (active) setError(requestError.message || "Unable to load admin governance data.");
       } finally {
-        if (active) {
-          setLoading(false);
-        }
+        if (active) setLoading(false);
       }
     }
 
-    loadAdminData();
+    loadAdmin();
     return () => {
       active = false;
     };
@@ -727,7 +620,6 @@ export default function DashboardPage() {
   async function handleCreateUnit() {
     setCreatingUnit(true);
     setError("");
-    setPollingBanner("");
     try {
       await createUnit({
         corridorId: Number(createForm.corridorId),
@@ -735,24 +627,11 @@ export default function DashboardPage() {
         distanceKm: createForm.distanceKm ? Number(createForm.distanceKm) : undefined,
         capacity: createForm.capacity ? Number(createForm.capacity) : undefined,
       });
-      setCreateForm({
-        corridorId: createForm.corridorId,
-        rent: "",
-        distanceKm: "",
-        capacity: "",
-      });
-      latestLandlordUnitsRef.current = [];
-      const unitPayload = await getLandlordUnits();
-      const nextUnits = Array.isArray(unitPayload) ? unitPayload : [];
-      setUnits(nextUnits);
-      const defaultCorridorId = String(createForm.corridorId || nextUnits[0]?.corridorId || "");
-      if (defaultCorridorId) {
-        const nextDemandSummary = await getDemandSummary(defaultCorridorId).catch(() => null);
-        setDemandSummary(nextDemandSummary);
-      }
-      setPollingBanner("Draft unit created successfully.");
-    } catch (loadError) {
-      setError(loadError.message || "Failed to create unit.");
+      const payload = await getLandlordUnits();
+      setLandlordUnits(Array.isArray(payload) ? payload : []);
+      setCreateForm((current) => ({ ...current, rent: "", distanceKm: "", capacity: "" }));
+    } catch (requestError) {
+      setError(requestError.message || "Unable to create unit draft.");
     } finally {
       setCreatingUnit(false);
     }
@@ -762,6 +641,7 @@ export default function DashboardPage() {
     return (
       <StudentDashboard
         corridorId={corridorId}
+        corridorOverview={corridorOverview}
         corridors={corridors}
         demand={demand}
         error={error}
@@ -769,10 +649,13 @@ export default function DashboardPage() {
         hiddenReasons={hiddenReasons}
         insights={insights}
         loading={loading}
-        reloadStudentData={reloadStudentData}
-        setCorridorId={setCorridorId}
+        reload={() => reloadStudentData()}
+        setCorridorId={(value) => {
+          setCorridorId(value);
+          reloadStudentData(value);
+        }}
         setFilters={setFilters}
-        units={units}
+        visibleUnits={visibleUnits}
       />
     );
   }
@@ -783,14 +666,11 @@ export default function DashboardPage() {
         corridors={corridors}
         createForm={createForm}
         creatingUnit={creatingUnit}
-        demandSummary={demandSummary}
         error={error}
         insights={insights}
-        loading={loading}
         onCreateUnit={handleCreateUnit}
-        pollingBanner={pollingBanner}
         setCreateForm={setCreateForm}
-        units={units}
+        units={landlordUnits}
       />
     );
   }
@@ -799,11 +679,12 @@ export default function DashboardPage() {
     <AdminDashboard
       auditQueue={auditQueue}
       corridors={corridors}
+      demand={demand}
       error={error}
-      loading={loading}
+      insights={insights}
       selectedCorridor={selectedCorridor}
       setSelectedCorridor={setSelectedCorridor}
-      units={units}
+      units={adminUnits}
     />
   );
 }

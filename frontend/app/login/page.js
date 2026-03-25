@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { login } from "@/lib/api";
+import { setSessionFromPayload } from "@/lib/session";
 import styles from "./page.module.css";
 
 const roleTabs = ["student", "landlord", "admin"];
@@ -33,22 +34,7 @@ export default function LoginPage() {
         return;
       }
 
-      localStorage.setItem("token", payload.token || "");
-      localStorage.setItem("role", payload.user?.role || "");
-      localStorage.setItem("user", JSON.stringify(payload.user || {}));
-      localStorage.setItem("userName", payload.user?.name || "");
-
-      if (payload.studentId !== null && payload.studentId !== undefined) {
-        localStorage.setItem("studentId", String(payload.studentId));
-      } else {
-        localStorage.removeItem("studentId");
-      }
-
-      if (payload.landlordId !== null && payload.landlordId !== undefined) {
-        localStorage.setItem("landlordId", String(payload.landlordId));
-      } else {
-        localStorage.removeItem("landlordId");
-      }
+      setSessionFromPayload(payload);
 
       router.push("/dashboard");
     } catch (submitError) {

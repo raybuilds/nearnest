@@ -1,4 +1,4 @@
-const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:3001";
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5000";
 
 export async function apiRequest(path, { method = "GET", body, isFormData = false } = {}) {
   const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
@@ -7,11 +7,22 @@ export async function apiRequest(path, { method = "GET", body, isFormData = fals
     ...(!isFormData ? { "Content-Type": "application/json" } : {}),
   };
 
-  const response = await fetch(`${BASE}${path}`, {
-    method,
-    headers,
-    body: isFormData ? body : body ? JSON.stringify(body) : undefined,
-  });
+  let response;
+
+  try {
+    response = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: isFormData ? body : body ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    const networkError = new Error(
+      `NearNest could not reach the backend at ${BASE}. Please make sure the backend server is running.`
+    );
+    networkError.cause = error;
+    networkError.code = "BACKEND_UNAVAILABLE";
+    throw networkError;
+  }
 
   if (response.status === 401) {
     if (typeof window !== "undefined") {

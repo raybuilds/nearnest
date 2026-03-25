@@ -4,93 +4,37 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ComplaintForm from "@/components/ComplaintForm";
 import { getComplaints, resolveComplaint } from "@/lib/api";
-import styles from "./page.module.css";
+import { formatDateTime, getStatusTone } from "@/lib/governance";
+import { getStoredRole } from "@/lib/session";
 
-function SlaCountdown({ slaCountdownMs }) {
-  const [remainingMs, setRemainingMs] = useState(Number(slaCountdownMs || 0));
-
-  useEffect(() => {
-    setRemainingMs(Number(slaCountdownMs || 0));
-  }, [slaCountdownMs]);
+function Countdown({ ms }) {
+  const [remaining, setRemaining] = useState(Number(ms || 0));
 
   useEffect(() => {
-    if (slaCountdownMs === null || slaCountdownMs === undefined) return undefined;
+    setRemaining(Number(ms || 0));
+  }, [ms]);
 
-    const intervalId = window.setInterval(() => {
-      setRemainingMs((current) => current - 1000);
-    }, 1000);
+  useEffect(() => {
+    if (ms == null) return undefined;
+    const id = window.setInterval(() => setRemaining((current) => current - 1000), 1000);
+    return () => window.clearInterval(id);
+  }, [ms]);
 
-    return () => window.clearInterval(intervalId);
-  }, [slaCountdownMs]);
+  if (ms == null) return null;
+  if (remaining <= 0) return <span className="signal-chip signal-danger">Breached</span>;
 
-  if (slaCountdownMs === null || slaCountdownMs === undefined) {
-    return null;
-  }
-
-  if (remainingMs <= 0) {
-    return <span className="sla-countdown pulse" style={{ color: "var(--color-error)" }}>SLA BREACHED</span>;
-  }
-
-  const totalSeconds = Math.floor(remainingMs / 1000);
+  const totalSeconds = Math.floor(remaining / 1000);
   const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
   const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
-  const seconds = String(totalSeconds % 60).padStart(2, "0");
-  const urgent = remainingMs <= 43200000;
-
-  return (
-    <span className={`sla-countdown ${urgent ? "pulse" : ""}`} style={{ color: urgent ? "var(--color-error)" : "var(--color-warn)" }}>
-      {`${hours}:${minutes}:${seconds}`}
-    </span>
-  );
-}
-
-function severityLabel(severity) {
-  if (severity <= 2) return "ch-ok";
-  if (severity === 3) return "ch-warn";
-  return "ch-err";
-}
-
-function normalizeMetrics(payload) {
-  if (payload?.role === "student") {
-    const complaints = Array.isArray(payload.complaints) ? payload.complaints : [];
-    const resolved = complaints.filter((item) => item.resolved).length;
-    const breached = complaints.filter((item) => item.slaStatus === "late" || item.slaStatus === "sla_breached").length;
-    return [
-      { label: "Total", value: complaints.length, note: "Submitted complaints" },
-      { label: "Open", value: complaints.filter((item) => !item.resolved).length, note: "Still unresolved" },
-      { label: "Resolved", value: resolved, note: "Closed items" },
-      { label: "SLA Breached", value: breached, note: "Late or breached" },
-    ];
-  }
-
-  const metrics = payload?.metrics || {};
-  return [
-    { label: "Total", value: payload?.total || 0, note: "Visible complaints" },
-    { label: "Open", value: metrics.openComplaints || 0, note: "Active issues" },
-    { label: "Resolved", value: (payload?.total || 0) - Number(metrics.openComplaints || 0), note: "Closed items" },
-    { label: "Avg Resolution", value: metrics.avgResolutionHours ?? "-", note: "Hours" },
-    {
-      label: "SLA Late",
-      value: metrics.slaLateCount ?? metrics.lateComplaints ?? metrics.lateOrBreached ?? 0,
-      note: "Late or breached",
-    },
-  ];
+  return <span className="signal-chip signal-warning">{`${hours}:${minutes} remaining`}</span>;
 }
 
 export default function ComplaintsPage() {
   const [role, setRole] = useState("");
+  const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [payload, setPayload] = useState(null);
-  const [selected, setSelected] = useState(null);
-  const [filters, setFilters] = useState({
-    unit: "",
-    status: "",
-    incidentType: "",
-    severity: "",
-    from: "",
-    to: "",
-  });
+  const [filters, setFilters] = useState({ unit: "", status: "", severity: "" });
 
   async function loadComplaints(activeFilters = filters) {
     setLoading(true);
@@ -99,285 +43,199 @@ export default function ComplaintsPage() {
       const params = new URLSearchParams();
       if (activeFilters.unit) params.set("unitId", activeFilters.unit);
       if (activeFilters.status) params.set("status", activeFilters.status);
-      if (activeFilters.incidentType) params.set("incidentType", activeFilters.incidentType);
       const response = await getComplaints(params.toString());
       setPayload(response || null);
-    } catch (loadError) {
-      setError(loadError.message || "Failed to load complaints.");
-      setPayload(null);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to load complaints.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    setRole(localStorage.getItem("role") || "");
+    setRole(getStoredRole());
     loadComplaints();
   }, []);
 
   const complaints = useMemo(() => {
     const list = Array.isArray(payload?.complaints) ? payload.complaints : [];
-    return list.filter((complaint) => {
-      if (filters.severity && String(complaint.severity) !== String(filters.severity)) return false;
-      if (filters.from && complaint.createdAt && new Date(complaint.createdAt) < new Date(filters.from)) return false;
-      if (filters.to && complaint.createdAt && new Date(complaint.createdAt) > new Date(`${filters.to}T23:59:59`)) return false;
-      return true;
-    });
-  }, [filters.from, filters.severity, filters.to, payload]);
+    if (!filters.severity) return list;
+    return list.filter((item) => String(item.severity) === filters.severity);
+  }, [filters.severity, payload]);
 
-  const metrics = useMemo(() => normalizeMetrics(payload), [payload]);
-  const severityDistribution = useMemo(() => {
-    return complaints.reduce((acc, complaint) => {
-      const key = String(complaint.severity || 0);
-      acc[key] = (acc[key] || 0) + 1;
-      return acc;
-    }, {});
+  const metrics = useMemo(() => {
+    if (!complaints.length) {
+      return [
+        { label: "Total", value: 0, note: "No complaints found" },
+        { label: "Open", value: 0, note: "No active issues" },
+        { label: "Resolved", value: 0, note: "No resolved issues" },
+        { label: "Breached", value: 0, note: "No SLA breaches" },
+      ];
+    }
+
+    const resolved = complaints.filter((item) => item.resolved).length;
+    const breached = complaints.filter((item) => item.slaStatus === "late" || item.slaStatus === "sla_breached").length;
+    return [
+      { label: "Total", value: complaints.length, note: "Complaint records in current scope" },
+      { label: "Open", value: complaints.filter((item) => !item.resolved).length, note: "Still influencing trust" },
+      { label: "Resolved", value: resolved, note: "Closed governance events" },
+      { label: "Breached", value: breached, note: "Late or SLA-breached" },
+    ];
   }, [complaints]);
 
-  async function handleResolve(complaintId) {
+  async function handleResolve(id) {
+    setError("");
     try {
-      await resolveComplaint(complaintId);
+      await resolveComplaint(id);
       await loadComplaints();
-    } catch (resolveError) {
-      setError(resolveError.message || "Failed to resolve complaint.");
+    } catch (requestError) {
+      setError(requestError.message || "Unable to resolve complaint.");
     }
   }
 
   return (
-    <div className={`pageShell ${styles.page}`}>
-      <section className="fade-up">
-        <h1 className="hero-heading">Complaints command center</h1>
-        <p className="pageSubtitle">Track complaint severity, SLA exposure, incident flags, and remediation progress across the role-specific queue.</p>
+    <div className="grid gap-6">
+      <section className="glass-panel-strong blueprint-border p-8 sm:p-10">
+        <div className="eyebrow">Complaint Governance</div>
+        <h1 className="page-title mt-5 text-gradient">Complaint signals with visible trust impact.</h1>
+        <p className="subtle-copy mt-4 max-w-3xl">
+          Complaints are not background tickets. They are governance inputs that influence trust score, SLA posture, and unit visibility.
+        </p>
+
+        <div className="mt-8 grid gap-4 md:grid-cols-3 xl:grid-cols-4">
+          <label className="grid gap-2">
+            <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Unit</span>
+            <select className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, unit: event.target.value }))} value={filters.unit}>
+              <option value="">All units</option>
+              {Array.from(new Set((payload?.complaints || []).map((item) => item.unitId))).map((unitId) => (
+                <option key={unitId} value={unitId}>
+                  Unit {unitId}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="grid gap-2">
+            <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Status</span>
+            <select className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))} value={filters.status}>
+              <option value="">All</option>
+              <option value="open">Open</option>
+              <option value="resolved">Resolved</option>
+              <option value="late">Late</option>
+              <option value="sla_breached">SLA breached</option>
+            </select>
+          </label>
+          <label className="grid gap-2">
+            <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Severity</span>
+            <select className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, severity: event.target.value }))} value={filters.severity}>
+              <option value="">All severities</option>
+              {["1", "2", "3", "4", "5"].map((value) => (
+                <option key={value} value={value}>
+                  Severity {value}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className="flex items-end">
+            <button className="btn-primary w-full" onClick={() => loadComplaints(filters)} type="button">
+              Apply filters
+            </button>
+          </div>
+        </div>
       </section>
 
-      <section className={`panel-light fade-up-d1 ${styles.filters}`}>
-        <label className={styles.filterField}>
-          <span>Unit</span>
-          <select className="app-input" value={filters.unit} onChange={(event) => setFilters((prev) => ({ ...prev, unit: event.target.value }))}>
-            <option value="">All</option>
-            {Array.from(new Set((payload?.complaints || []).map((item) => item.unitId))).map((unitId) => (
-              <option key={unitId} value={unitId}>
-                {unitId}
-              </option>
-            ))}
-          </select>
-        </label>
+      {error ? <div className="status-banner error">{error}</div> : null}
 
-        <label className={styles.filterField}>
-          <span>Status</span>
-          <select className="app-input" value={filters.status} onChange={(event) => setFilters((prev) => ({ ...prev, status: event.target.value }))}>
-            <option value="">All</option>
-            <option value="open">open</option>
-            <option value="resolved">resolved</option>
-            <option value="late">late</option>
-            <option value="sla_breached">sla_breached</option>
-          </select>
-        </label>
-
-        <label className={styles.filterField}>
-          <span>Incident type</span>
-          <select className="app-input" value={filters.incidentType} onChange={(event) => setFilters((prev) => ({ ...prev, incidentType: event.target.value }))}>
-            <option value="">All</option>
-            <option value="safety">safety</option>
-            <option value="injury">injury</option>
-            <option value="fire">fire</option>
-            <option value="harassment">harassment</option>
-            <option value="water">water</option>
-            <option value="common_area">common_area</option>
-            <option value="electrical">electrical</option>
-            <option value="other">other</option>
-          </select>
-        </label>
-
-        <label className={styles.filterField}>
-          <span>Severity</span>
-          <select className="app-input" value={filters.severity} onChange={(event) => setFilters((prev) => ({ ...prev, severity: event.target.value }))}>
-            <option value="">All</option>
-            {["1", "2", "3", "4", "5"].map((value) => (
-              <option key={value} value={value}>
-                {value}
-              </option>
-            ))}
-          </select>
-        </label>
-
-        <label className={styles.filterField}>
-          <span>From</span>
-          <input className="app-input" type="date" value={filters.from} onChange={(event) => setFilters((prev) => ({ ...prev, from: event.target.value }))} />
-        </label>
-
-        <label className={styles.filterField}>
-          <span>To</span>
-          <input className="app-input" type="date" value={filters.to} onChange={(event) => setFilters((prev) => ({ ...prev, to: event.target.value }))} />
-        </label>
-
-        <button className="btn-secondary" onClick={() => loadComplaints(filters)} type="button">
-          Apply
-        </button>
-      </section>
-
-      {error ? <div className="status-banner error fade-up-d1">{error}</div> : null}
-
-      <section className={`${styles.metricGrid} fade-up-d2`}>
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
         {metrics.map((metric) => (
-          <article key={metric.label} className="metric-card">
-            <p className="label-caps">{metric.label}</p>
+          <article key={metric.label} className="metric-tile">
+            <p>{metric.label}</p>
             <strong>{metric.value}</strong>
             <span>{metric.note}</span>
           </article>
         ))}
       </section>
 
-      {role !== "student" ? (
-        <section className={`panel fade-up-d2 ${styles.distributionPanel}`}>
-          <div className={styles.sectionLead}>
-            <h2 className="section-heading">Severity distribution</h2>
-            <p className="mutedText">Live breakdown of complaint severity in the current filtered queue.</p>
+      <section className="grid gap-5 xl:grid-cols-[1.2fr,0.8fr]">
+        <article className="glass-panel p-6">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow">Complaint stream</div>
+              <h2 className="section-title mt-4">Incident, severity, SLA, trust impact</h2>
+            </div>
           </div>
 
-          <div className={styles.severityBars}>
-            {severityDistribution && ["1", "2", "3", "4", "5"].map((level) => (
-              <div key={level} className={styles.severityBarRow}>
-                <div className={styles.barLabel}>
-                  <span className={`chip ${severityLabel(Number(level))}`}>{level}</span>
-                  <strong>{severityDistribution[level] || 0}</strong>
-                </div>
-                <div className="trust-bar-track">
-                  <div
-                    className={`trust-bar-fill ${Number(level) >= 4 ? "hidden" : Number(level) === 3 ? "standard" : "priority"}`}
-                    style={{
-                      width: `${Math.min(100, complaints.length > 0 ? ((severityDistribution[level] || 0) / complaints.length) * 100 : 0)}%`,
-                    }}
-                  />
-                </div>
-              </div>
-            ))}
-          </div>
-        </section>
-      ) : null}
-
-      <section className={`fade-up-d3 ${styles.mainLayout}`}>
-        <div className={styles.cardGrid}>
-          {loading ? (
-            Array.from({ length: 4 }).map((_, index) => <div key={index} className="skeleton" />)
-          ) : complaints.length > 0 ? (
-            complaints.map((complaint) => (
-              <article key={complaint.id} className={`${styles.complaintCard} glass`} onClick={() => setSelected(complaint)}>
-                <div className={styles.cardHeader}>
-                  <span className={`chip ${severityLabel(Number(complaint.severity || 0))}`}>{`Severity ${complaint.severity}`}</span>
-                  <span className={`chip ${complaint.slaStatus === "resolved" ? "ch-ok" : complaint.slaStatus === "late" || complaint.slaStatus === "sla_breached" ? "ch-err" : "ch-warn"}`}>
-                    {complaint.slaStatus}
-                  </span>
-                  <span className={`chip ${complaint.resolved ? "ch-ok" : "ch-blue"}`}>{complaint.resolved ? "resolved" : "open"}</span>
-                </div>
-
-                <div className={styles.cardMeta}>
-                  {complaint.incidentType ? <span className="chip ch-blue">{complaint.incidentType}</span> : null}
-                  {complaint.incidentFlag ? <span className="chip ch-err">Flagged incident</span> : null}
-                </div>
-
-                <p className={styles.message}>{complaint.message || "No description provided."}</p>
-
-                <div className={styles.cardFooter}>
-                  <div className={styles.metaText}>
-                    <span>{`Unit ${complaint.unitId}`}</span>
-                    <span>{new Date(complaint.createdAt).toLocaleString()}</span>
-                    {role !== "student" && complaint.student?.name ? <span>{complaint.student.name}</span> : null}
+          <div className="mt-6 grid gap-4">
+            {loading ? (
+              Array.from({ length: 4 }).map((_, index) => <div key={index} className="surface-panel h-48 animate-pulse" />)
+            ) : complaints.length ? (
+              complaints.map((complaint) => (
+                <article key={complaint.id} className="rounded-[24px] border border-white/10 bg-white/5 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap gap-2">
+                      <span className={`signal-chip ${getStatusTone(complaint.slaStatus)}`}>{complaint.slaStatus || "Open"}</span>
+                      <span className="signal-chip signal-info">Severity {complaint.severity}</span>
+                      {complaint.incidentType ? <span className="signal-chip signal-warning">{complaint.incidentType}</span> : null}
+                    </div>
+                    {!complaint.resolved ? <Countdown ms={complaint.slaCountdownMs} /> : <span className="signal-chip signal-success">Resolved</span>}
                   </div>
-                  {!complaint.resolved ? <SlaCountdown slaCountdownMs={complaint.slaCountdownMs} /> : null}
-                </div>
 
-                {complaint.trustImpactHint !== undefined ? <div className="label-caps">{`Trust impact ${complaint.trustImpactHint}`}</div> : null}
+                  <p className="mt-4 text-base leading-7 text-slate-200">{complaint.message || "No description provided."}</p>
 
-                {role !== "student" && !complaint.resolved ? (
-                  <button
-                    className="btn-soft mint"
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      handleResolve(complaint.id);
-                    }}
-                    type="button"
-                  >
-                    Resolve
-                  </button>
-                ) : null}
+                  <div className="mt-4 grid gap-3 md:grid-cols-3">
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Unit</p>
+                      <strong className="mt-2 block text-white">Unit {complaint.unitId}</strong>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Created</p>
+                      <strong className="mt-2 block text-white">{formatDateTime(complaint.createdAt)}</strong>
+                    </div>
+                    <div>
+                      <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Trust impact</p>
+                      <strong className="mt-2 block text-white">{complaint.trustImpactHint ?? "Tracked by engine"}</strong>
+                    </div>
+                  </div>
 
-                {role === "student" ? (
-                  <Link
-                    className="btn-soft blue"
-                    href={`/unit/${complaint.unitId}`}
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    View unit
-                  </Link>
-                ) : null}
-              </article>
-            ))
-          ) : (
-            <div className="empty-state panel-light">No complaints matched the current filters.</div>
-          )}
-        </div>
+                  <div className="mt-5 flex flex-wrap gap-3">
+                    <Link className="btn-secondary" href={`/unit/${complaint.unitId}`}>
+                      Open unit detail
+                    </Link>
+                    {role !== "student" && !complaint.resolved ? (
+                      <button className="btn-primary" onClick={() => handleResolve(complaint.id)} type="button">
+                        Resolve issue
+                      </button>
+                    ) : null}
+                  </div>
+                </article>
+              ))
+            ) : (
+              <div className="empty-state">No complaints found.</div>
+            )}
+          </div>
+        </article>
 
-        <div className={styles.formColumn}>
+        <div className="grid gap-5">
           {role === "student" ? (
             <ComplaintForm />
           ) : (
-            <div className="panel">
-              <h2 className="section-heading">Resolution workflow</h2>
-              <p className="mutedText">
-                Select any open complaint card to resolve it from the side panel and refresh trust metrics.
-              </p>
-            </div>
+            <article className="glass-panel p-6">
+              <div className="eyebrow">Resolution workflow</div>
+              <h2 className="section-title mt-4">Governance response guide</h2>
+              <div className="mt-5 grid gap-3">
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+                  Active complaints continue to influence trust until resolved.
+                </div>
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+                  Late resolution can trigger stronger audit pressure and hide units from students.
+                </div>
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+                  Resolution should be accompanied by evidence and a clear rationale for restored confidence.
+                </div>
+              </div>
+            </article>
           )}
         </div>
       </section>
-
-      {selected ? (
-        <div className={styles.drawerOverlay} onClick={() => setSelected(null)}>
-          <aside className={styles.drawer} onClick={(event) => event.stopPropagation()}>
-            <div className={styles.drawerHeader}>
-              <div>
-                <p className="label-caps">{`Complaint ${selected.id}`}</p>
-                <h2 className="section-heading">{`Unit ${selected.unitId}`}</h2>
-              </div>
-              <button className="btn-secondary" onClick={() => setSelected(null)} type="button">
-                Close
-              </button>
-            </div>
-
-            <div className={styles.drawerStack}>
-              <span className={`chip ${severityLabel(Number(selected.severity || 0))}`}>{`Severity ${selected.severity}`}</span>
-              <span className={`chip ${selected.slaStatus === "resolved" ? "ch-ok" : selected.slaStatus === "late" || selected.slaStatus === "sla_breached" ? "ch-err" : "ch-warn"}`}>
-                {selected.slaStatus}
-              </span>
-              {selected.incidentFlag ? <span className="chip ch-err">Flagged incident</span> : null}
-            </div>
-
-            <p className={styles.drawerText}>{selected.message || "No description provided."}</p>
-
-            <div className={styles.timeline}>
-              <div className="panel-light">
-                <strong>Created</strong>
-                <span>{new Date(selected.createdAt).toLocaleString()}</span>
-              </div>
-              {selected.resolvedAt ? (
-                <div className="panel-light">
-                  <strong>Resolved</strong>
-                  <span>{new Date(selected.resolvedAt).toLocaleString()}</span>
-                </div>
-              ) : null}
-              {selected.slaDeadline ? (
-                <div className="panel-light">
-                  <strong>SLA deadline</strong>
-                  <span>{new Date(selected.slaDeadline).toLocaleString()}</span>
-                </div>
-              ) : null}
-            </div>
-
-            {role !== "student" && !selected.resolved ? <ComplaintForm complaintId={selected.id} /> : null}
-          </aside>
-        </div>
-      ) : null}
     </div>
   );
 }

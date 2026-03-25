@@ -1,87 +1,83 @@
-import styles from "./page.module.css";
-
-const architectureNodes = [
-  { title: "App Router", body: "Next.js 14 frontend with role-aware client pages and shared API service calls." },
-  { title: "Express API", body: "Backend endpoints drive auth, units, complaints, audits, profiles, and Dawn intelligence." },
-  { title: "Trust Logic", body: "Trust bands remain priority, standard, or hidden, with visibility and audit banners surfaced in UI." },
-  { title: "Operational AI", body: "Dawn handles structured insight cards, complaint drafting, trust explanations, and advisory responses." },
+const pillars = [
+  {
+    title: "Behavior",
+    body: "Complaints, evidence quality, self-declaration accuracy, and resolution behavior feed the system.",
+  },
+  {
+    title: "Signals",
+    body: "Complaint density, SLA breaches, incident flags, and audit triggers are translated into visible operational signals.",
+  },
+  {
+    title: "Trust",
+    body: "Trust score is not cosmetic. It determines whether a unit remains visible or starts sliding toward restriction.",
+  },
+  {
+    title: "Governance",
+    body: "Admins and rules enforce approval, suspension, audit, and corrective plans based on traceable causes.",
+  },
+  {
+    title: "Visibility",
+    body: "Students only see supply that still meets the trust and governance bar for safe discovery.",
+  },
 ];
 
-const launchFlow = [
-  "Register as a student or landlord and complete login to establish the local session.",
-  "Students join the demand pool, browse visible units, shortlist housing, and submit complaints.",
-  "Landlords publish draft units, upload required evidence, submit for review, and track complaints or audits.",
-  "Admins review units, manage corridor resources, and resolve audit workflows through governance screens.",
+const dawnCapabilities = [
+  "Draft complaint language from a situation description.",
+  "Explain why a unit is visible or hidden.",
+  "Recommend safer units from live intelligence.",
+  "Summarize corridor risk and operational pressure.",
 ];
-
-const demoAccounts = [
-  { role: "Student", email: "student@nearnest.local", password: "student123" },
-  { role: "Landlord", email: "landlord@nearnest.local", password: "landlord123" },
-  { role: "Admin", email: "admin@nearnest.local", password: "admin123" },
-];
-
-const apiHighlights = ["/auth/login", "/units/:corridorId", "/complaint", "/profile", "/admin/units/:corridorId", "/dawn/query"];
 
 export default function DocsPage() {
   return (
-    <div className={styles.page}>
-      <section className={`${styles.hero} glass fade-up`}>
-        <p className="label-caps">NearNest docs</p>
-        <h1 className="hero-heading">NearNest docs</h1>
-        <p className={styles.subtitle}>Product overview, launch flow, and backend route highlights for the current platform build.</p>
-      </section>
-
-      <section className="panel fade-up-d1">
-        <p className="label-caps">Product overview</p>
-        <p className={styles.copy}>
-          NearNest is a student housing workflow that combines verified demand, trust-scored unit discovery, complaint tracking,
-          landlord operations, audit governance, and Dawn-assisted intelligence.
+    <div className="grid gap-6">
+      <section className="glass-panel-strong blueprint-border p-8 sm:p-10">
+        <div className="eyebrow">Platform Docs</div>
+        <h1 className="page-title mt-5 text-gradient">NearNest is governance software disguised as housing UX.</h1>
+        <p className="subtle-copy mt-4 max-w-3xl">
+          This platform is deliberately not a generic listing marketplace. Every page, card, and action exists to expose why
+          a unit is visible, hidden, suspended, or trusted.
         </p>
       </section>
 
-      <section className="panel fade-up-d2">
-        <p className="label-caps">Architecture snapshot</p>
-        <div className="docs-grid">
-          {architectureNodes.map((node) => (
-            <article key={node.title} className="docs-node">
-              <strong>{node.title}</strong>
-              <p className={styles.copy}>{node.body}</p>
-            </article>
-          ))}
-        </div>
+      <section className="grid gap-4 lg:grid-cols-5">
+        {pillars.map((pillar) => (
+          <article key={pillar.title} className="glass-panel p-5">
+            <div className="eyebrow">{pillar.title}</div>
+            <p className="mt-4 text-sm leading-6 text-slate-300">{pillar.body}</p>
+          </article>
+        ))}
       </section>
 
-      <section className={`${styles.grid} fade-up-d3`}>
-        <article className="panel">
-          <p className="label-caps">Launch flow</p>
-          <ol className={styles.flow}>
-            {launchFlow.map((item) => (
-              <li key={item}>{item}</li>
-            ))}
-          </ol>
+      <section className="grid gap-5 lg:grid-cols-2">
+        <article className="glass-panel p-6">
+          <div className="eyebrow">Role Model</div>
+          <div className="mt-5 grid gap-4">
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+              Students receive trust-filtered visibility, not raw inventory volume.
+            </div>
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+              Landlords manage evidence, trust decline, complaint pressure, and audit exposure.
+            </div>
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+              Admins see corridor risk, governance triggers, and distribution of trust across supply.
+            </div>
+          </div>
         </article>
 
-        <article className="panel">
-          <p className="label-caps">Demo accounts</p>
-          <div className={styles.table}>
-            {demoAccounts.map((account) => (
-              <div key={account.role} className={styles.tableRow}>
-                <strong>{account.role}</strong>
-                <span>{account.email}</span>
-                <code>{account.password}</code>
+        <article className="glass-panel p-6">
+          <div className="eyebrow">Dawn Assistant</div>
+          <div className="mt-5 grid gap-3">
+            {dawnCapabilities.map((item) => (
+              <div key={item} className="rounded-[24px] border border-white/10 bg-black/20 p-4 text-sm leading-6 text-slate-300">
+                {item}
               </div>
             ))}
           </div>
+          <p className="mt-5 text-sm leading-6 text-slate-400">
+            Dawn is not the decision-maker. It is the interface to intelligence and explanation.
+          </p>
         </article>
-      </section>
-
-      <section className="panel-light fade-up-d3">
-        <p className="label-caps">API route highlights</p>
-        <div className={styles.apiList}>
-          {apiHighlights.map((route) => (
-            <code key={route}>{route}</code>
-          ))}
-        </div>
       </section>
     </div>
   );

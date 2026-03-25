@@ -4,14 +4,9 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ComplaintForm from "@/components/ComplaintForm";
 import {
-  checkIn,
   explainUnit,
   getAdminAuditLogs,
-  getAdminDemand,
   getAdminUnitDetail,
-  getInterestedStudents,
-  getLandlordAuditLogs,
-  getLandlordComplaints,
   getLandlordOverview,
   getStudentUnitDetail,
   patchOperationalCL,
@@ -19,848 +14,594 @@ import {
   penalizeSelfDecl,
   putOperationalCL,
   putStructuralCL,
-  queryDawn,
   reviewUnit,
-  shortlistUnit,
+  resolveAuditLog,
+  setCorrectivePlan,
   submitUnit,
   triggerAudit,
   uploadMedia,
 } from "@/lib/api";
-import styles from "./page.module.css";
+import { formatDateTime, getStatusTone, getTrustBand } from "@/lib/governance";
+import { getStoredRole } from "@/lib/session";
 
-function trustBandLabel(trustBand) {
-  if (trustBand === "priority") return "Priority";
-  if (trustBand === "standard") return "Standard";
-  return "Hidden";
+const structuralFields = ["fireExit", "wiringSafe", "plumbingSafe", "occupancyCompliant"];
+const operationalFields = ["bedAvailable", "waterAvailable", "toiletsAvailable", "ventilationGood"];
+const evidenceTypes = ["photo", "document", "walkthrough360"];
+
+function ToggleGrid({ values, setValues, fields }) {
+  return (
+    <div className="grid gap-3 sm:grid-cols-2">
+      {fields.map((field) => (
+        <label key={field} className="flex items-center justify-between rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+          <span>{field}</span>
+          <input
+            checked={Boolean(values?.[field])}
+            onChange={() => setValues((current) => ({ ...current, [field]: !current?.[field] }))}
+            type="checkbox"
+          />
+        </label>
+      ))}
+    </div>
+  );
 }
-
-function trustBandClass(trustBand) {
-  if (trustBand === "priority") return "band-priority";
-  if (trustBand === "standard") return "band-standard";
-  return "band-hidden";
-}
-
-function statusChip(status) {
-  if (status === "approved" || status === "live") return "ch-ok";
-  if (status === "submitted" || status === "pending") return "ch-warn";
-  return "ch-err";
-}
-
-function formatDate(value) {
-  if (!value) return "Not available";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Not available";
-  return date.toLocaleString();
-}
-
-function mediaTypesSubmitted(overview) {
-  return Array.from(new Set((overview?.media?.all || []).map((item) => String(item.type || "").trim().toLowerCase())));
-}
-
-const requiredMediaTypes = ["photo", "document", "walkthrough360"];
 
 export default function UnitDetailPage({ params }) {
   const unitId = params.unitId;
   const [role, setRole] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [tab, setTab] = useState("overview");
   const [banner, setBanner] = useState("");
+  const [explanation, setExplanation] = useState(null);
   const [studentDetail, setStudentDetail] = useState(null);
-  const [landlordOverview, setLandlordOverview] = useState(null);
-  const [landlordComplaints, setLandlordComplaints] = useState([]);
-  const [landlordAudits, setLandlordAudits] = useState([]);
-  const [interestedStudents, setInterestedStudents] = useState(null);
+  const [landlordDetail, setLandlordDetail] = useState(null);
   const [adminDetail, setAdminDetail] = useState(null);
   const [adminAuditLogs, setAdminAuditLogs] = useState([]);
-  const [adminDemand, setAdminDemand] = useState(null);
-  const [dawnTrustCard, setDawnTrustCard] = useState(null);
-  const [actionError, setActionError] = useState("");
   const [structuralForm, setStructuralForm] = useState({});
   const [operationalForm, setOperationalForm] = useState({});
-  const [penaltyForm, setPenaltyForm] = useState({ reason: "", penaltyPoints: 8 });
+  const [selfDeclaration, setSelfDeclaration] = useState("");
   const [auditReason, setAuditReason] = useState("");
-  const [checkInStudentId, setCheckInStudentId] = useState("");
+  const [penaltyForm, setPenaltyForm] = useState({ reason: "", penaltyPoints: 8 });
+  const [auditForms, setAuditForms] = useState({});
 
-  async function loadPageData(currentRole) {
+  async function loadPage(currentRole) {
     setLoading(true);
     setError("");
     try {
       if (currentRole === "student") {
         const payload = await getStudentUnitDetail(unitId);
         setStudentDetail(payload);
-        setLandlordOverview(null);
+        setLandlordDetail(null);
         setAdminDetail(null);
       } else if (currentRole === "landlord") {
-        const [overview, complaintsPayload, auditsPayload, interestedPayload] = await Promise.all([
-          getLandlordOverview(unitId),
-          getLandlordComplaints(unitId),
-          getLandlordAuditLogs(unitId),
-          getInterestedStudents(unitId),
-        ]);
-        setLandlordOverview(overview);
-        setLandlordComplaints(complaintsPayload?.complaints || []);
-        setLandlordAudits(auditsPayload?.logs || []);
-        setInterestedStudents(interestedPayload);
-        setStructuralForm(overview?.checklists?.structural || {});
-        setOperationalForm(overview?.checklists?.operational || {});
+        const payload = await getLandlordOverview(unitId);
+        setLandlordDetail(payload);
+        setStructuralForm(payload?.checklists?.structural || {});
+        setOperationalForm(payload?.checklists?.operational || {});
+        setSelfDeclaration(payload?.checklists?.operational?.selfDeclaration || "");
         setStudentDetail(null);
         setAdminDetail(null);
-      } else if (currentRole === "admin") {
-        const detail = await getAdminUnitDetail(unitId);
-        const audits = await getAdminAuditLogs(unitId);
-        const corridorId = detail?.evidence?.corridor?.id;
-        const demand = corridorId ? await getAdminDemand(corridorId) : null;
-        setAdminDetail(detail);
-        setAdminAuditLogs(audits || []);
-        setAdminDemand(demand);
-        setStructuralForm(detail?.evidence?.structuralChecklist || {});
-        setOperationalForm(detail?.evidence?.operationalChecklist || {});
-        setStudentDetail(null);
-        setLandlordOverview(null);
       } else {
-        setError("Unsupported role");
+        const [payload, auditLogs] = await Promise.all([
+          getAdminUnitDetail(unitId),
+          getAdminAuditLogs(unitId).catch(() => []),
+        ]);
+        setAdminDetail(payload);
+        setAdminAuditLogs(Array.isArray(auditLogs) ? auditLogs : []);
+        setStructuralForm(payload?.evidence?.structuralChecklist || {});
+        setOperationalForm(payload?.evidence?.operationalChecklist || {});
+        setSelfDeclaration(payload?.evidence?.selfDeclaration || "");
+        setStudentDetail(null);
+        setLandlordDetail(null);
       }
-    } catch (loadError) {
-      setError(loadError.message || "Unable to load unit details.");
+    } catch (requestError) {
+      setError(requestError.message || "Unable to load unit detail.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    const currentRole = localStorage.getItem("role") || "";
+    const currentRole = getStoredRole();
     setRole(currentRole);
-    if (currentRole === "landlord") setTab("overview");
-    if (currentRole === "admin") setTab("governance");
-    if (currentRole === "student") setTab("overview");
     if (currentRole) {
-      loadPageData(currentRole);
+      loadPage(currentRole);
     } else {
       setLoading(false);
-      setError("Please sign in to view unit details.");
     }
   }, [unitId]);
 
-  const landlordMediaTypes = useMemo(() => mediaTypesSubmitted(landlordOverview), [landlordOverview]);
-  const canSubmitUnit = requiredMediaTypes.every((type) => landlordMediaTypes.includes(type));
-  const currentTrustBand =
-    studentDetail?.trustSignals?.trustBand ||
-    adminDetail?.governanceCore?.trustBand ||
-    (Number(landlordOverview?.trustScore || 0) >= 80 ? "priority" : Number(landlordOverview?.trustScore || 0) >= 50 ? "standard" : "hidden");
+  const trustScore =
+    studentDetail?.trustSignals?.trustScore ||
+    landlordDetail?.trustScore ||
+    adminDetail?.governanceCore?.trustScore ||
+    0;
+  const trust = getTrustBand(trustScore);
+  const status =
+    adminDetail?.governanceCore?.status ||
+    landlordDetail?.status ||
+    (studentDetail?.transparency?.visibleToStudents ? "visible" : "hidden");
 
-  async function handleTrustExplain() {
-    setActionError("");
-    setBanner("");
+  const visibilityNotes = useMemo(() => {
+    if (studentDetail?.transparency?.visibilityReasons) return studentDetail.transparency.visibilityReasons;
+    if (adminDetail?.behavioralHistory) {
+      return [
+        `${adminDetail.behavioralHistory.slaMetrics?.lateResolvedCount || 0} late resolution events shape governance.`,
+        `${adminDetail.behavioralHistory.recurrenceAnalytics?.complaintsLast30Days || 0} complaints landed in the last 30 days.`,
+      ];
+    }
+    if (landlordDetail?.visibleToStudents === false) {
+      return ["Hidden because governance or trust conditions are not yet cleared."];
+    }
+    return ["Visibility reasoning will update as governance signals change."];
+  }, [adminDetail, landlordDetail, studentDetail]);
+
+  async function handleExplain() {
+    setError("");
     try {
-      const [explainPayload, dawnPayload] = await Promise.all([
-        explainUnit(unitId),
-        queryDawn({ message: `Explain trust score for unit ${unitId}`, intent: "trust_explanation" }),
-      ]);
-      setDawnTrustCard({
-        trustScore: explainPayload?.trustScore ?? null,
-        trustBand: explainPayload?.trustBand ?? null,
-        visibilityReasons: explainPayload?.visibilityReasons || [],
-        assistant: dawnPayload?.assistant || "",
-      });
+      const payload = await explainUnit(unitId);
+      setExplanation(payload);
     } catch (requestError) {
-      setActionError(requestError.message || "Unable to explain this trust score right now.");
+      setError(requestError.message || "Unable to explain trust score.");
     }
   }
 
-  async function handleShortlist() {
-    setActionError("");
+  async function saveChecklist(kind) {
+    setError("");
     setBanner("");
     try {
-      await shortlistUnit({ unitId: Number(unitId) });
-      setBanner("Unit shortlisted successfully.");
-    } catch (requestError) {
-      setActionError(requestError.message || "Unable to shortlist this unit.");
-    }
-  }
-
-  async function saveLandlordChecklist(kind) {
-    setActionError("");
-    setBanner("");
-    try {
-      if (kind === "structural") {
-        await putStructuralCL(unitId, {
-          fireExit: Boolean(structuralForm.fireExit),
-          wiringSafe: Boolean(structuralForm.wiringSafe),
-          plumbingSafe: Boolean(structuralForm.plumbingSafe),
-          occupancyCompliant: Boolean(structuralForm.occupancyCompliant),
-        });
-        setBanner("Structural checklist saved.");
+      if (role === "landlord") {
+        if (kind === "structural") {
+          await putStructuralCL(unitId, structuralForm);
+        } else {
+          await putOperationalCL(unitId, { ...operationalForm, selfDeclaration });
+        }
       } else {
-        await putOperationalCL(unitId, {
-          bedAvailable: Boolean(operationalForm.bedAvailable),
-          waterAvailable: Boolean(operationalForm.waterAvailable),
-          toiletsAvailable: Boolean(operationalForm.toiletsAvailable),
-          ventilationGood: Boolean(operationalForm.ventilationGood),
-          selfDeclaration: operationalForm.selfDeclaration || "",
-        });
-        setBanner("Operational checklist saved.");
+        if (kind === "structural") {
+          await patchStructuralCL(unitId, structuralForm);
+        } else {
+          await patchOperationalCL(unitId, { ...operationalForm, selfDeclaration });
+        }
       }
-      await loadPageData("landlord");
+      setBanner(`${kind} checklist saved.`);
+      await loadPage(role);
     } catch (requestError) {
-      setActionError(requestError.message || "Checklist update failed.");
+      setError(requestError.message || "Unable to save checklist.");
     }
   }
 
-  async function handleMediaUpload(event, type) {
+  async function handleUpload(event, type) {
     const file = event.target.files?.[0];
     if (!file) return;
-    setActionError("");
+    setError("");
     setBanner("");
     try {
       const formData = new FormData();
       formData.append("file", file);
       formData.append("type", type);
       await uploadMedia(unitId, formData);
-      setBanner(`${type} uploaded successfully.`);
-      await loadPageData("landlord");
+      setBanner(`${type} uploaded.`);
+      await loadPage(role);
     } catch (requestError) {
-      setActionError(requestError.message || "Media upload failed.");
+      setError(requestError.message || "Unable to upload evidence.");
     }
   }
 
   async function handleSubmitUnit() {
-    setActionError("");
+    setError("");
     setBanner("");
     try {
       await submitUnit(unitId);
-      setBanner("Unit submitted for review.");
-      await loadPageData("landlord");
+      setBanner("Unit submitted for governance review.");
+      await loadPage(role);
     } catch (requestError) {
-      setActionError(requestError.message || "Unable to submit unit.");
+      setError(requestError.message || "Unable to submit unit.");
     }
   }
 
-  async function handleCheckIn() {
-    setActionError("");
-    setBanner("");
-    try {
-      const payload = await checkIn({ unitId: Number(unitId), studentId: Number(checkInStudentId) });
-      setBanner(`Student checked in. Occupant ID: ${payload?.occupant?.publicId || "generated"}.`);
-      setCheckInStudentId("");
-      await loadPageData("landlord");
-    } catch (requestError) {
-      setActionError(requestError.message || "Check-in failed.");
-    }
-  }
-
-  async function handleAdminStatus(status) {
-    setActionError("");
+  async function handleAdminStatus(nextStatus) {
+    setError("");
     setBanner("");
     try {
       const body =
-        status === "approved"
+        nextStatus === "approved"
           ? { status: "approved", structuralApproved: true, operationalBaselineApproved: true }
-          : { status };
+          : { status: nextStatus };
       await reviewUnit(unitId, body);
-      setBanner(`Unit moved to ${status}.`);
-      await loadPageData("admin");
+      setBanner(`Unit moved to ${nextStatus}.`);
+      await loadPage(role);
     } catch (requestError) {
-      setActionError(requestError.message || "Status update failed.");
+      setError(requestError.message || "Unable to update governance status.");
     }
   }
 
-  async function saveAdminChecklist(kind) {
-    setActionError("");
+  async function handleTriggerAudit() {
+    setError("");
     setBanner("");
     try {
-      if (kind === "structural") {
-        await patchStructuralCL(unitId, {
-          fireExit: Boolean(structuralForm.fireExit),
-          wiringSafe: Boolean(structuralForm.wiringSafe),
-          plumbingSafe: Boolean(structuralForm.plumbingSafe),
-          occupancyCompliant: Boolean(structuralForm.occupancyCompliant),
-        });
-        setBanner("Structural checklist updated.");
-      } else {
-        await patchOperationalCL(unitId, {
-          bedAvailable: Boolean(operationalForm.bedAvailable),
-          waterAvailable: Boolean(operationalForm.waterAvailable),
-          toiletsAvailable: Boolean(operationalForm.toiletsAvailable),
-          ventilationGood: Boolean(operationalForm.ventilationGood),
-          selfDeclaration: operationalForm.selfDeclaration || "",
-        });
-        setBanner("Operational checklist updated.");
-      }
-      await loadPageData("admin");
+      await triggerAudit(unitId, { reason: auditReason });
+      setAuditReason("");
+      setBanner("Audit triggered successfully.");
+      await loadPage(role);
     } catch (requestError) {
-      setActionError(requestError.message || "Checklist update failed.");
+      setError(requestError.message || "Unable to trigger audit.");
     }
   }
 
   async function handlePenalty() {
-    setActionError("");
+    setError("");
     setBanner("");
     try {
       await penalizeSelfDecl(unitId, {
         reason: penaltyForm.reason,
         penaltyPoints: Number(penaltyForm.penaltyPoints || 8),
       });
+      setPenaltyForm({ reason: "", penaltyPoints: 8 });
       setBanner("Self-declaration penalty applied.");
-      await loadPageData("admin");
+      await loadPage(role);
     } catch (requestError) {
-      setActionError(requestError.message || "Penalty could not be applied.");
+      setError(requestError.message || "Unable to apply penalty.");
     }
   }
 
-  async function handleTriggerAudit() {
-    setActionError("");
+  function updateAuditForm(auditLogId, field, value) {
+    setAuditForms((current) => ({
+      ...current,
+      [auditLogId]: {
+        ...(current[auditLogId] || {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  async function handleSetCorrectivePlan(auditLogId) {
+    const form = auditForms[auditLogId] || {};
+    setError("");
     setBanner("");
     try {
-      await triggerAudit(unitId, { reason: auditReason });
-      setBanner("Audit triggered successfully.");
-      setAuditReason("");
-      await loadPageData("admin");
+      await setCorrectivePlan(auditLogId, {
+        correctiveAction: form.correctiveAction,
+        correctiveDeadline: form.correctiveDeadline || undefined,
+      });
+      setBanner(`Corrective plan saved for audit ${auditLogId}.`);
+      await loadPage(role);
     } catch (requestError) {
-      setActionError(requestError.message || "Manual audit trigger failed.");
+      setError(requestError.message || "Unable to save corrective plan.");
     }
   }
 
-  function toggleFormValue(setter, field) {
-    setter((current) => ({ ...current, [field]: !current[field] }));
+  async function handleResolveAudit(auditLogId) {
+    const form = auditForms[auditLogId] || {};
+    setError("");
+    setBanner("");
+    try {
+      await resolveAuditLog(auditLogId, {
+        verificationNotes: form.verificationNotes || "",
+        reopenUnit: Boolean(form.reopenUnit),
+      });
+      setBanner(`Audit ${auditLogId} resolved.`);
+      await loadPage(role);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to resolve audit.");
+    }
   }
+
+  const evidenceList =
+    studentDetail?.discovery?.media ||
+    landlordDetail?.media?.all ||
+    adminDetail?.evidence?.media ||
+    [];
 
   if (loading) {
     return (
-      <div className={styles.page}>
-        <div className={styles.skeleton} />
-        <div className={styles.skeletonTall} />
+      <div className="grid gap-5">
+        <div className="surface-panel h-56 animate-pulse" />
+        <div className="surface-panel h-96 animate-pulse" />
       </div>
     );
   }
 
   return (
-    <div className={styles.page}>
-      <Link className={styles.backLink} href="/dashboard">
-        ← Back to dashboard
+    <div className="grid gap-6">
+      <Link className="btn-secondary w-fit" href="/dashboard">
+        Back to dashboard
       </Link>
 
       {error ? <div className="status-banner error">{error}</div> : null}
-      {actionError ? <div className="status-banner error">{actionError}</div> : null}
       {banner ? <div className="status-banner success">{banner}</div> : null}
-      {role === "student" && studentDetail ? (
-        <>
-          <section className={`${styles.hero} glass fade-up`}>
-            <div>
-              <p className="label-caps">Student view</p>
-              <h1 className={styles.heroTitle}>£{studentDetail.discovery?.rent || 0}/mo</h1>
-              <div className={styles.heroMeta}>
-                <span className="chip ch-blue">{studentDetail.discovery?.occupancyType || "shared"}</span>
-                <span className={styles.heroDistance}>{studentDetail.discovery?.distanceKm || 0} km away</span>
-              </div>
+
+      <section className="glass-panel-strong blueprint-border p-8 sm:p-10">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+          <div>
+            <div className="eyebrow">Unit Detail</div>
+            <h1 className="page-title mt-5 text-gradient">Unit {unitId}</h1>
+            <p className="subtle-copy mt-4 max-w-3xl">
+              Governance core, trust breakdown, evidence, and history live together here so visibility never feels like a black box.
+            </p>
+            <div className="mt-5 flex flex-wrap gap-2">
+              <span className={`signal-chip ${getStatusTone(status)}`}>{status}</span>
+              <span className={`signal-chip ${trust.tone}`}>{trust.label}</span>
+              {adminDetail?.governanceCore?.auditRequired || landlordDetail?.auditRequired ? <span className="signal-chip signal-danger">Audit required</span> : null}
             </div>
-            <div className={styles.heroActions}>
-              <button className="btn-soft blue" onClick={handleTrustExplain} type="button">
-                Explain Trust Score
-              </button>
-              <button className="btn-primary" onClick={handleShortlist} type="button">
-                Shortlist this unit
-              </button>
-            </div>
-          </section>
-
-          {studentDetail.transparency?.visibilityReasons?.map((reason) => (
-            <div key={reason} className="status-banner warn">
-              {reason}
-            </div>
-          ))}
-
-          <section className={`${styles.grid} fade-up-d1`}>
-            <article className="panel">
-              <div className={styles.sectionRow}>
-                <div>
-                  <p className="label-caps">Trust score</p>
-                  <h2 className="section-heading">Current trust</h2>
-                </div>
-                <span className={`trust-band-badge ${trustBandClass(studentDetail.trustSignals?.trustBand)}`}>
-                  {trustBandLabel(studentDetail.trustSignals?.trustBand)}
-                </span>
-              </div>
-              <div className="trust-bar-track">
-                <div
-                  className={`trust-bar-fill ${studentDetail.trustSignals?.trustBand || "hidden"}`}
-                  style={{ width: `${studentDetail.trustSignals?.trustScore || 0}%` }}
-                />
-              </div>
-              <p className={styles.score}>{studentDetail.trustSignals?.trustScore || 0}</p>
-              <div className={styles.metricGrid}>
-                <div className="metric-card">
-                  <span className="ml">Active complaints</span>
-                  <strong className="mv">{studentDetail.trustSignals?.complaintSummary?.activeComplaints || 0}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="ml">Complaints in 30 days</span>
-                  <strong className="mv">{studentDetail.trustSignals?.complaintSummary?.complaintsLast30Days || 0}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="ml">Last audit</span>
-                  <strong className="mv">
-                    {studentDetail.trustSignals?.lastAuditDate ? formatDate(studentDetail.trustSignals.lastAuditDate) : "None"}
-                  </strong>
-                </div>
-              </div>
-            </article>
-
-            <article className="panel">
-              <p className="label-caps">Availability</p>
-              <h2 className="section-heading">Current occupancy</h2>
-              <div className={styles.metricGrid}>
-                <div className="metric-card">
-                  <span className="ml">Capacity</span>
-                  <strong className="mv">{studentDetail.availability?.capacity || 0}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="ml">Occupied</span>
-                  <strong className="mv">{studentDetail.availability?.occupancyCount || 0}</strong>
-                </div>
-                <div className="metric-card">
-                  <span className="ml">Available slots</span>
-                  <strong className="mv">{studentDetail.availability?.availableSlots || 0}</strong>
-                </div>
-              </div>
-              <div className={styles.chipRow}>
-                <span className={`chip ${studentDetail.discovery?.ac ? "ch-blue" : "ch-warn"}`}>
-                  {studentDetail.discovery?.ac ? "AC included" : "No AC"}
-                </span>
-                <span className={`chip ${studentDetail.availability?.availableSlots > 0 ? "ch-ok" : "ch-err"}`}>
-                  {studentDetail.availability?.availableSlots > 0 ? "Slots available" : "Full occupancy"}
-                </span>
-              </div>
-            </article>
-          </section>
-
-          <section className={`${styles.grid} fade-up-d2`}>
-            <article className="panel">
-              <p className="label-caps">Transparency</p>
-              <h2 className="section-heading">Media and history</h2>
-              <div className={styles.mediaGrid}>
-                {(studentDetail.discovery?.media || []).map((media) => (
-                  <div key={media.id} className="panel-light">
-                    <div className={styles.mediaHeader}>
-                      <span className="chip ch-blue">{media.type}</span>
-                      {media.locked ? <span className="chip ch-warn">Locked</span> : null}
-                    </div>
-                    <p className={styles.mediaText}>{media.publicUrl || "Stored media asset"}</p>
-                  </div>
-                ))}
-                {!studentDetail.discovery?.media?.length ? <div className="empty-state">No media is currently attached to this unit.</div> : null}
-              </div>
-              {dawnTrustCard ? (
-                <div className={`${styles.trustExplain} panel-light`}>
-                  <p className="label-caps">Trust explanation</p>
-                  <div className="trust-bar-track">
-                    <div className={`trust-bar-fill ${dawnTrustCard.trustBand || "hidden"}`} style={{ width: `${dawnTrustCard.trustScore || 0}%` }} />
-                  </div>
-                  <div className={styles.explainHeader}>
-                    <strong>{dawnTrustCard.trustScore || 0}</strong>
-                    <span className={`trust-band-badge ${trustBandClass(dawnTrustCard.trustBand)}`}>{trustBandLabel(dawnTrustCard.trustBand)}</span>
-                  </div>
-                  {dawnTrustCard.assistant ? <p className={styles.muted}>{dawnTrustCard.assistant}</p> : null}
-                  {(dawnTrustCard.visibilityReasons || []).map((reason) => (
-                    <div key={reason} className="status-banner warn">
-                      {reason}
-                    </div>
-                  ))}
-                </div>
-              ) : null}
-            </article>
-
-            <article className="panel">
-              <p className="label-caps">Complaint history</p>
-              <h2 className="section-heading">Your recent reports</h2>
-              <div className={styles.timeline}>
-                {(studentDetail.transparency?.ownComplaintHistory || []).map((item) => (
-                  <div key={item.id} className="panel-light">
-                    <div className={styles.timelineHeader}>
-                      <span className={`chip ${item.resolved ? "ch-ok" : "ch-warn"}`}>{item.resolved ? "Resolved" : "Open"}</span>
-                      <span className="label-caps">{formatDate(item.createdAt)}</span>
-                    </div>
-                    <p className={styles.muted}>Severity {item.severity}</p>
-                  </div>
-                ))}
-                {!studentDetail.transparency?.ownComplaintHistory?.length ? <div className="empty-state">You have not reported issues for this unit yet.</div> : null}
-              </div>
-            </article>
-          </section>
-        </>
-      ) : null}
-
-      {role === "landlord" && landlordOverview ? (
-        <>
-          <section className={`${styles.hero} glass fade-up`}>
-            <div>
-              <p className="label-caps">Landlord view</p>
-              <h1 className={styles.heroTitle}>Unit {landlordOverview.id}</h1>
-              <div className={styles.heroMeta}>
-                <span className={`chip ${statusChip(landlordOverview.status)}`}>{landlordOverview.status}</span>
-                <span className={`trust-band-badge ${trustBandClass(currentTrustBand)}`}>{trustBandLabel(currentTrustBand)}</span>
-              </div>
-            </div>
-            <div className={styles.heroStats}>
-              <span className="chip ch-blue">Trust {landlordOverview.trustScore}</span>
-              {landlordOverview.auditRequired ? <span className="chip ch-err">Audit required</span> : null}
-              {landlordOverview.status === "suspended" ? <span className="chip ch-err">Unit suspended</span> : null}
-            </div>
-          </section>
-
-          <div className={styles.tabBar}>
-            {["overview", "occupants", "shortlists", "complaints", "audits"].map((item) => (
-              <button key={item} className={tab === item ? styles.tabActive : styles.tab} onClick={() => setTab(item)} type="button">
-                {item}
-              </button>
-            ))}
           </div>
 
-          {tab === "overview" ? (
-            <section className={`${styles.grid} fade-up-d1`}>
-              <article className="panel">
-                <p className="label-caps">Property details</p>
-                <div className={styles.infoGrid}>
-                  <div className="metric-card"><span className="ml">Rent</span><strong className="mv">£{landlordOverview.propertyDetails?.rent || 0}</strong></div>
-                  <div className="metric-card"><span className="ml">Distance</span><strong className="mv">{landlordOverview.propertyDetails?.distanceKm || 0} km</strong></div>
-                  <div className="metric-card"><span className="ml">Institution proximity</span><strong className="mv">{landlordOverview.propertyDetails?.institutionProximityKm || 0} km</strong></div>
-                  <div className="metric-card"><span className="ml">Capacity</span><strong className="mv">{landlordOverview.capacity || 0}</strong></div>
-                  <div className="metric-card"><span className="ml">Occupancy count</span><strong className="mv">{landlordOverview.occupancyCount || 0}</strong></div>
-                  <div className="metric-card"><span className="ml">Open audits</span><strong className="mv">{landlordOverview.openAuditLogCount || 0}</strong></div>
-                </div>
-              </article>
+          <div className="grid gap-3 sm:min-w-[280px]">
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Trust score</p>
+              <strong className="mt-2 block text-3xl text-white">{trustScore}</strong>
+              <div className="mt-4 trust-track">
+                <div className={`trust-fill ${trust.fillClass}`} style={{ width: `${trustScore}%` }} />
+              </div>
+            </div>
+            <button className="btn-secondary" onClick={handleExplain} type="button">
+              Explain trust score
+            </button>
+          </div>
+        </div>
+      </section>
 
-              <article className="panel">
-                <p className="label-caps">Structural checklist</p>
-                <div className={styles.checklist}>
-                  {["fireExit", "wiringSafe", "plumbingSafe", "occupancyCompliant"].map((field) => (
-                    <label key={field} className={styles.checkRow}>
-                      <span>{field}</span>
-                      <input checked={Boolean(structuralForm[field])} onChange={() => toggleFormValue(setStructuralForm, field)} type="checkbox" />
-                    </label>
-                  ))}
-                </div>
-                <button className="btn-secondary" onClick={() => saveLandlordChecklist("structural")} type="button">
+      <section className="grid gap-5 xl:grid-cols-[1.1fr,0.9fr]">
+        <article className="glass-panel p-6">
+          <div className="eyebrow">Governance Core</div>
+          <div className="mt-5 grid gap-4 md:grid-cols-2">
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Trust Band</p><strong className="mt-2 block text-white">{trust.label}</strong></div>
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Risk level</p><strong className="mt-2 block text-white">{trust.key === "A" ? "Stable" : trust.key === "B" ? "Warning" : "Critical"}</strong></div>
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Audit required</p><strong className="mt-2 block text-white">{adminDetail?.governanceCore?.auditRequired || landlordDetail?.auditRequired ? "Yes" : "No"}</strong></div>
+            <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Visible to students</p><strong className="mt-2 block text-white">{studentDetail?.transparency?.visibleToStudents === false || landlordDetail?.visibleToStudents === false ? "No" : "Yes"}</strong></div>
+          </div>
+        </article>
+
+        <article className="glass-panel p-6">
+          <div className="eyebrow">Trust Breakdown</div>
+          <div className="mt-5 grid gap-3">
+            {visibilityNotes.map((note) => (
+              <div key={note} className="rounded-[24px] border border-white/10 bg-black/20 p-4 text-sm leading-6 text-slate-300">
+                {note}
+              </div>
+            ))}
+            {explanation?.visibilityReasons?.map((note) => (
+              <div key={note} className="rounded-[24px] border border-sky-300/20 bg-sky-300/10 p-4 text-sm leading-6 text-slate-200">
+                {note}
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
+
+      <section className="grid gap-5 lg:grid-cols-2">
+        <article className="glass-panel p-6">
+          <div className="eyebrow">Checklists</div>
+          <h2 className="section-title mt-4">Structural and operational readiness</h2>
+
+          {(role === "landlord" || role === "admin") ? (
+            <div className="mt-6 grid gap-6">
+              <div>
+                <h3 className="mb-4 text-lg font-semibold text-white">Structural</h3>
+                <ToggleGrid fields={structuralFields} setValues={setStructuralForm} values={structuralForm} />
+                <button className="btn-secondary mt-4" onClick={() => saveChecklist("structural")} type="button">
                   Save structural checklist
                 </button>
-              </article>
-
-              <article className="panel">
-                <p className="label-caps">Operational checklist</p>
-                <div className={styles.checklist}>
-                  {["bedAvailable", "waterAvailable", "toiletsAvailable", "ventilationGood"].map((field) => (
-                    <label key={field} className={styles.checkRow}>
-                      <span>{field}</span>
-                      <input checked={Boolean(operationalForm[field])} onChange={() => toggleFormValue(setOperationalForm, field)} type="checkbox" />
-                    </label>
-                  ))}
-                </div>
-                <label className={styles.field}>
-                  <span>Self declaration</span>
-                  <textarea className="app-input" onChange={(event) => setOperationalForm((current) => ({ ...current, selfDeclaration: event.target.value }))} value={operationalForm.selfDeclaration || ""} />
+              </div>
+              <div>
+                <h3 className="mb-4 text-lg font-semibold text-white">Operational</h3>
+                <ToggleGrid fields={operationalFields} setValues={setOperationalForm} values={operationalForm} />
+                <label className="mt-4 grid gap-2">
+                  <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Self declaration</span>
+                  <textarea className="textarea-shell" onChange={(event) => setSelfDeclaration(event.target.value)} value={selfDeclaration} />
                 </label>
-                <button className="btn-secondary" onClick={() => saveLandlordChecklist("operational")} type="button">
+                <button className="btn-secondary mt-4" onClick={() => saveChecklist("operational")} type="button">
                   Save operational checklist
                 </button>
-              </article>
-
-              <article className="panel">
-                <p className="label-caps">Media</p>
-                <div className={styles.uploadGrid}>
-                  {requiredMediaTypes.map((type) => (
-                    <label key={type} className="panel-light">
-                      <span className="chip ch-blue">{type}</span>
-                      <input disabled={landlordOverview.status !== "draft"} onChange={(event) => handleMediaUpload(event, type)} type="file" />
-                    </label>
-                  ))}
-                </div>
-                <div className={styles.chipRow}>
-                  {landlordMediaTypes.map((type) => (
-                    <span key={type} className="chip ch-ok">
-                      {type}
-                    </span>
-                  ))}
-                </div>
-                <button className="btn-primary" disabled={landlordOverview.status !== "draft" || !canSubmitUnit} onClick={handleSubmitUnit} type="button">
-                  Submit for review
-                </button>
-              </article>
-            </section>
-          ) : null}
-
-          {tab === "occupants" ? (
-            <section className={`${styles.grid} fade-up-d1`}>
-              <article className="panel">
-                <p className="label-caps">Check in</p>
-                <div className={styles.inlineForm}>
-                  <input className="app-input" onChange={(event) => setCheckInStudentId(event.target.value)} placeholder="Student ID" type="number" value={checkInStudentId} />
-                  <button className="btn-primary" onClick={handleCheckIn} type="button">
-                    Check in
-                  </button>
-                </div>
-              </article>
-              <article className="panel">
-                <p className="label-caps">Current occupants</p>
-                <div className={styles.timeline}>
-                  {(interestedStudents?.students || [])
-                    .filter((item) => item.status === "occupant")
-                    .map((item) => (
-                      <div key={`${item.studentId}-${item.status}`} className="panel-light">
-                        <div className={styles.timelineHeader}>
-                          <strong>{item.name}</strong>
-                          <span className="chip ch-blue">{item.status}</span>
-                        </div>
-                        <p className={styles.muted}>{item.email || "No email available"}</p>
-                        <p className={styles.muted}>Since {formatDate(item.since)}</p>
-                      </div>
-                    ))}
-                  {!interestedStudents?.students?.some((item) => item.status === "occupant") ? <div className="empty-state">No active occupants are currently listed for this unit.</div> : null}
-                </div>
-              </article>
-            </section>
-          ) : null}
-          {tab === "shortlists" ? (
-            <section className="panel fade-up-d1">
-              <p className="label-caps">Interested students</p>
-              <div className={styles.timeline}>
-                {(interestedStudents?.students || []).map((item) => (
-                  <div key={`${item.studentId}-${item.status}`} className="panel-light">
-                    <div className={styles.timelineHeader}>
-                      <strong>{item.name}</strong>
-                      <span className={`chip ${item.status === "occupant" ? "ch-blue" : "ch-gold"}`}>{item.status}</span>
-                    </div>
-                    <p className={styles.muted}>{item.email || "No email available"}</p>
-                    <p className={styles.muted}>{item.institutionName || "Institution unavailable"}</p>
-                  </div>
-                ))}
-                {!interestedStudents?.students?.length ? <div className="empty-state">No shortlisted or occupied students are available for this unit.</div> : null}
-              </div>
-            </section>
-          ) : null}
-
-          {tab === "complaints" ? (
-            <section className={`${styles.grid} fade-up-d1`}>
-              {(landlordComplaints || []).map((complaint) => (
-                <article key={complaint.id} className="panel">
-                  <div className={styles.timelineHeader}>
-                    <span className={`chip ${complaint.severity >= 4 ? "ch-err" : complaint.severity === 3 ? "ch-warn" : "ch-ok"}`}>Severity {complaint.severity}</span>
-                    <span className={`chip ${complaint.resolved ? "ch-ok" : "ch-warn"}`}>{complaint.resolved ? "Resolved" : "Open"}</span>
-                  </div>
-                  <p className={styles.muted}>{complaint.incidentType || "other"}</p>
-                  <p className={styles.muted}>
-                    {complaint.student?.name || "Student"} • {complaint.student?.email || "No email"}
-                  </p>
-                  <p className={styles.muted}>Created {formatDate(complaint.createdAt)}</p>
-                  {!complaint.resolved ? <ComplaintForm complaintId={complaint.id} /> : null}
-                </article>
-              ))}
-              {!landlordComplaints?.length ? <div className="empty-state">No complaints have been submitted for this unit.</div> : null}
-            </section>
-          ) : null}
-
-          {tab === "audits" ? (
-            <section className="panel fade-up-d1">
-              <p className="label-caps">Audit timeline</p>
-              <div className={styles.timeline}>
-                {(landlordAudits || []).map((item) => (
-                  <div key={item.id} className="panel-light">
-                    <div className={styles.timelineHeader}>
-                      <span className="chip ch-err">{item.triggerType}</span>
-                      <span className={`chip ${item.resolved ? "ch-ok" : "ch-warn"}`}>{item.resolved ? "Resolved" : "Open"}</span>
-                    </div>
-                    <p className={styles.muted}>{item.reason}</p>
-                    <p className={styles.muted}>{item.correctiveAction || "No corrective action set."}</p>
-                    <p className={styles.muted}>Created {formatDate(item.createdAt)}</p>
-                  </div>
-                ))}
-                {!landlordAudits?.length ? <div className="empty-state">No audit logs are currently associated with this unit.</div> : null}
-              </div>
-            </section>
-          ) : null}
-        </>
-      ) : null}
-
-      {role === "admin" && adminDetail ? (
-        <>
-          <section className={`${styles.hero} glass fade-up`}>
-            <div>
-              <p className="label-caps">Admin view</p>
-              <h1 className={styles.heroTitle}>Unit {adminDetail.unitId}</h1>
-              <div className={styles.heroMeta}>
-                <span className={`chip ${statusChip(adminDetail.governanceCore?.status)}`}>{adminDetail.governanceCore?.status}</span>
-                <span className={`trust-band-badge ${trustBandClass(adminDetail.governanceCore?.trustBand)}`}>{trustBandLabel(adminDetail.governanceCore?.trustBand)}</span>
               </div>
             </div>
-            <div className={styles.heroStats}>
-              <span className="chip ch-blue">Trust {adminDetail.governanceCore?.trustScore || 0}</span>
-              {adminDetail.governanceCore?.auditRequired ? <span className="chip ch-err">Audit required</span> : null}
+          ) : (
+            <div className="mt-5 text-sm leading-6 text-slate-400">
+              Checklist status is reflected indirectly through trust and visibility for student users.
             </div>
-          </section>
+          )}
+        </article>
 
-          <div className={styles.tabBar}>
-            {["governance", "evidence", "checklist", "audit", "demand"].map((item) => (
-              <button key={item} className={tab === item ? styles.tabActive : styles.tab} onClick={() => setTab(item)} type="button">
-                {item}
-              </button>
-            ))}
+        <article className="glass-panel p-6">
+          <div className="eyebrow">Evidence</div>
+          <h2 className="section-title mt-4">Photos, docs, and 360 proof</h2>
+          <div className="mt-5 grid gap-3">
+            {evidenceList.length ? (
+              evidenceList.map((item) => (
+                <div key={item.id} className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <span className="signal-chip signal-info">{item.type}</span>
+                    {item.createdAt ? <span className="text-xs text-slate-500">{formatDateTime(item.createdAt)}</span> : null}
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-slate-300">{item.publicUrl || "Evidence file attached to backend storage."}</p>
+                </div>
+              ))
+            ) : (
+              <div className="empty-state">No evidence uploaded yet.</div>
+            )}
           </div>
 
-          {tab === "governance" ? (
-            <section className={`${styles.grid} fade-up-d1`}>
-              <article className="panel">
-                <p className="label-caps">Governance core</p>
-                <div className={styles.infoGrid}>
-                  <div className="metric-card"><span className="ml">Status</span><strong className="mv">{adminDetail.governanceCore?.status}</strong></div>
-                  <div className="metric-card"><span className="ml">Trust score</span><strong className="mv">{adminDetail.governanceCore?.trustScore || 0}</strong></div>
-                  <div className="metric-card"><span className="ml">Structural approved</span><strong className="mv">{adminDetail.governanceCore?.structuralApproved ? "Yes" : "No"}</strong></div>
-                  <div className="metric-card"><span className="ml">Operational approved</span><strong className="mv">{adminDetail.governanceCore?.operationalBaselineApproved ? "Yes" : "No"}</strong></div>
-                </div>
-                <div className={styles.buttonRow}>
-                  <button className="btn-soft mint" onClick={() => handleAdminStatus("approved")} type="button">Approve</button>
-                  <button className="btn-soft red" onClick={() => handleAdminStatus("rejected")} type="button">Reject</button>
-                  <button className="btn-soft gold" onClick={() => handleAdminStatus("suspended")} type="button">Suspend</button>
-                  <button className="btn-secondary" onClick={() => handleAdminStatus("archived")} type="button">Archive</button>
-                </div>
-              </article>
+          {role === "landlord" ? (
+            <div className="mt-6 grid gap-3">
+              {evidenceTypes.map((type) => (
+                <label key={type} className="rounded-[24px] border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
+                  <span className="mb-2 block">{type}</span>
+                  <input onChange={(event) => handleUpload(event, type)} type="file" />
+                </label>
+              ))}
+              <button className="btn-primary mt-2" onClick={handleSubmitUnit} type="button">
+                Submit for review
+              </button>
+            </div>
+          ) : null}
+        </article>
+      </section>
 
-              <article className="panel">
-                <p className="label-caps">Self-declaration penalty</p>
-                <label className={styles.field}>
-                  <span>Reason</span>
-                  <textarea className="app-input" onChange={(event) => setPenaltyForm((current) => ({ ...current, reason: event.target.value }))} value={penaltyForm.reason} />
-                </label>
-                <label className={styles.field}>
-                  <span>Penalty points</span>
-                  <input className="app-input" min="1" onChange={(event) => setPenaltyForm((current) => ({ ...current, penaltyPoints: event.target.value }))} type="number" value={penaltyForm.penaltyPoints} />
-                </label>
-                <button className="btn-soft red" onClick={handlePenalty} type="button">
-                  Apply penalty
-                </button>
-              </article>
+      <section className="grid gap-5 lg:grid-cols-2">
+        <article className="glass-panel p-6">
+          <div className="eyebrow">History</div>
+          <div className="mt-5 grid gap-3">
+            {adminDetail?.behavioralHistory?.complaintTimeline?.length ? (
+              adminDetail.behavioralHistory.complaintTimeline.slice(0, 6).map((item) => (
+                <div key={item.id} className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="signal-chip signal-warning">Severity {item.severity}</span>
+                    <span className={`signal-chip ${item.resolved ? "signal-success" : "signal-danger"}`}>{item.resolved ? "Resolved" : "Open"}</span>
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">Created {formatDateTime(item.createdAt)}</p>
+                </div>
+              ))
+            ) : studentDetail?.transparency?.ownComplaintHistory?.length ? (
+              studentDetail.transparency.ownComplaintHistory.map((item) => (
+                <div key={item.id} className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="signal-chip signal-warning">Severity {item.severity}</span>
+                    <span className={`signal-chip ${item.resolved ? "signal-success" : "signal-danger"}`}>{item.resolved ? "Resolved" : "Open"}</span>
+                  </div>
+                  <p className="mt-3 text-sm leading-6 text-slate-400">Created {formatDateTime(item.createdAt)}</p>
+                </div>
+              ))
+            ) : (
+              <div className="empty-state">No complaint timeline available for this unit.</div>
+            )}
+          </div>
+        </article>
 
-              <article className="panel">
-                <p className="label-caps">Manual audit</p>
-                <label className={styles.field}>
-                  <span>Reason</span>
-                  <textarea className="app-input" onChange={(event) => setAuditReason(event.target.value)} value={auditReason} />
-                </label>
-                <button className="btn-secondary" onClick={handleTriggerAudit} type="button">
+        <article className="glass-panel p-6">
+          <div className="eyebrow">Actions</div>
+          {role === "student" ? (
+            <div className="mt-5 grid gap-4">
+              <Link className="btn-secondary" href={`/unit/${unitId}/complaints`}>
+                Open complaint history
+              </Link>
+              <ComplaintForm initialUnitId={unitId} />
+            </div>
+          ) : role === "admin" ? (
+            <div className="mt-5 grid gap-6">
+              <div>
+                <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Governance status</p>
+                <div className="flex flex-wrap gap-3">
+                  <button className="btn-primary" onClick={() => handleAdminStatus("approved")} type="button">Approve</button>
+                  <button className="btn-secondary" onClick={() => handleAdminStatus("suspended")} type="button">Suspend</button>
+                  <button className="btn-secondary" onClick={() => handleAdminStatus("rejected")} type="button">Reject</button>
+                </div>
+              </div>
+
+              <div className="soft-divider pt-5">
+                <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Manual audit trigger</p>
+                <textarea
+                  className="textarea-shell"
+                  onChange={(event) => setAuditReason(event.target.value)}
+                  placeholder="Explain why this unit should enter audit review..."
+                  value={auditReason}
+                />
+                <button className="btn-secondary mt-3" onClick={handleTriggerAudit} type="button">
                   Trigger audit
                 </button>
-              </article>
-            </section>
-          ) : null}
-
-          {tab === "evidence" ? (
-            <section className="panel fade-up-d1">
-              <p className="label-caps">Evidence</p>
-              <div className={styles.chipRow}>
-                {(adminDetail.evidence?.media || []).map((media) => (
-                  <span key={media.id} className="chip ch-blue">
-                    {media.type}
-                  </span>
-                ))}
               </div>
-              <div className={styles.timeline}>
-                {(adminDetail.evidence?.media || []).map((media) => (
-                  <div key={media.id} className="panel-light">
-                    <div className={styles.timelineHeader}>
-                      <span className="chip ch-blue">{media.type}</span>
-                      <span className={`chip ${media.locked ? "ch-warn" : "ch-ok"}`}>{media.locked ? "Locked" : "Open"}</span>
-                    </div>
-                    <p className={styles.muted}>{media.publicUrl || "Media stored in backend"}</p>
-                    <p className={styles.muted}>{formatDate(media.createdAt)}</p>
-                  </div>
-                ))}
-              </div>
-            </section>
-          ) : null}
 
-          {tab === "checklist" ? (
-            <section className={`${styles.grid} fade-up-d1`}>
-              <article className="panel">
-                <p className="label-caps">Structural checklist</p>
-                <div className={styles.checklist}>
-                  {["fireExit", "wiringSafe", "plumbingSafe", "occupancyCompliant"].map((field) => (
-                    <label key={field} className={styles.checkRow}>
-                      <span>{field}</span>
-                      <input checked={Boolean(structuralForm[field])} onChange={() => toggleFormValue(setStructuralForm, field)} type="checkbox" />
-                    </label>
-                  ))}
-                </div>
-                <button className="btn-secondary" onClick={() => saveAdminChecklist("structural")} type="button">
-                  Save structural review
+              <div className="soft-divider pt-5">
+                <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Self-declaration penalty</p>
+                <textarea
+                  className="textarea-shell"
+                  onChange={(event) => setPenaltyForm((current) => ({ ...current, reason: event.target.value }))}
+                  placeholder="Reason for misrepresentation penalty..."
+                  value={penaltyForm.reason}
+                />
+                <input
+                  className="input-shell mt-3"
+                  min="1"
+                  onChange={(event) => setPenaltyForm((current) => ({ ...current, penaltyPoints: event.target.value }))}
+                  type="number"
+                  value={penaltyForm.penaltyPoints}
+                />
+                <button className="btn-secondary mt-3" onClick={handlePenalty} type="button">
+                  Apply penalty
                 </button>
-              </article>
-
-              <article className="panel">
-                <p className="label-caps">Operational checklist</p>
-                <div className={styles.checklist}>
-                  {["bedAvailable", "waterAvailable", "toiletsAvailable", "ventilationGood"].map((field) => (
-                    <label key={field} className={styles.checkRow}>
-                      <span>{field}</span>
-                      <input checked={Boolean(operationalForm[field])} onChange={() => toggleFormValue(setOperationalForm, field)} type="checkbox" />
-                    </label>
-                  ))}
-                </div>
-                <label className={styles.field}>
-                  <span>Self declaration</span>
-                  <textarea className="app-input" onChange={(event) => setOperationalForm((current) => ({ ...current, selfDeclaration: event.target.value }))} value={operationalForm.selfDeclaration || ""} />
-                </label>
-                <button className="btn-secondary" onClick={() => saveAdminChecklist("operational")} type="button">
-                  Save operational review
-                </button>
-              </article>
-            </section>
-          ) : null}
-
-          {tab === "audit" ? (
-            <section className="panel fade-up-d1">
-              <p className="label-caps">Audit logs</p>
-              <div className={styles.timeline}>
-                {(adminAuditLogs || []).map((item) => (
-                  <div key={item.id} className="panel-light">
-                    <div className={styles.timelineHeader}>
-                      <span className="chip ch-err">{item.triggerType}</span>
-                      <span className={`chip ${item.resolved ? "ch-ok" : "ch-warn"}`}>{item.resolved ? "Resolved" : "Open"}</span>
-                    </div>
-                    <p className={styles.muted}>{item.reason}</p>
-                    <p className={styles.muted}>{item.correctiveAction || "No corrective action recorded."}</p>
-                    <p className={styles.muted}>{item.correctiveDeadline ? `Due ${formatDate(item.correctiveDeadline)}` : "No corrective deadline set."}</p>
-                  </div>
-                ))}
               </div>
-            </section>
-          ) : null}
+            </div>
+          ) : (
+            <div className="mt-5 text-sm leading-6 text-slate-400">
+              Landlords can update evidence and checklists above. Complaint resolution remains on the complaints page.
+            </div>
+          )}
+        </article>
+      </section>
 
-          {tab === "demand" ? (
-            <section className={`${styles.grid} fade-up-d1`}>
-              <article className="panel">
-                <p className="label-caps">Demand context</p>
-                <div className={styles.infoGrid}>
-                  <div className="metric-card"><span className="ml">Shortlists</span><strong className="mv">{adminDetail.demandContext?.shortlistCount || 0}</strong></div>
-                  <div className="metric-card"><span className="ml">Unique shortlisted</span><strong className="mv">{adminDetail.demandContext?.uniqueShortlistedStudents || 0}</strong></div>
-                  <div className="metric-card"><span className="ml">Active occupancy</span><strong className="mv">{adminDetail.demandContext?.activeOccupancyCount || 0}</strong></div>
-                  <div className="metric-card"><span className="ml">Conversion rate</span><strong className="mv">{adminDetail.demandContext?.conversionRate || 0}%</strong></div>
-                </div>
-              </article>
-              <article className="panel">
-                <p className="label-caps">Corridor demand</p>
-                <div className={styles.timeline}>
-                  {(adminDemand?.byInstitution || []).map((item) => (
-                    <div key={item.institutionId} className="panel-light">
-                      <div className={styles.timelineHeader}>
-                        <strong>{item.institutionName}</strong>
-                        <span className="chip ch-blue">{item.count}</span>
+      {role === "admin" ? (
+        <section className="glass-panel p-6">
+          <div className="eyebrow">Audit Logs</div>
+          <h2 className="section-title mt-4">Audit timeline and corrective actions</h2>
+          <div className="mt-6 grid gap-4">
+            {adminAuditLogs.length ? (
+              adminAuditLogs.map((log) => (
+                <article key={log.id} className="rounded-[24px] border border-white/10 bg-white/5 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="signal-chip signal-danger">{log.triggerType}</span>
+                      <span className={`signal-chip ${log.resolved ? "signal-success" : "signal-warning"}`}>
+                        {log.resolved ? "Resolved" : "Open"}
+                      </span>
+                    </div>
+                    <span className="text-xs text-slate-500">{formatDateTime(log.createdAt)}</span>
+                  </div>
+
+                  <p className="mt-4 text-sm leading-6 text-slate-300">{log.reason}</p>
+                  {log.correctiveAction ? <p className="mt-2 text-sm leading-6 text-slate-400">Corrective action: {log.correctiveAction}</p> : null}
+                  {log.correctiveDeadline ? <p className="text-sm leading-6 text-slate-400">Deadline: {formatDateTime(log.correctiveDeadline)}</p> : null}
+
+                  {!log.resolved ? (
+                    <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                      <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                        <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Corrective plan</p>
+                        <textarea
+                          className="textarea-shell"
+                          onChange={(event) => updateAuditForm(log.id, "correctiveAction", event.target.value)}
+                          placeholder="Define the corrective plan..."
+                          value={auditForms[log.id]?.correctiveAction || ""}
+                        />
+                        <input
+                          className="input-shell mt-3"
+                          onChange={(event) => updateAuditForm(log.id, "correctiveDeadline", event.target.value)}
+                          type="date"
+                          value={auditForms[log.id]?.correctiveDeadline || ""}
+                        />
+                        <button className="btn-secondary mt-3" onClick={() => handleSetCorrectivePlan(log.id)} type="button">
+                          Save corrective plan
+                        </button>
+                      </div>
+
+                      <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                        <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Resolve audit</p>
+                        <textarea
+                          className="textarea-shell"
+                          onChange={(event) => updateAuditForm(log.id, "verificationNotes", event.target.value)}
+                          placeholder="Verification notes before resolving..."
+                          value={auditForms[log.id]?.verificationNotes || ""}
+                        />
+                        <label className="mt-3 flex items-center justify-between rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+                          <span>Reopen unit to approved status</span>
+                          <input
+                            checked={Boolean(auditForms[log.id]?.reopenUnit)}
+                            onChange={(event) => updateAuditForm(log.id, "reopenUnit", event.target.checked)}
+                            type="checkbox"
+                          />
+                        </label>
+                        <button className="btn-primary mt-3" onClick={() => handleResolveAudit(log.id)} type="button">
+                          Resolve audit log
+                        </button>
                       </div>
                     </div>
-                  ))}
-                  {!adminDemand?.byInstitution?.length ? <div className="empty-state">No institution demand data is available for this corridor.</div> : null}
-                </div>
-              </article>
-            </section>
-          ) : null}
-        </>
+                  ) : (
+                    <div className="mt-4 rounded-[24px] border border-emerald-300/15 bg-emerald-300/5 p-4 text-sm leading-6 text-slate-300">
+                      {log.verificationNotes || "This audit log has already been resolved."}
+                    </div>
+                  )}
+                </article>
+              ))
+            ) : (
+              <div className="empty-state">No audit logs are currently associated with this unit.</div>
+            )}
+          </div>
+        </section>
       ) : null}
     </div>
   );

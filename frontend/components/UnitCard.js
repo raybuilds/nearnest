@@ -1,169 +1,119 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useMemo, useState } from "react";
+import { inferVisibilityReasons, getRiskTone, getStatusTone, getTrustBand } from "@/lib/governance";
 import { shortlistUnit } from "@/lib/api";
-import styles from "./UnitCard.module.css";
 
-function getStatusTone(status) {
-  const normalized = String(status || "").toLowerCase();
-  if (normalized === "approved" || normalized === "live" || normalized === "occupied") return "ch-ok";
-  if (normalized === "pending" || normalized === "submitted" || normalized === "draft") return "ch-warn";
-  if (normalized === "suspended" || normalized === "rejected") return "ch-err";
-  return "ch-blue";
-}
+export default function UnitCard({ unit, onShortlist, showForStudent = false, compact = false }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [error, setError] = useState("");
 
-function getTrustBandLabel(trustBand) {
-  if (trustBand === "priority") return "Priority";
-  if (trustBand === "standard") return "Standard";
-  return "Hidden";
-}
+  const trust = getTrustBand(unit?.trustScore);
+  const visibilityReasons = useMemo(() => inferVisibilityReasons(unit), [unit]);
+  const unitId = unit?.unitId || unit?.id;
+  const complaintCount = Number(unit?.activeComplaints || unit?.complaintSummary?.activeComplaints || unit?.openIssues || 0);
+  const riskLevel =
+    unit?.riskLevel ||
+    (unit?.auditRequired ? "Critical" : complaintCount >= 3 ? "Warning" : Number(unit?.trustScore || 0) >= 75 ? "Stable" : "Warning");
 
-function getTrustBandClass(trustBand) {
-  if (trustBand === "priority") return "band-priority";
-  if (trustBand === "standard") return "band-standard";
-  return "band-hidden";
-}
-
-export default function UnitCard(props) {
-  const unit = props.unit || props;
-  const unitId = unit.unitId || unit.id;
-  const status = unit.status || "unknown";
-  const trustScore = Number(unit.trustScore ?? 0);
-  const trustBand = unit.trustBand || (trustScore >= 80 ? "priority" : trustScore >= 50 ? "standard" : "hidden");
-  const visibleToStudents = unit.visibleToStudents !== false;
-  const [shortlistState, setShortlistState] = useState({ loading: false, success: "", error: "" });
-
-  const name = unit.name || `Unit ${unitId}`;
-  const occupancyType = unit.occupancyType || unit.bhkType || "Unit";
-  const address = unit.address || `${Number(unit.distanceKm ?? 0).toFixed(1)} km away`;
-  const rent = Number(unit.rent ?? 0);
-  const activeComplaints = Number(unit.activeComplaints ?? unit.openIssues ?? 0);
-  const openAuditLogCount = Number(unit.openAuditLogCount ?? 0);
-  const availableSlots = Number(unit.availableSlots ?? 0);
-  const capacity = Number(unit.capacity ?? 0);
-  const mediaCount = Number(unit.mediaCount ?? 0);
-  const shortlistedCount = Number(unit.shortlistedCount ?? 0);
+  if (!unit || (showForStudent && unit.visibleToStudents === false)) {
+    return null;
+  }
 
   async function handleShortlist(event) {
     event.preventDefault();
     event.stopPropagation();
+    setSubmitting(true);
+    setFeedback("");
+    setError("");
 
-    if (!unitId) return;
-
-    setShortlistState({ loading: true, success: "", error: "" });
     try {
       await shortlistUnit({ unitId: Number(unitId) });
-      setShortlistState({ loading: false, success: "Shortlisted successfully.", error: "" });
-      props.onShortlist?.();
-    } catch (error) {
-      setShortlistState({ loading: false, success: "", error: error.message || "Shortlist failed" });
+      setFeedback("Unit shortlisted. Demand interest recorded.");
+      onShortlist?.();
+    } catch (requestError) {
+      setError(requestError.message || "Unable to shortlist this unit.");
+    } finally {
+      setSubmitting(false);
     }
   }
 
-  if (props.showForStudent && !visibleToStudents) {
-    return null;
-  }
-
   return (
-    <Link className={`${styles.card} glass`} href={`/unit/${unitId}`} prefetch={false}>
-      <div className={styles.thumbnail}>
-        <div className={styles.houseIcon}>
-          <svg fill="none" height="20" viewBox="0 0 24 24" width="20">
-            <path d="M4 10.5 12 4l8 6.5V20a1 1 0 0 1-1 1h-4v-6H9v6H5a1 1 0 0 1-1-1v-9.5Z" stroke="rgba(108,142,245,0.72)" strokeWidth="1.5" />
-          </svg>
+    <Link href={`/unit/${unitId}`} prefetch={false} className="glass-panel blueprint-border group flex h-full flex-col overflow-hidden p-5 transition hover:-translate-y-1">
+      <div className="flex items-start justify-between gap-3">
+        <div>
+          <div className="eyebrow mb-3">Unit {unitId}</div>
+          <h3 className="text-xl font-semibold text-white">{unit?.name || `Governed Unit ${unitId}`}</h3>
+          <p className="mt-2 text-sm text-slate-400">
+            {unit?.occupancyType || "Student housing"} • {Number(unit?.distanceKm || 0).toFixed(1)} km from demand corridor
+          </p>
         </div>
-        <span className={`chip ${styles.statusChip} ${getStatusTone(status)}`}>{status}</span>
-        <span className={`chip ch-blue ${styles.typeChip}`}>{occupancyType}</span>
-        {unit.auditRequired ? <span className={`chip ch-err ${styles.auditChip}`}>Audit</span> : null}
+        <div className="text-right">
+          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Trust score</p>
+          <strong className="mt-1 block text-3xl text-white">{Number(unit?.trustScore || 0)}</strong>
+          <span className={`signal-chip mt-2 ${trust.tone}`}>{trust.label}</span>
+        </div>
       </div>
 
-      <div className={styles.body}>
-        <div className={styles.headingRow}>
-          <div>
-            <p className="label-caps">Unit {unitId}</p>
-            <h3 className={styles.title}>{name}</h3>
-          </div>
-          <div className={styles.priceBlock}>
-            <strong>{`\u00A3${rent}/mo`}</strong>
-            <span>{address}</span>
-          </div>
-        </div>
-
-        <div className={styles.metaRow}>
-          <span className="chip ch-purple">{`${Number(unit.distanceKm ?? 0).toFixed(1)} km away`}</span>
-          {unit.ac ? <span className="chip ch-blue">AC included</span> : null}
-        </div>
-
-        <div className={styles.trustSection}>
-          <div className={styles.trustRow}>
-            <span className="label-caps">Trust</span>
-            <strong
-              className={styles.trustValue}
-              style={{
-                color:
-                  trustBand === "priority"
-                    ? "var(--accent-mint)"
-                    : trustBand === "standard"
-                      ? "var(--accent-gold)"
-                      : "var(--color-error)",
-              }}
-            >
-              {trustScore}
-            </strong>
-          </div>
-          <div className="trust-bar-track">
-            <div className={`trust-bar-fill ${trustBand}`} style={{ width: `${trustScore}%` }} />
-          </div>
-          <span className={`trust-band-badge ${getTrustBandClass(trustBand)}`}>{getTrustBandLabel(trustBand)}</span>
-        </div>
-
-        <div className={styles.signalRow}>
-          {activeComplaints > 0 ? <span className="chip ch-warn">{`${activeComplaints} open complaints`}</span> : null}
-          {openAuditLogCount > 0 ? <span className="chip ch-err">{`${openAuditLogCount} audits`}</span> : null}
-        </div>
-
-        {props.showDetails ? (
-          <>
-            <div className={styles.metricGrid}>
-              <div className="metric-card">
-                <p className="label-caps">Capacity</p>
-                <strong>{capacity}</strong>
-              </div>
-              <div className="metric-card">
-                <p className="label-caps">Available</p>
-                <strong>{availableSlots}</strong>
-              </div>
-              <div className="metric-card">
-                <p className="label-caps">Media</p>
-                <strong>{mediaCount}</strong>
-              </div>
-              <div className="metric-card">
-                <p className="label-caps">Shortlists</p>
-                <strong>{shortlistedCount}</strong>
-              </div>
-            </div>
-
-            <div className={styles.amenities}>
-              {unit.ac ? <span className="chip ch-blue">AC</span> : null}
-              {unit.bedAvailable ? <span className="chip ch-ok">Bed</span> : null}
-              {unit.waterAvailable ? <span className="chip ch-ok">Water</span> : null}
-              {Number(unit.toiletsAvailable ?? 0) > 0 ? <span className="chip ch-ok">{`${unit.toiletsAvailable} toilets`}</span> : null}
-              {unit.ventilationGood ? <span className="chip ch-ok">Ventilated</span> : null}
-            </div>
-          </>
-        ) : null}
-
-        {props.showForStudent ? (
-          <div className={styles.studentActions}>
-            <button className="btn-soft mint" disabled={shortlistState.loading} onClick={handleShortlist} type="button">
-              {shortlistState.loading ? "Shortlisting..." : "Shortlist"}
-            </button>
-            {shortlistState.success ? <div className="status-banner success">{shortlistState.success}</div> : null}
-            {shortlistState.error ? <div className="status-banner error">{shortlistState.error}</div> : null}
-          </div>
-        ) : null}
+      <div className="mt-5 trust-track">
+        <div className={`trust-fill ${trust.fillClass}`} style={{ width: `${Math.min(Number(unit?.trustScore || 0), 100)}%` }} />
       </div>
+
+      <div className="mt-5 flex flex-wrap gap-2">
+        <span className={`signal-chip ${getStatusTone(unit?.status)}`}>{unit?.status || "unknown status"}</span>
+        <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel} risk</span>
+        {unit?.auditRequired ? <span className="signal-chip signal-danger">Audit required</span> : null}
+        {unit?.ac ? <span className="signal-chip signal-info">AC</span> : null}
+      </div>
+
+      <div className={`mt-5 grid gap-3 ${compact ? "sm:grid-cols-2" : "sm:grid-cols-4"}`}>
+        <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
+          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Complaints</p>
+          <strong className="mt-2 block text-xl text-white">{complaintCount}</strong>
+        </div>
+        <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
+          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Capacity</p>
+          <strong className="mt-2 block text-xl text-white">{Number(unit?.capacity || unit?.availability?.capacity || 0)}</strong>
+        </div>
+        <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
+          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Available</p>
+          <strong className="mt-2 block text-xl text-white">{Number(unit?.availableSlots || unit?.availability?.availableSlots || 0)}</strong>
+        </div>
+        <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
+          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Rent</p>
+          <strong className="mt-2 block text-xl text-white">£{Number(unit?.rent || 0)}</strong>
+        </div>
+      </div>
+
+      <div className="mt-5 rounded-[24px] border border-white/8 bg-black/20 p-4">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Why visible or hidden</p>
+        <div className="mt-3 grid gap-2">
+          {visibilityReasons.length ? (
+            visibilityReasons.slice(0, compact ? 2 : 3).map((reason) => (
+              <div key={reason} className="flex items-start gap-2 text-sm leading-6 text-slate-300">
+                <span className="mt-2 h-1.5 w-1.5 rounded-full bg-sky-300" />
+                <span>{reason}</span>
+              </div>
+            ))
+          ) : (
+            <p className="text-sm leading-6 text-slate-400">Visibility rationale will appear here once governance signals are available.</p>
+          )}
+        </div>
+      </div>
+
+      {showForStudent ? (
+        <div className="mt-5 flex flex-wrap items-center gap-3">
+          <button className="btn-primary" disabled={submitting} onClick={handleShortlist} type="button">
+            {submitting ? "Recording..." : "Shortlist"}
+          </button>
+          <span className="text-sm text-slate-400">Demand-gated interest only. This is not a marketplace booking flow.</span>
+        </div>
+      ) : null}
+
+      {feedback ? <div className="status-banner success mt-4">{feedback}</div> : null}
+      {error ? <div className="status-banner error mt-4">{error}</div> : null}
     </Link>
   );
 }

@@ -15,7 +15,7 @@ const bodyFont = Plus_Jakarta_Sans({
 
 export const metadata = {
   title: "NearNest",
-  description: "Verified student housing with trust, transparency, and Dawn AI",
+  description: "Behavioral student housing governance platform centered on trust, transparency, and visibility.",
 };
 
 export default function RootLayout({ children }) {
@@ -28,9 +28,9 @@ export default function RootLayout({ children }) {
       }}
     >
       <body>
-        <div className="app-shell">
+        <div className="relative min-h-screen pb-20">
           <Navbar />
-          <main className="app-main fade-up">{children}</main>
+          <main className="page-shell pt-8 pb-8 sm:pt-10">{children}</main>
           <DawnChat />
         </div>
       </body>

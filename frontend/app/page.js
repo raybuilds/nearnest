@@ -1,118 +1,108 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import styles from "./page.module.css";
 
-const dashboardStats = [
-  { label: "Trust visibility", value: 50, suffix: "+", delta: "Minimum score for student visibility" },
-  { label: "Complaint SLA", value: 48, suffix: "h", delta: "Deadline tracked on every complaint" },
-  { label: "Audit triggers", value: 3, suffix: "", delta: "Capacity, trust, and complaint governance" },
-  { label: "User roles", value: 3, suffix: "", delta: "Student, landlord, and admin workflows" },
+const roleCards = [
+  {
+    role: "Student",
+    responsibility: "Only sees supply that still meets trust and governance thresholds.",
+    gain: "Clear visibility logic, safer discovery, and Dawn-assisted explanations.",
+  },
+  {
+    role: "Landlord",
+    responsibility: "Maintains evidence, checklists, SLA performance, and trust resilience.",
+    gain: "Portfolio clarity, demand signals, and earlier intervention before suspension.",
+  },
+  {
+    role: "Admin",
+    responsibility: "Governs approvals, audits, corridor risk, and system-triggered visibility.",
+    gain: "Transparent control over why units surface, pause, or disappear.",
+  },
 ];
 
-const featureCards = [
-  {
-    title: "Predictive Portfolio Intelligence",
-    body: "Spot risk signals, complaint surges, and operational blind spots before residents feel the impact.",
-  },
-  {
-    title: "Editorial-Grade Operations Oversight",
-    body: "Luxury dashboards, granular workflows, and beautifully clear remediation priorities for every team.",
-  },
-  {
-    title: "Dawn AI Embedded Everywhere",
-    body: "From intake drafting to risk briefings, Dawn turns raw property signals into action-ready guidance.",
-  },
+const principles = [
+  "Behavior generates signals.",
+  "Signals shape trust.",
+  "Trust drives governance action.",
+  "Governance determines visibility.",
 ];
 
 export default function HomePage() {
-  const [counts, setCounts] = useState(dashboardStats.map(() => 0));
-
-  useEffect(() => {
-    const duration = 1200;
-    const start = performance.now();
-    let frameId = 0;
-
-    const tick = (now) => {
-      const progress = Math.min((now - start) / duration, 1);
-      setCounts(dashboardStats.map((item) => Math.round(item.value * progress)));
-      if (progress < 1) frameId = requestAnimationFrame(tick);
-    };
-
-    frameId = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(frameId);
-  }, []);
-
   return (
-    <div className={`pageShell ${styles.page}`}>
-      <section className={styles.hero}>
-        <div className={styles.heroContent}>
-          <span className="chip">Dawn Property OS</span>
-          <h1 className="pageTitle">Intelligent property management, powered by Dawn AI</h1>
-          <p className="pageSubtitle">
-            A full operational command center for landlords, administrators, and resident-facing teams with risk visibility,
-            complaint orchestration, and editorial-grade portfolio oversight.
+    <div className="grid gap-8 pb-6">
+      <section className="governance-grid items-stretch">
+        <div className="glass-panel-strong blueprint-border fade-in-up lg:col-span-7 p-8 sm:p-10 lg:p-12">
+          <div className="eyebrow">Behavioral Student Housing Governance</div>
+          <h1 className="page-title mt-6 max-w-3xl text-gradient">
+            Housing you can trust. Not just listings.
+          </h1>
+          <p className="subtle-copy mt-6 max-w-2xl">
+            NearNest is a demand-gated governance platform for student housing. Units do not appear because they exist.
+            They appear because their behavior, complaint history, SLA performance, and evidence posture still justify visibility.
           </p>
-          <div className={styles.actions}>
-            <Link className="primaryButton" href="/dashboard">
-              Enter Dashboard
+
+          <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+            <Link className="btn-primary" href="/dashboard">
+              Enter Platform
             </Link>
-            <Link className="secondaryButton" href="/register">
-              Create Account
+            <Link className="btn-secondary" href="/docs">
+              Read Docs
             </Link>
+          </div>
+
+          <div className="mt-10 grid gap-3 sm:grid-cols-2">
+            {principles.map((item, index) => (
+              <div key={item} className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Step {index + 1}</p>
+                <strong className="mt-2 block text-lg text-white">{item}</strong>
+              </div>
+            ))}
           </div>
         </div>
 
-        <div className={styles.heroPanel}>
-          <div className={styles.panelHeader}>
-            <p>Dawn Live Overview</p>
-            <span className={styles.livePill}>Updated just now</span>
-          </div>
-          <div className={styles.signalRow}>
-            <div>
-              <strong>Garden Block</strong>
-              <span>Highest risk trajectory</span>
-            </div>
-            <b>81%</b>
-          </div>
-          <div className={styles.signalRow}>
-            <div>
-              <strong>Avg SLA Response</strong>
-              <span>Holding below target</span>
-            </div>
-            <b>6.2h</b>
-          </div>
-          <div className={styles.signalRow}>
-            <div>
-              <strong>Occupancy Health</strong>
-              <span>Portfolio confidence</span>
-            </div>
-            <b>93%</b>
-          </div>
+        <div className="fade-in-up-delayed grid gap-4 lg:col-span-5">
+          {roleCards.map((card) => (
+            <article key={card.role} className="glass-panel blueprint-border p-6">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="section-title">{card.role}</h2>
+                <span className={`role-badge role-${card.role.toLowerCase()}`}>{card.role}</span>
+              </div>
+              <div className="mt-5 rounded-[24px] border border-white/10 bg-black/20 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Responsibility</p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">{card.responsibility}</p>
+              </div>
+              <div className="mt-4 rounded-[24px] border border-white/10 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">What they gain</p>
+                <p className="mt-2 text-sm leading-6 text-slate-300">{card.gain}</p>
+              </div>
+            </article>
+          ))}
         </div>
       </section>
 
-      <section className={styles.features}>
-        {featureCards.map((feature, index) => (
-          <article key={feature.title} className={styles.featureCard} style={{ animationDelay: `${0.12 * index}s` }}>
-            <h2>{feature.title}</h2>
-            <p>{feature.body}</p>
-          </article>
-        ))}
-      </section>
-
-      <section className={styles.stats}>
-        {dashboardStats.map((item, index) => (
-          <article key={item.label} className={styles.statCard} style={{ animationDelay: `${0.18 * index}s` }}>
-            <p>{item.label}</p>
-            <strong>
-              {counts[index]}
-              {item.suffix}
-            </strong>
-            <span>{item.delta}</span>
-          </article>
-        ))}
+      <section className="glass-panel p-8 sm:p-10">
+        <div className="flex flex-col gap-6 lg:flex-row lg:items-end lg:justify-between">
+          <div>
+            <div className="eyebrow">Visibility Logic</div>
+            <h2 className="section-title mt-4">Every surface answers why a unit is visible or hidden</h2>
+            <p className="subtle-copy mt-3 max-w-2xl">
+              NearNest avoids black-box housing discovery. Students see transparency notes, landlords see trust pressure,
+              and admins see the exact governance signal behind every approval, suspension, and audit.
+            </p>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:w-[420px]">
+            <div className="metric-tile">
+              <p>Transparency</p>
+              <strong>Always On</strong>
+              <span>No hidden decision-making in visibility logic.</span>
+            </div>
+            <div className="metric-tile">
+              <p>Dawn</p>
+              <strong>Assistive</strong>
+              <span>Explains intelligence, but never makes governance decisions.</span>
+            </div>
+          </div>
+        </div>
       </section>
     </div>
   );

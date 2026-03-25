@@ -3,8 +3,18 @@ setlocal
 
 set "ROOT=%~dp0"
 
+echo Stopping stale NearNest processes on ports 3000 and 5000...
+for %%P in (3000 5000) do (
+  for /f "tokens=5" %%I in ('netstat -ano ^| findstr :%%P ^| findstr LISTENING') do (
+    taskkill /F /PID %%I >nul 2>nul
+  )
+)
+
 echo Starting NearNest backend...
 start "NearNest Backend" cmd /k "cd /d "%ROOT%" && npm run dev"
+
+echo Resetting frontend build cache...
+if exist "%ROOT%frontend\.next" rmdir /s /q "%ROOT%frontend\.next"
 
 echo Starting NearNest frontend...
 start "NearNest Frontend" cmd /k "cd /d "%ROOT%frontend" && npm run dev"
