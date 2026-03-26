@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { login } from "@/lib/api";
-import { setSessionFromPayload } from "@/lib/session";
+import { clearSession, setSessionFromPayload } from "@/lib/session";
 import styles from "./page.module.css";
 
 const roleTabs = ["student", "landlord", "admin"];
@@ -23,6 +23,11 @@ export default function LoginPage() {
     setSessionExpired(params.get("reason") === "session-expired");
   }, []);
 
+  function normalizeRole(value) {
+    const role = String(value || "").trim().toLowerCase();
+    return roleTabs.includes(role) ? role : "";
+  }
+
   async function handleSubmit(event) {
     event.preventDefault();
     setLoading(true);
@@ -31,6 +36,21 @@ export default function LoginPage() {
     try {
       const payload = await login({ email, password });
       if (!payload) {
+        return;
+      }
+
+      const actualRole = normalizeRole(payload?.user?.role);
+      const expectedRole = normalizeRole(roleTab);
+
+      if (!actualRole) {
+        clearSession();
+        setError("This account did not return a valid role. Please try again.");
+        return;
+      }
+
+      if (expectedRole && actualRole !== expectedRole) {
+        clearSession();
+        setError(`These credentials belong to a ${actualRole} account. Switch to the ${actualRole} tab or use matching credentials.`);
         return;
       }
 
@@ -87,6 +107,9 @@ export default function LoginPage() {
               </button>
             ))}
           </div>
+          <p className={styles.roleHint}>
+            Choose the role you expect to enter. NearNest will reject credentials that belong to a different role.
+          </p>
 
           {sessionExpired ? <div className="status-banner warn">Your session expired. Please sign in again.</div> : null}
           {error ? <div className="status-banner error">{error}</div> : null}

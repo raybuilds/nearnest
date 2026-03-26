@@ -110,6 +110,13 @@
   background: rgba(108, 142, 245, 0.14);
 }
 
+.roleHint {
+  margin: -4px 2px 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--text-muted);
+}
+
 .field {
   display: grid;
   gap: 8px;

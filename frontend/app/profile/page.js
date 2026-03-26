@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { getProfile } from "@/lib/api";
 import { formatShortDate, getRoleClass, getTrustBand } from "@/lib/governance";
-import { getStoredRole, getStoredUser, requireSessionOrRedirect } from "@/lib/session";
+import { clearSession, getStoredRole, getStoredUser, requireSessionOrRedirect } from "@/lib/session";
 
 function SectionCard({ title, children }) {
   return (
@@ -35,7 +35,16 @@ export default function ProfilePage() {
         const payload = await getProfile();
         if (active) setProfile(payload);
       } catch (requestError) {
-        if (active) setError(requestError.message || "Unable to load profile.");
+        const message = requestError.message || "Unable to load profile.";
+        if (!active) return;
+
+        if (message === "User not found") {
+          clearSession();
+          window.location.href = "/login?reason=session-expired";
+          return;
+        }
+
+        setError(message);
       } finally {
         if (active) setLoading(false);
       }
@@ -57,7 +66,28 @@ export default function ProfilePage() {
       .join("");
   }, [profile, user]);
 
+  const roleValue = profile?.role || role || "student";
   const currentTrust = getTrustBand(profile?.currentAccommodation?.trustScore || profile?.portfolioSummary?.avgTrustAcrossUnits || 0);
+  const posture = (() => {
+    if (roleValue === "student" || roleValue === "landlord") {
+      return {
+        title: currentTrust.label,
+        body: currentTrust.narrative,
+      };
+    }
+
+    if (roleValue === "admin") {
+      return {
+        title: "Governance Control",
+        body: "Administrative visibility spans corridor risk, audits, suspensions, and complaint density.",
+      };
+    }
+
+    return {
+      title: "Profile Active",
+      body: "Role-based visibility is active for this account.",
+    };
+  })();
 
   if (loading) {
     return (
@@ -82,7 +112,7 @@ export default function ProfilePage() {
             <h1 className="page-title mt-4 text-gradient">{profile?.identity?.name || user?.name || "NearNest User"}</h1>
             <p className="subtle-copy mt-3">{profile?.identity?.email || user?.email || "Email unavailable"}</p>
             <div className="mt-4">
-              <span className={getRoleClass(profile?.role || role || "student")}>{profile?.role || role || "student"}</span>
+              <span className={getRoleClass(roleValue)}>{roleValue}</span>
             </div>
           </div>
         </div>
@@ -90,8 +120,8 @@ export default function ProfilePage() {
         <div className="grid gap-3 sm:min-w-[260px]">
           <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
             <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Governance posture</p>
-            <strong className="mt-2 block text-2xl text-white">{currentTrust.label}</strong>
-            <span className="mt-2 block text-sm leading-6 text-slate-400">{currentTrust.narrative}</span>
+            <strong className="mt-2 block text-2xl text-white">{posture.title}</strong>
+            <span className="mt-2 block text-sm leading-6 text-slate-400">{posture.body}</span>
           </div>
         </div>
       </section>

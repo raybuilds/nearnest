@@ -46,11 +46,13 @@ async function callApi(path, token, options = {}) {
 }
 
 function parseMaxRent(text) {
-  const kMatch = text.match(/(?:under|max|below)\s+(\d+)\s*k\b/);
+  const kMatch = text.match(/(?:under|max|below|within)\s*[₹rs.\s]*?(\d+)\s*k\b/);
   if (kMatch) return Number(kMatch[1]) * 1000;
 
-  const rawMatch = text.match(/(?:under|max|below)\s+(\d{3,6})\b/);
+  const rawMatch = text.match(/(?:under|max|below|within)\s*[₹rs.\s]*?(\d{3,6})\b/);
   if (rawMatch) return Number(rawMatch[1]);
+
+  if (/\b(cheap|budget|affordable|low rent)\b/.test(text)) return 8000;
 
   return null;
 }
@@ -70,11 +72,32 @@ function parseAcFilter(text) {
 }
 
 function parseSeverity(text) {
-  const match = text.match(/severity\s*(\d)\b/);
+  const match = text.match(/(?:severity|sev(?:erity)?)\s*(?:is\s*)?(\d)\b/);
   if (!match) return null;
   const value = Number(match[1]);
   if (!Number.isInteger(value) || value < 1 || value > 5) return null;
   return value;
+}
+
+function parseDuration(text) {
+  const source = String(text || "").toLowerCase();
+  const hourMatch = source.match(/(\d+)\s*(hour|hours|hr|hrs)\b/);
+  if (hourMatch) {
+    const value = Number(hourMatch[1]);
+    if (!Number.isNaN(value)) return `${value} hour${value === 1 ? "" : "s"}`;
+  }
+
+  const dayMatch = source.match(/(\d+)\s*(day|days)\b/);
+  if (dayMatch) {
+    const value = Number(dayMatch[1]);
+    if (!Number.isNaN(value)) return `${value} day${value === 1 ? "" : "s"}`;
+  }
+
+  if (/\b(today|since today)\b/.test(source)) return "since today";
+  if (/\b(yesterday|since yesterday)\b/.test(source)) return "since yesterday";
+  if (/\bthis week\b/.test(source)) return "this week";
+  if (/\bfor a while\b/.test(source)) return "for a while";
+  return null;
 }
 
 function parseRequestedLandlordId(text) {
@@ -85,10 +108,34 @@ function parseRequestedLandlordId(text) {
 }
 
 function parseRequestedUnitId(text) {
-  const match = String(text || "").match(/\bunit\s*#?\s*(\d+)\b/);
+  const match = String(text || "").match(/\b(?:unit|room)\s*#?\s*(\d+)\b/);
   if (!match) return null;
   const value = Number(match[1]);
   return Number.isNaN(value) ? null : value;
+}
+
+function preprocessDawnText(text) {
+  let normalized = String(text || "").trim().toLowerCase();
+  if (!normalized) return normalized;
+
+  const replacements = [
+    [/\bcheap\b/g, "budget under 8000"],
+    [/\baffordable\b/g, "budget under 8000"],
+    [/\bsafe\b/g, "high trust low risk"],
+    [/\bunsafe\b/g, "risky trust low"],
+    [/\bbad area\b/g, "corridor risk"],
+    [/\brisky area\b/g, "corridor risk"],
+    [/\breport an issue\b/g, "draft complaint"],
+    [/\bissue in my room\b/g, "complaint in my unit"],
+    [/\bexplain this unit\b/g, "explain this unit trust risk health"],
+    [/\bunits needing attention\b/g, "which units need attention"],
+  ];
+
+  for (const [pattern, replacement] of replacements) {
+    normalized = normalized.replace(pattern, replacement);
+  }
+
+  return normalized.replace(/\s+/g, " ").trim();
 }
 
 function detectIncidentType(text) {
@@ -148,9 +195,11 @@ module.exports = {
   getBearerToken,
   inLastDays,
   parseAcFilter,
+  parseDuration,
   parseMaxDistance,
   parseMaxRent,
   parseRequestedLandlordId,
   parseRequestedUnitId,
   parseSeverity,
+  preprocessDawnText,
 };

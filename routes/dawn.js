@@ -1,6 +1,6 @@
 const express = require("express");
 const { verifyToken } = require("../middlewares/auth");
-const { callApi, getBearerToken } = require("../services/dawnIntents/utils");
+const { callApi, getBearerToken, parseRequestedUnitId, preprocessDawnText } = require("../services/dawnIntents/utils");
 const studentSearch = require("../services/dawnIntents/studentSearch");
 const studentComplaintDraft = require("../services/dawnIntents/studentComplaintDraft");
 const studentComplaintSummary = require("../services/dawnIntents/studentComplaintSummary");
@@ -17,6 +17,7 @@ const { getUnitHealthReport } = require("../services/intelligence/dawnUnitHealth
 const { getCorridorInsights } = require("../services/intelligence/dawnCorridorInsightService");
 const { forecastUnitRisk } = require("../services/intelligence/dawnRiskForecastService");
 const { generateOperationalInsights } = require("../services/intelligence/dawnOperationsAdvisor");
+const { explainTrust } = require("../services/intelligence/trustExplanationService");
 
 const router = express.Router();
 
@@ -49,6 +50,7 @@ const intentMap = {
   landlord_remediation_advisor: landlordRemediationAdvisor,
   admin_density: adminCorridorAnalytics,
   explain_unit_trust: explainUnitTrust,
+  explain_unit_overview: explainUnitOverview,
 };
 
 function createDawnContext(req, token, memory) {
@@ -71,6 +73,128 @@ function createDawnContext(req, token, memory) {
       updateContext(userId, { ...current, [field]: null });
     },
     callApi: (path, options = {}) => callApi(path, token, options),
+  };
+}
+
+function buildComplaintCountFromProfile(profile) {
+  return Number(
+    profile?.currentAccommodation?.complaintHealth?.openComplaints30d ??
+      profile?.currentAccommodation?.complaintHealth?.totalComplaints30d ??
+      profile?.currentAccommodation?.trust?.complaintDensity30d ??
+      0
+  );
+}
+
+async function buildResolvedContext(req, context) {
+  if (req.user.role === "student") {
+    const profile = await context.callApi("/profile");
+    const currentUnit = profile?.occupancy?.currentUnit || {};
+    const accommodation = profile?.currentAccommodation || {};
+
+    return {
+      role: "student",
+      corridorId:
+        currentUnit?.corridor?.id ||
+        profile?.identity?.corridor?.id ||
+        accommodation?.identity?.corridor?.id ||
+        context.memory?.lastCorridorId ||
+        null,
+      unitId:
+        currentUnit?.unitId ||
+        accommodation?.identity?.unitId ||
+        context.memory?.lastUnitId ||
+        null,
+      trustScore:
+        accommodation?.trust?.trustScore ??
+        accommodation?.complaintHealth?.trustScore ??
+        context.memory?.lastKnownTrustScore ??
+        null,
+      activeComplaintsCount: buildComplaintCountFromProfile(profile),
+      profile,
+    };
+  }
+
+  if (req.user.role === "landlord") {
+    const units = await context.callApi("/landlord/units").catch(() => []);
+    const focusUnit = selectLandlordFocusUnit(Array.isArray(units) ? units : []);
+    return {
+      role: "landlord",
+      corridorId: focusUnit?.corridorId || context.memory?.lastCorridorId || null,
+      unitId: focusUnit?.id || context.memory?.lastUnitId || null,
+      trustScore: focusUnit?.trustScore ?? context.memory?.lastKnownTrustScore ?? null,
+      activeComplaintsCount: Number(focusUnit?.activeComplaints ?? 0),
+      focusUnit,
+    };
+  }
+
+  if (req.user.role === "admin") {
+    const analytics = await adminCorridorAnalytics({ req, context }).catch(() => null);
+    const topCorridor = analytics?.data?.corridors?.[0] || null;
+    return {
+      role: "admin",
+      corridorId: topCorridor?.corridorId || context.memory?.lastCorridorId || null,
+      unitId: context.memory?.lastUnitId || null,
+      trustScore: null,
+      activeComplaintsCount: Number(topCorridor?.complaintDensity ?? 0),
+      corridorAnalytics: topCorridor,
+    };
+  }
+
+  return {
+    role: req.user.role,
+    corridorId: context.memory?.lastCorridorId || null,
+    unitId: context.memory?.lastUnitId || null,
+    trustScore: context.memory?.lastKnownTrustScore || null,
+    activeComplaintsCount: context.memory?.lastKnownComplaintCount || 0,
+  };
+}
+
+async function explainUnitOverview({ req, context }) {
+  const explicitUnitId = parseRequestedUnitId(context.message) ?? parseRequestedUnitId(context.text);
+  const unitId = explicitUnitId || context.resolvedContext?.unitId || context.memory?.lastUnitId || null;
+  const corridorId = context.resolvedContext?.corridorId || context.memory?.lastCorridorId || null;
+
+  if (!unitId) {
+    return {
+      message: "Please specify a unit to explain.",
+      assistant: "I need a unit reference before I can explain its trust, complaint history, and forecast.",
+      data: {
+        missing: "unitId",
+      },
+    };
+  }
+
+  const [trust, healthReport, riskForecast] = await Promise.all([
+    explainTrust(unitId, { callApi: context.callApi }),
+    getUnitHealthReport({
+      unitId,
+      corridorId,
+      callApi: context.callApi,
+    }),
+    forecastUnitRisk(unitId),
+  ]);
+
+  context.updateMemory({
+    lastIntent: "explain_unit_overview",
+    lastUnitId: unitId,
+    lastViewedUnitId: unitId,
+    lastKnownTrustScore: trust?.trustScore ?? healthReport?.trustScore ?? null,
+    lastKnownComplaintCount: healthReport?.complaintsLast30Days ?? null,
+    lastKnownRiskLevel: riskForecast?.riskLevel ?? null,
+  });
+
+  return {
+    message: `Here is the full explanation for Unit ${unitId}.`,
+    data: {
+      unitId,
+      corridorId,
+      trust,
+      healthReport,
+      riskForecast,
+      trustScore: trust?.trustScore ?? healthReport?.trustScore ?? null,
+      complaintCount: healthReport?.complaintsLast30Days ?? 0,
+      riskLevel: riskForecast?.riskLevel ?? "STABLE",
+    },
   };
 }
 
@@ -354,6 +478,14 @@ function inferIntent(role, message) {
   const text = String(message || "").toLowerCase().trim();
 
   if (
+    text.includes("explain this unit") ||
+    text.includes("explain unit") ||
+    text.includes("full unit explanation")
+  ) {
+    return "explain_unit_overview";
+  }
+
+  if (
     text.includes("explain trust score") ||
     text.includes("why is this unit trust low") ||
     text.includes("why trust score dropped") ||
@@ -459,11 +591,90 @@ function inferIntent(role, message) {
     ) {
       return "operations_advisor";
     }
-    if (text.includes("corridor") && text.includes("density")) return "admin_density";
-    if (text.includes("highest complaint density")) return "admin_density";
+    if (
+      (text.includes("corridor") && text.includes("density")) ||
+      text.includes("highest complaint density") ||
+      text.includes("which corridor is risky") ||
+      text.includes("corridor risk")
+    ) {
+      return "admin_density";
+    }
   }
 
   return "unsupported";
+}
+
+function buildSuggestions(intent, role, result, resolvedContext) {
+  const unitId = resolvedContext?.unitId || result?.data?.unitId || result?.data?.trust?.unitId || null;
+  const complaintCount =
+    Number(result?.data?.complaintCount) ||
+    Number(result?.data?.healthReport?.complaintsLast30Days) ||
+    Number(resolvedContext?.activeComplaintsCount) ||
+    0;
+
+  if (intent === "student_search") {
+    return ["Explain this unit", "Why is my unit risky?", "Report an issue"];
+  }
+  if (intent === "student_complaint") {
+    if (result?.requiresConfirmation) return ["Confirm complaint", "Change severity", "Add duration"];
+    return ["View complaints", "See trust breakdown", "How is my unit doing?"];
+  }
+  if (intent === "student_unit_health" || intent === "predict_unit_risk") {
+    return [
+      complaintCount > 0 ? "View complaints" : "Report an issue",
+      "See trust breakdown",
+      unitId ? `Explain unit ${unitId}` : "Explain this unit",
+    ];
+  }
+  if (intent === "explain_unit_trust" || intent === "explain_unit_overview") {
+    return ["See risk forecast", "View complaints", role === "student" ? "Report an issue" : "Which units are at risk?"];
+  }
+  if (intent === "landlord_remediation_advisor") {
+    return ["Which units are at risk?", "Show recurring issues", "Any operational problems?"];
+  }
+  if (intent === "landlord_risk" || intent === "landlord_recurring") {
+    return ["What should I fix first?", "Any operational problems?", "Explain this unit"];
+  }
+  if (intent === "admin_density" || intent === "corridor_behavioral_insight" || intent === "operations_advisor") {
+    return ["Units needing attention", "Which corridor is risky?", "Explain this unit"];
+  }
+
+  if (role === "student") return ["Find safe rooms under ₹8000", "Why is my unit risky?", "Report an issue"];
+  if (role === "landlord") return ["What should I fix first?", "Which units are at risk?", "Show recurring issues"];
+  if (role === "admin") return ["Which corridor is risky?", "Units needing attention", "Any operational problems?"];
+  return [];
+}
+
+function buildResponseSummary(intent, result, resolvedContext) {
+  const trustScore =
+    result?.data?.trustScore ??
+    result?.data?.trust?.trustScore ??
+    result?.data?.healthReport?.trustScore ??
+    resolvedContext?.trustScore ??
+    null;
+  const riskLevel =
+    result?.data?.riskLevel ??
+    result?.data?.riskForecast?.riskLevel ??
+    result?.data?.riskSignal?.riskLevel ??
+    result?.riskSignal?.riskLevel ??
+    result?.riskForecast?.riskLevel ??
+    resolvedContext?.lastKnownRiskLevel ??
+    null;
+  const complaintCount =
+    result?.data?.complaintCount ??
+    result?.data?.healthReport?.complaintsLast30Days ??
+    result?.data?.complaintsLast30Days ??
+    resolvedContext?.activeComplaintsCount ??
+    null;
+
+  return {
+    unitId: result?.data?.unitId ?? result?.data?.trust?.unitId ?? resolvedContext?.unitId ?? null,
+    corridorId: result?.data?.corridorId ?? resolvedContext?.corridorId ?? null,
+    trustScore,
+    riskLevel,
+    complaintCount,
+    intent,
+  };
 }
 
 function unsupportedMessageForRole(role) {
@@ -489,12 +700,44 @@ router.get("/dawn/insights", verifyToken, async (req, res) => {
     const context = createDawnContext(req, token, getContext(req.user.id));
     const insightContext = await buildInsightContext(req, context);
     const insights = await buildProactiveInsightCards(req, context);
+    const summary = {
+      unitId: insightContext.unit,
+      corridorId: insightContext.corridorMetrics?.corridorId || null,
+      trustScore: insightContext.trustScore ?? null,
+      riskLevel:
+        insightContext.trustScore !== null && insightContext.trustScore !== undefined
+          ? Number(insightContext.trustScore) < 50
+            ? "HIGH"
+            : Number(insightContext.trustScore) < 70
+              ? "MEDIUM"
+              : "LOW"
+          : insightContext.corridorMetrics?.complaintDensityIncreasing
+            ? "MEDIUM"
+            : "LOW",
+      complaintCount: insightContext.unresolvedComplaints ?? 0,
+    };
+
+    const assistant =
+      req.user.role === "student"
+        ? summary.complaintCount > 0
+          ? `You have ${summary.complaintCount} unresolved complaint${summary.complaintCount === 1 ? "" : "s"} linked to your unit.`
+          : "Your housing profile is stable right now. I can explain trust or help report a new issue."
+        : req.user.role === "landlord"
+          ? summary.unitId
+            ? `Unit ${summary.unitId} is the best place to review first based on current complaint pressure.`
+            : "Your portfolio looks stable right now. I can still check risk and recurring issues."
+          : summary.corridorId
+            ? `Complaint density is rising around corridor ${summary.corridorId}.`
+            : "I can highlight the corridors and units that need governance attention.";
 
     return res.json({
       role: req.user.role,
       unit: insightContext.unit,
       trustScore: insightContext.trustScore,
       insights,
+      assistant,
+      summary,
+      suggestions: buildSuggestions("insights", req.user.role, { data: summary }, summary),
     });
   } catch (error) {
     if (error?.isHttpError) {
@@ -520,6 +763,7 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
     const role = req.user.role;
     const userId = req.user.id;
     const memory = getContext(userId);
+    const normalizedText = preprocessDawnText(message);
 
     const shouldClearContext = /^\/?(clear|reset)\s+(memory|context)$/i.test(message.trim());
     if (shouldClearContext) {
@@ -527,10 +771,17 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
       return res.json({
         intent: "context_reset",
         assistant: "Context cleared. We can start fresh.",
+        suggestions: buildSuggestions("context_reset", role, {}, {}),
       });
     }
 
-    let inferredIntent = inferIntent(role, message);
+    const baseContext = createDawnContext(req, token, memory);
+    const resolvedContext = await buildResolvedContext(req, baseContext);
+
+    let inferredIntent = inferIntent(role, normalizedText);
+    if (memory?.pendingFollowUp?.intent === "student_complaint") {
+      inferredIntent = "student_complaint";
+    }
     if (inferredIntent === "unsupported" && memory?.lastIntent) {
       inferredIntent = memory.lastIntent;
     }
@@ -542,22 +793,36 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
       return res.json({
         intent: "unsupported",
         assistant: unsupportedMessageForRole(role),
+        suggestions: buildSuggestions("unsupported", role, {}, resolvedContext),
+        summary: buildResponseSummary("unsupported", {}, resolvedContext),
       });
     }
 
     const context = {
-      ...createDawnContext(req, token, memory),
+      ...baseContext,
       message: message.trim(),
-      text: message.toLowerCase().trim(),
+      text: normalizedText,
       confirm: Boolean(confirm),
       action: action && typeof action === "object" ? action : null,
       intent,
+      resolvedContext,
     };
 
     const result = await handler({ req, context });
+    const summary = buildResponseSummary(intent, result || {}, resolvedContext);
+    const suggestions = buildSuggestions(intent, role, result || {}, resolvedContext);
+
     updateContext(userId, {
       lastIntent: intent,
-      ...(result?.data?.unitId ? { lastUnitId: result.data.unitId } : {}),
+      ...(summary.unitId ? { lastUnitId: summary.unitId, lastViewedUnitId: summary.unitId } : {}),
+      ...(summary.corridorId ? { lastCorridorId: summary.corridorId } : {}),
+      ...(summary.trustScore !== null && summary.trustScore !== undefined ? { lastKnownTrustScore: summary.trustScore } : {}),
+      ...(summary.complaintCount !== null && summary.complaintCount !== undefined ? { lastKnownComplaintCount: summary.complaintCount } : {}),
+      ...(summary.riskLevel ? { lastKnownRiskLevel: summary.riskLevel } : {}),
+      currentUnitId: resolvedContext.unitId,
+      currentCorridorId: resolvedContext.corridorId,
+      currentTrustScore: resolvedContext.trustScore,
+      currentActiveComplaints: resolvedContext.activeComplaintsCount,
     });
 
     const assistant = formatDawnResponse(intent, result || {});
@@ -565,6 +830,15 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
       intent,
       ...(result || {}),
       assistant,
+      suggestions,
+      summary,
+      context: {
+        role,
+        unitId: resolvedContext.unitId,
+        corridorId: resolvedContext.corridorId,
+        trustScore: resolvedContext.trustScore,
+        activeComplaintsCount: resolvedContext.activeComplaintsCount,
+      },
     });
   } catch (error) {
     if (error?.isHttpError) {

@@ -22,3 +22,4 @@ scripts/*.local.ps1
 *.pem
 *.key
 
+.vercel

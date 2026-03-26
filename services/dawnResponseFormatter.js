@@ -47,6 +47,17 @@ function formatTrustExplanation(result) {
   return `Unit trust score is ${trustScore}. Main drivers: ${drivers.join("; ")}.`;
 }
 
+function formatUnitOverview(result) {
+  const trust = result?.data?.trust || {};
+  const health = result?.data?.healthReport || {};
+  const risk = result?.data?.riskForecast || {};
+  const trustScore = trust?.trustScore ?? health?.trustScore ?? "N/A";
+  const complaintCount = health?.complaintsLast30Days ?? 0;
+  const riskLevel = risk?.riskLevel || "STABLE";
+
+  return `Unit ${result?.data?.unitId || ""} is currently at trust score ${trustScore} with ${complaintCount} recent complaints and risk level ${riskLevel}. I combined trust drivers, complaint health, and forecast signals so you can decide the next action quickly.`.trim();
+}
+
 function formatStudentUnitHealth(result) {
   const report = result?.data?.healthReport || result?.data;
   if (!report) {
@@ -56,7 +67,7 @@ function formatStudentUnitHealth(result) {
   const trustScore = report.trustScore ?? result?.data?.trustScore ?? "N/A";
   const trend = report.complaintTrend ?? result?.data?.trend ?? "unknown";
   const responsePerformance = report.responsePerformance ?? "unknown";
-  return `Here is the health report for your housing: Trust score ${trustScore}, complaint trend ${trend}, response performance ${responsePerformance}.`;
+  return `Here is the health report for your housing: trust score ${trustScore}, complaint trend ${trend}, response performance ${responsePerformance}.`;
 }
 
 function formatPredictUnitRisk(result) {
@@ -74,7 +85,7 @@ function formatPredictUnitRisk(result) {
   const indicators = Array.isArray(forecast.indicators) ? forecast.indicators : [];
   const recommendation = forecast.recommendation || "Continue monitoring this unit.";
   const indicatorText = indicators.length > 0 ? indicators.join("; ") : "No major early warning indicators right now";
-  return `Risk Signal: ${riskSignal}. Indicators: ${indicatorText}. Recommendation: ${recommendation}`;
+  return `This unit is ${riskSignal}. Indicators: ${indicatorText}. Recommended next step: ${recommendation}`;
 }
 
 function formatCorridorBehavioralInsight(result) {
@@ -141,6 +152,7 @@ function formatDawnResponse(intent, result) {
   if (intent === "landlord_recurring") return formatLandlordRecurring(result);
   if (intent === "admin_density") return formatAdminDensity(result);
   if (intent === "explain_unit_trust") return formatTrustExplanation(result);
+  if (intent === "explain_unit_overview") return formatUnitOverview(result);
   return result?.assistant || "Done.";
 }
 

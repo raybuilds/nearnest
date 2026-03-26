@@ -1,4 +1,4 @@
-const { detectIncidentType, ensureRole, estimateSeverity, parseSeverity } = require("./utils");
+const { detectIncidentType, ensureRole, estimateSeverity, parseDuration, parseSeverity } = require("./utils");
 
 function resolveStudentContext(profile) {
   const unitId = profile?.occupancy?.currentUnit?.unitId || profile?.currentAccommodation?.identity?.unitId || null;
@@ -24,30 +24,89 @@ module.exports = async function studentComplaintDraft({ req, context }) {
     };
   }
 
-  const incidentType = detectIncidentType(text);
-  const severity = parseSeverity(text) || estimateSeverity(text, incidentType);
+  const detectedIncidentType = detectIncidentType(text);
+  const incidentType =
+    detectedIncidentType !== "other"
+      ? detectedIncidentType
+      : memory?.lastComplaintDraft?.incidentType || detectedIncidentType;
+  const severity = parseSeverity(text) || memory?.lastComplaintDraft?.severity || null;
+  const duration = parseDuration(text) || memory?.lastComplaintDraft?.duration || null;
+  const estimatedSeverity = severity || estimateSeverity(text, incidentType);
+  const baseMessage =
+    memory?.lastComplaintDraft?.message &&
+    (parseSeverity(text) || parseDuration(text)) &&
+    detectedIncidentType === "other"
+      ? String(memory.lastComplaintDraft.message).replace(/\s*Duration reported:.*$/i, "").trim()
+      : message.trim();
+  const draftMessage = duration ? `${baseMessage} Duration reported: ${duration}.` : baseMessage;
   const draft = {
     ...(studentContext.occupantId ? { occupantId: studentContext.occupantId } : { unitId: studentContext.unitId }),
-    severity,
+    severity: estimatedSeverity,
     incidentType,
-    message: message.trim(),
+    duration,
+    message: draftMessage,
     requiresConfirmation: true,
   };
+
+  const missingFields = [];
+  if (!severity) missingFields.push("severity");
+  if (!duration) missingFields.push("duration");
+
+  if (!confirm && missingFields.length > 0) {
+    updateMemory({
+      lastIntent: "student_complaint",
+      lastUnitId: studentContext.unitId,
+      lastComplaintDraft: draft,
+      pendingFollowUp: {
+        intent: "student_complaint",
+        missingFields,
+      },
+    });
+
+    return {
+      requiresConfirmation: false,
+      assistant:
+        missingFields.length === 2
+          ? "I can draft this complaint. First tell me the severity from 1 to 5 and how long this issue has been happening."
+          : missingFields[0] === "severity"
+            ? "I can draft this complaint. What severity should I use from 1 to 5?"
+            : "I can draft this complaint. How long has this issue been happening?",
+      data: {
+        draft: {
+          severity: draft.severity,
+          incidentType: draft.incidentType,
+          duration: draft.duration,
+          message: message.trim(),
+        },
+        preview: {
+          unitId: studentContext.unitId,
+          occupantBound: Boolean(studentContext.occupantId),
+          incidentType,
+          severity: draft.severity,
+          duration,
+          message: message.trim(),
+        },
+        missingFields,
+      },
+    };
+  }
 
   if (!confirm) {
     updateMemory({
       lastIntent: "student_complaint",
       lastUnitId: studentContext.unitId,
       lastComplaintDraft: draft,
+      pendingFollowUp: null,
     });
 
     return {
       requiresConfirmation: true,
-      assistant: "Complaint draft prepared. Confirm to submit.",
+      assistant: "Complaint draft prepared. Review the preview and confirm to submit it.",
       data: {
         draft: {
           severity: draft.severity,
           incidentType: draft.incidentType,
+          duration: draft.duration,
           message: draft.message,
           requiresConfirmation: true,
         },
@@ -55,7 +114,8 @@ module.exports = async function studentComplaintDraft({ req, context }) {
           unitId: studentContext.unitId,
           occupantBound: Boolean(studentContext.occupantId),
           incidentType,
-          severity,
+          severity: draft.severity,
+          duration: draft.duration,
           message: draft.message,
         },
       },
@@ -82,6 +142,7 @@ module.exports = async function studentComplaintDraft({ req, context }) {
     lastIntent: "student_complaint",
     lastUnitId: studentContext.unitId,
     lastComplaintDraft: null,
+    pendingFollowUp: null,
   });
 
   return {
@@ -91,6 +152,7 @@ module.exports = async function studentComplaintDraft({ req, context }) {
       trustScore: created?.trustScore ?? null,
       incidentType: finalPayload.incidentType,
       severity: finalPayload.severity,
+      duration: finalPayload.duration || null,
     },
   };
 };

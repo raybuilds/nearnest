@@ -7,6 +7,10 @@ async function resolveUnitId(req, context) {
     return explicitUnitId;
   }
 
+  if (context.resolvedContext?.unitId) {
+    return Number(context.resolvedContext.unitId);
+  }
+
   if (context.action?.payload?.unitId) {
     return Number(context.action.payload.unitId);
   }

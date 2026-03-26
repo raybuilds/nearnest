@@ -6,7 +6,11 @@ module.exports = async function studentSearch({ req, context }) {
 
   const { callApi, text, memory, updateMemory } = context;
   const profile = await callApi("/profile");
-  const corridorId = profile?.identity?.corridor?.id || memory?.lastCorridorId || null;
+  const corridorId =
+    context.resolvedContext?.corridorId ||
+    profile?.identity?.corridor?.id ||
+    memory?.lastCorridorId ||
+    null;
 
   if (!corridorId) {
     return {

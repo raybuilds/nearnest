@@ -1,0 +1,192 @@
+# NearNest Phase 1 Architecture Documentation
+
+## 1. PROJECT OVERVIEW
+
+**Problem Solved:**
+NearNest addresses the lack of transparency and accountability in student housing markets by creating a closed-loop governance system that protects students while providing operational control for landlords and enforcement oversight for administrators.
+
+**Core Idea:**
+A corridor-scoped housing platform with three distinct user roles, where trust is enforced through measurable visibility rules rather than manual authority. The system combines unit discovery, trust scoring, complaint-led governance, audits, occupancy management, and media evidence with a conversational AI layer (Dawn) for natural interaction.
+
+**Key Differentiators:**
+- **Closed-loop governance:** Complaints directly impact trust scores which control visibility
+- **Role-aware transparency:** Students see trust signals but not private operational details
+- **Location-encoded identity:** Occupant IDs prevent enumeration attacks while enabling accountability
+- **Deterministic trust engine:** Transparent, repeatable scoring based on behavioral history
+- **AI as interaction layer:** Dawn executes existing APIs without policy overrides
+
+## 2. SYSTEM ARCHITECTURE
+
+**Frontend:**
+- Next.js 14 (App Router) with React 18
+- Tailwind CSS for styling
+- Role-specific UI depth (Student/Landlord/Admin)
+- API communication through `/lib/api.js`
+
+**Backend:**
+- Node.js with Express framework
+- Prisma ORM with PostgreSQL database
+- JWT-based authentication with role-based access control
+- CORS-enabled for frontend integration
+
+**Database:**
+- PostgreSQL with comprehensive schema for housing governance
+- Prisma migrations for schema evolution
+- Referential integrity and constraint enforcement
+
+**Key Folders:**
+- `routes/` - API endpoints organized by domain (auth, unit, complaint, etc.)
+- `services/` - Business logic and infrastructure services
+- `engines/` - Core calculation engines (trust scoring)
+- `prisma/` - Database schema and migrations
+- `frontend/` - Next.js application with role-specific pages
+
+## 3. CORE LAYERS
+
+### Discovery Layer
+- **Purpose:** Student-facing unit discovery with trust-based filtering
+- **Key Components:** 
+  - Unit visibility gates (status, baselines, trust threshold)
+  - Ranking algorithm combining trust, availability, price, distance
+  - VDP (Verified Demand Pool) for demand verification
+- **Constraints:** Units must have `trustScore >= 50` and all baselines approved for student visibility
+
+### Behavior Layer
+- **Purpose:** Tracks and scores housing behavior through complaints
+- **Key Components:**
+  - Immutable complaint records with severity and SLA tracking
+  - Incident type classification (water, structural, etc.)
+  - Occupancy-bound complaint ownership
+- **Constraints:** Complaints are append-only; resolution is timestamped and role-gated
+
+### Intelligence Layer (Read-Only Principle)
+- **Purpose:** Deterministic analysis and insights without policy modification
+- **Key Components:**
+  - `trustEngine.js` - Core trust calculation logic
+  - `dawnInsightsEngine.js` - Role-specific behavioral insights
+  - `dawnRanking.js` - Unit recommendation scoring
+  - `trustExplanationService.js` - Trust score breakdown
+- **Constraints:** No direct database writes; only reads and calculations
+
+### Governance Layer
+- **Purpose:** Enforcement and compliance management
+- **Key Components:**
+  - Structural and operational baseline approvals
+  - Audit triggers and corrective action workflows
+  - Suspension logic for trust violations
+  - Event-driven governance listeners
+- **Constraints:** Immutable audit logs; governance actions require proper role authorization
+
+### Continuous Feedback Loop
+- **Purpose:** Self-correcting system where behavior directly impacts visibility
+- **Flow:** Complaint → Trust Recalculation → Visibility Update → Discovery Impact
+- **Mechanism:** Real-time trust score updates trigger visibility changes and potential audits
+
+## 4. USER FLOWS
+
+### Student Journey
+1. **Discovery:** Browse units filtered by trust score and baselines
+2. **Occupancy:** Check-in creates location-encoded occupant ID
+3. **Complaint:** File complaints bound to occupancy with automatic unit association
+4. **Monitoring:** View unit health summary and trust explanations
+5. **Transparency:** See complaint aggregates without exposing other students' identities
+
+### Landlord Journey
+1. **Unit Management:** Create units, submit baselines, upload media evidence
+2. **Occupancy:** Manage check-in/check-out with capacity enforcement
+3. **Complaint Response:** Resolve complaints within SLA to maintain trust
+4. **Insights:** Receive Dawn recommendations for operational improvements
+5. **Compliance:** Address audit requirements and corrective actions
+
+### Admin Journey
+1. **Corridor Oversight:** Monitor complaint density and risk levels
+2. **Unit Review:** Approve baselines and trigger audits
+3. **Enforcement:** Suspend units and manage compliance workflows
+4. **Analytics:** Use Dawn for corridor-wide behavioral insights
+5. **Governance:** Configure policies and monitor system health
+
+## 5. CORE SYSTEM LOOP
+
+### Complaint → Resolution → Trust Update Flow
+1. **Complaint Creation:** Student files complaint with severity and incident type
+2. **SLA Tracking:** System calculates deadline based on severity
+3. **Resolution:** Landlord/admin resolves within deadline
+4. **Trust Recalculation:** Engine applies penalties for severity, delays, and recurrence
+5. **Visibility Update:** Trust score changes may affect unit discoverability
+6. **Audit Triggers:** Low trust or violations automatically trigger governance review
+
+### SLA Mechanism
+- **Calculation:** Deadline = creation time + (severity * 24 hours)
+- **Tracking:** Real-time monitoring of resolution status
+- **Penalties:** -3 trust points for SLA breaches
+- **Escalation:** Repeated breaches trigger audit requirements
+
+### Trust Impact Logic
+- **Base Score:** 75 points
+- **Severity Penalty:** -2 per severity level
+- **Unresolved Penalty:** -5 per open complaint
+- **SLA Breach Penalty:** -3 per late resolution
+- **Recurrence Penalty:** -5 per complaint beyond threshold in 30-day window
+- **Minimum:** 0 (no negative trust scores)
+
+## 6. DAWN ASSISTANT (HIGH LEVEL)
+
+### What Dawn Does
+- **Role-Scoped Intents:** Natural language processing tailored to user roles
+- **API Orchestration:** Executes existing backend endpoints without policy overrides
+- **Contextual Awareness:** Uses authenticated profile context for personalized responses
+- **Deterministic Recommendations:** Rule-based guidance without ML black boxes
+
+### How It Interacts with APIs
+- **Intent Mapping:** Natural language → specific API endpoints
+- **Authentication:** Uses JWT context to access role-appropriate data
+- **Transaction Safety:** Complaint creation requires explicit confirmation
+- **Read-Only Analysis:** Insights generated from existing data without modifications
+
+### What Dawn Does NOT Do
+- **No Policy Overrides:** Cannot bypass RBAC, validation, or trust logic
+- **No Direct Database Writes:** All mutations go through existing API endpoints
+- **No Trust Manipulation:** Cannot directly modify trust scores or governance state
+- **No Audit Triggers:** Cannot auto-initiate governance actions
+
+## 7. GOVERNANCE LOGIC (HIGH LEVEL)
+
+### Ranking/Visibility Changes
+- **Trust Bands:** 
+  - Priority (80+): Enhanced visibility
+  - Standard (50-79): Normal visibility
+  - Hidden (<50): Not discoverable by students
+- **Baseline Requirements:** Both structural and operational approvals required
+- **Status Gates:** Only approved units with baselines visible to students
+
+### Role of Trust Score
+- **Visibility Control:** Primary gate for student discovery
+- **Risk Indicator:** Signals housing quality and landlord reliability
+- **Audit Trigger:** Low scores automatically initiate compliance reviews
+- **Transparency Tool:** Students can request explanations for score changes
+
+### Audit/Penalty Triggers
+- **Trust Threshold:** Scores below 50 trigger mandatory audits
+- **Capacity Violations:** Over-occupancy detected by governance listeners
+- **SLA Patterns:** Repeated resolution delays indicate systemic issues
+- **Complaint Density:** High complaint volumes in corridors trigger admin review
+- **Baseline Failures:** Unapproved structural or operational checklists
+
+## System Guarantees
+
+- **No Over-Capacity:** Concurrent check-ins prevented through database constraints
+- **No Identity Enumeration:** Occupant IDs use location encoding with safe error responses
+- **No Trust Manipulation:** Trust changes only through governed behavioral flows
+- **No Cross-Corridor Access:** All operations enforce geographic boundaries
+- **Immutable Audit Trail:** All governance actions logged and timestamped
+
+## Technology Stack Summary
+
+- **Frontend:** Next.js 14, React 18, Tailwind CSS
+- **Backend:** Node.js, Express, Prisma, PostgreSQL
+- **Authentication:** JWT with role-based access control
+- **Storage:** Local disk abstraction with S3-compatible boundary
+- **AI Layer:** Rule-based intent processing (no ML dependencies)
+- **Deployment:** Split frontend (Vercel) and backend (Render/Railway) recommended
+
+This architecture provides a robust foundation for transparent, accountable student housing governance while maintaining clear separation of concerns and role-based access patterns.

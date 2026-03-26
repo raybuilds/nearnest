@@ -42,6 +42,7 @@ export interface DawnAction {
   variant?: "primary" | "secondary" | "danger" | "confirm" | "cancel";
   confirmable?: boolean;
   href?: string;
+  actionType?: string;
 }
 
 export interface DawnCard {
@@ -58,6 +59,15 @@ export interface DawnResponse {
   role: DawnRole;
   message: string;
   cards: DawnCard[];
+  suggestions?: string[];
+  summary?: {
+    unitId?: number | null;
+    corridorId?: number | null;
+    trustScore?: number | null;
+    riskLevel?: string | null;
+    complaintCount?: number | null;
+    intent?: string | null;
+  };
 }
 
 export interface DawnContext {

@@ -5,9 +5,14 @@ function emitSessionChange() {
   window.dispatchEvent(new Event("nearnest:session-changed"));
 }
 
+function normalizeRole(value) {
+  const role = String(value || "").trim().toLowerCase();
+  return ["student", "landlord", "admin"].includes(role) ? role : "";
+}
+
 export function getStoredRole() {
   if (typeof window === "undefined") return "";
-  return localStorage.getItem("role") || "";
+  return normalizeRole(localStorage.getItem("role"));
 }
 
 export function getStoredUser() {
@@ -35,8 +40,10 @@ export function clearSession() {
 export function setSessionFromPayload(payload) {
   if (typeof window === "undefined") return;
 
+  const role = normalizeRole(payload?.user?.role);
+
   localStorage.setItem("token", payload?.token || "");
-  localStorage.setItem("role", payload?.user?.role || "");
+  localStorage.setItem("role", role);
   localStorage.setItem("user", JSON.stringify(payload?.user || {}));
   localStorage.setItem("userName", payload?.user?.name || "");
 
