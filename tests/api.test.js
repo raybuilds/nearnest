@@ -838,6 +838,24 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     assert.equal(adminSystemHealth.data.data.role, "admin");
     assert.ok(Array.isArray(adminSystemHealth.data.data.riskyCorridors));
 
+    const adminExplainOverview = await api("/dawn/query", {
+      method: "POST",
+      token: adminLogin.data.token,
+      body: { message: `Explain unit ${safeUnitId}` },
+    });
+    assert.equal(adminExplainOverview.status, 200);
+    assert.equal(adminExplainOverview.data.intent, "explain_unit_overview");
+    assert.equal(adminExplainOverview.data.data.unitId, safeUnitId);
+
+    const adminExplainCurrentPageUnit = await api("/dawn/query", {
+      method: "POST",
+      token: adminLogin.data.token,
+      body: { message: "Explain this unit", unitId: mediumUnitId },
+    });
+    assert.equal(adminExplainCurrentPageUnit.status, 200);
+    assert.equal(adminExplainCurrentPageUnit.data.intent, "explain_unit_overview");
+    assert.equal(adminExplainCurrentPageUnit.data.data.unitId, mediumUnitId);
+
     const studentOperations = await api("/dawn/query", {
       method: "POST",
       token: studentLogin.data.token,

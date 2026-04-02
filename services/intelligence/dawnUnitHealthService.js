@@ -65,10 +65,11 @@ async function getUnitHealthReport(context) {
     throw createHttpError(400, "Unit health report requires unitId");
   }
 
-  const [profile, complaintPayload, visibleUnits] = await Promise.all([
+  const [profile, complaintPayload, visibleUnits, explainPayload] = await Promise.all([
     callApi("/profile"),
     callApi(`/unit/${unitId}/complaints`),
     corridorId ? callApi(`/units/${corridorId}`).catch(() => []) : Promise.resolve([]),
+    callApi(`/unit/${unitId}/explain`).catch(() => null),
   ]);
 
   const currentAccommodation = profile?.currentAccommodation || {};
@@ -80,11 +81,23 @@ async function getUnitHealthReport(context) {
 
   const trustScore = Number(
     complaintSummary.trustScore ??
+      explainPayload?.trustScore ??
       currentAccommodation?.trust?.trustScore ??
       visibleUnit?.trustScore ??
       0
   );
-  const trustBand = getHealthTrustBand(trustScore);
+  const trustBand =
+    complaintSummary.trustBand ??
+    explainPayload?.trustBand ??
+    currentAccommodation?.trust?.trustBand ??
+    getHealthTrustBand(trustScore);
+  const auditRequired = Boolean(
+    complaintSummary.auditRequired ??
+      explainPayload?.auditRequired ??
+      currentAccommodation?.trust?.auditRequired ??
+      visibleUnit?.auditRequired ??
+      false
+  );
   const complaintsLast30Days = Number(
     complaintSummary.complaintsLast30Days ??
       complaintHealth.totalComplaints30d ??
@@ -110,10 +123,14 @@ async function getUnitHealthReport(context) {
     slaBreaches30Days,
     unresolvedComplaints,
   });
+  if (auditRequired && !riskSignals.includes("Unit is currently flagged for audit")) {
+    riskSignals.unshift("Unit is currently flagged for audit");
+  }
 
   return {
     trustScore,
     trustBand,
+    auditRequired,
     complaintsLast30Days,
     unresolvedComplaints,
     slaBreaches30Days,

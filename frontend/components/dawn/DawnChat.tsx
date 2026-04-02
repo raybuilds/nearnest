@@ -107,8 +107,8 @@ function toCards(payload: any): DawnCard[] {
           complaintsLast30Days: report?.complaintsLast30Days ?? payload?.summary?.complaintCount ?? null,
           slaBreaches30Days: report?.slaBreaches30Days ?? null,
           status: report?.trend ?? report?.status ?? "active",
-          auditRequired: report?.trustBand === "risk",
-          visibilityReasons: report?.riskSignals || [report?.summary || payload?.assistant].filter(Boolean),
+          auditRequired: Boolean(report?.auditRequired),
+          visibilityReasons: report?.riskSignals || report?.visibilityReasons || [report?.summary || payload?.assistant].filter(Boolean),
         },
         why: report?.summary || payload?.assistant || "Dawn summarized trust and complaint pressure for your unit.",
         actions: [],
@@ -150,6 +150,24 @@ function toCards(payload: any): DawnCard[] {
     const trust = payload?.data?.trust || {};
     const health = payload?.data?.healthReport || {};
     const risk = payload?.data?.riskForecast || {};
+    const resolvedTrustScore =
+      health?.trustScore ??
+      trust?.trustScore ??
+      payload?.summary?.trustScore ??
+      null;
+    const resolvedTrustBand =
+      health?.trustBand ??
+      trust?.trustBand ??
+      null;
+    const resolvedAuditRequired =
+      health?.auditRequired ??
+      trust?.auditRequired ??
+      false;
+    const resolvedReasons =
+      health?.riskSignals ||
+      health?.visibilityReasons ||
+      trust?.visibilityReasons ||
+      [health?.summary].filter(Boolean);
     return [
       {
         type: "explanation_card",
@@ -166,13 +184,13 @@ function toCards(payload: any): DawnCard[] {
         type: "health_report",
         title: "Complaint and health summary",
         data: {
-          trustScore: health?.trustScore ?? payload?.summary?.trustScore ?? null,
-          trustBand: health?.trustBand ?? null,
+          trustScore: resolvedTrustScore,
+          trustBand: resolvedTrustBand,
           complaintsLast30Days: health?.complaintsLast30Days ?? payload?.summary?.complaintCount ?? null,
           slaBreaches30Days: health?.slaBreaches30Days ?? null,
           status: health?.trend ?? "active",
-          auditRequired: health?.trustBand === "risk",
-          visibilityReasons: health?.riskSignals || [health?.summary].filter(Boolean),
+          auditRequired: Boolean(resolvedAuditRequired),
+          visibilityReasons: resolvedReasons,
         },
         why: health?.summary || "Unit health summary",
         actions: [],

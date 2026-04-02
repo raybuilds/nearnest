@@ -179,7 +179,7 @@ async function explainUnitOverview({ req, context }) {
     };
   }
 
-  const [trust, healthReport, riskForecast] = await Promise.all([
+  const [rawTrust, rawHealthReport, riskForecast] = await Promise.all([
     explainTrust(unitId, { callApi: context.callApi }),
     getUnitHealthReport({
       unitId,
@@ -188,6 +188,66 @@ async function explainUnitOverview({ req, context }) {
     }),
     forecastUnitRisk(unitId),
   ]);
+  let trust = rawTrust;
+  let governanceSnapshot = null;
+  if (!Number(rawTrust?.trustScore || 0)) {
+    if (req.user.role === "admin") {
+      const adminDetails = await context.callApi(`/admin/unit/${unitId}/details`).catch(() => null);
+      if (adminDetails?.governanceCore) {
+        governanceSnapshot = adminDetails.governanceCore;
+        trust = {
+          ...rawTrust,
+          trustScore: Number(adminDetails.governanceCore.trustScore ?? rawTrust?.trustScore ?? 0),
+          trustBand: adminDetails.governanceCore.trustBand || rawTrust?.trustBand || null,
+          auditRequired: Boolean(adminDetails.governanceCore.auditRequired ?? rawTrust?.auditRequired ?? false),
+        };
+      }
+    } else if (req.user.role === "landlord") {
+      const landlordOverview = await context.callApi(`/landlord/unit/${unitId}/overview`).catch(() => null);
+      if (landlordOverview) {
+        governanceSnapshot = landlordOverview;
+        trust = {
+          ...rawTrust,
+          trustScore: Number(landlordOverview.trustScore ?? rawTrust?.trustScore ?? 0),
+          trustBand: rawTrust?.trustBand || null,
+          auditRequired: Boolean(landlordOverview.auditRequired ?? rawTrust?.auditRequired ?? false),
+        };
+      }
+    } else if (req.user.role === "student") {
+      const studentDetails = await context.callApi(`/student/unit/${unitId}/details`).catch(() => null);
+      if (studentDetails?.trustSignals) {
+        governanceSnapshot = studentDetails.trustSignals;
+        trust = {
+          ...rawTrust,
+          trustScore: Number(studentDetails.trustSignals.trustScore ?? rawTrust?.trustScore ?? 0),
+          trustBand: studentDetails.trustSignals.trustBand || rawTrust?.trustBand || null,
+        };
+      }
+    }
+  }
+  const healthReport = {
+    ...(rawHealthReport || {}),
+    trustScore:
+      rawHealthReport?.trustScore ||
+      governanceSnapshot?.trustScore ||
+      trust?.trustScore ||
+      null,
+    trustBand:
+      rawHealthReport?.trustBand ||
+      governanceSnapshot?.trustBand ||
+      trust?.trustBand ||
+      null,
+    auditRequired:
+      rawHealthReport?.auditRequired ??
+      governanceSnapshot?.auditRequired ??
+      trust?.auditRequired ??
+      false,
+    visibilityReasons:
+      rawHealthReport?.riskSignals ||
+      rawHealthReport?.visibilityReasons ||
+      trust?.visibilityReasons ||
+      [],
+  };
 
   context.updateMemory({
     lastIntent: "explain_unit_overview",

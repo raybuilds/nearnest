@@ -75,6 +75,9 @@ async function explainTrust(unitId, options = {}) {
   return {
     unitId: resolvedUnitId,
     trustScore: Number(explainPayload?.trustScore ?? 0),
+    trustBand: explainPayload?.trustBand || null,
+    auditRequired: Boolean(explainPayload?.auditRequired ?? false),
+    visibilityReasons: Array.isArray(explainPayload?.visibilityReasons) ? explainPayload.visibilityReasons : [],
     drivers,
   };
 }
