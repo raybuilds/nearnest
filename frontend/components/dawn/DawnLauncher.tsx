@@ -1,14 +1,27 @@
 "use client";
 
 import { useState } from "react";
+import { usePathname } from "next/navigation";
 import DawnChat from "@/components/dawn/DawnChat";
 
 export default function DawnLauncher() {
   const [open, setOpen] = useState(false);
+  const pathname = usePathname();
+  const unitMatch = pathname?.match(/^\/unit\/(\d+)(?:\/|$)/);
+  const corridorMatch = pathname?.match(/^\/corridor\/(\d+)(?:\/|$)/);
+  const currentUnitId = unitMatch ? Number(unitMatch[1]) : null;
+  const currentCorridorId = corridorMatch ? Number(corridorMatch[1]) : null;
 
   return (
     <>
-      <DawnChat open={open} onClose={() => setOpen(false)} />
+      <DawnChat
+        open={open}
+        onClose={() => setOpen(false)}
+        pageContext={{
+          unitId: currentUnitId,
+          corridorId: currentCorridorId,
+        }}
+      />
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}

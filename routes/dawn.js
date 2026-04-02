@@ -28,21 +28,28 @@ const intentMap = {
   student_unit_health: studentUnitHealth,
   predict_unit_risk: studentUnitHealth,
   recommend_unit_decision: recommendUnitDecision,
+  compare_units: compareUnits,
+  system_health_summary: systemHealthSummary,
   operations_advisor: async ({ req, context }) => {
     const alerts = await generateOperationalInsights(req.user.role, req.user.id, {
       callApi: context.callApi,
     });
+    const wrappedAlerts = wrapOperationsAlerts(alerts, req.user.role);
 
     context.updateMemory({
       lastIntent: "operations_advisor",
-      lastUnitId: alerts[0]?.affectedUnits?.[0] || null,
+      lastUnitId: wrappedAlerts[0]?.affectedUnits?.[0] || null,
     });
 
     return {
       message: "Here is the current operational advisory summary:",
-      assistant: `Prepared ${alerts.length} operational insight alert(s).`,
-      alerts,
-      data: alerts,
+      assistant: `Prepared ${wrappedAlerts.length} operational insight alert(s).`,
+      alerts: wrappedAlerts,
+      data: {
+        alerts: wrappedAlerts,
+        units: wrappedAlerts.flatMap((item) => item.units || []),
+        corridors: wrappedAlerts.flatMap((item) => item.corridors || []),
+      },
     };
   },
   corridor_behavioral_insight: corridorBehavioralInsight,
@@ -87,6 +94,11 @@ function buildComplaintCountFromProfile(profile) {
 }
 
 async function buildResolvedContext(req, context) {
+  const hintedUnitId = Number(context?.hintedUnitId);
+  const hintedCorridorId = Number(context?.hintedCorridorId);
+  const resolvedHintedUnitId = Number.isNaN(hintedUnitId) ? null : hintedUnitId;
+  const resolvedHintedCorridorId = Number.isNaN(hintedCorridorId) ? null : hintedCorridorId;
+
   if (req.user.role === "student") {
     const profile = await context.callApi("/profile");
     const currentUnit = profile?.occupancy?.currentUnit || {};
@@ -95,12 +107,14 @@ async function buildResolvedContext(req, context) {
     return {
       role: "student",
       corridorId:
+        resolvedHintedCorridorId ||
         currentUnit?.corridor?.id ||
         profile?.identity?.corridor?.id ||
         accommodation?.identity?.corridor?.id ||
         context.memory?.lastCorridorId ||
         null,
       unitId:
+        resolvedHintedUnitId ||
         currentUnit?.unitId ||
         accommodation?.identity?.unitId ||
         context.memory?.lastUnitId ||
@@ -120,8 +134,8 @@ async function buildResolvedContext(req, context) {
     const focusUnit = selectLandlordFocusUnit(Array.isArray(units) ? units : []);
     return {
       role: "landlord",
-      corridorId: focusUnit?.corridorId || context.memory?.lastCorridorId || null,
-      unitId: focusUnit?.id || context.memory?.lastUnitId || null,
+      corridorId: resolvedHintedCorridorId || focusUnit?.corridorId || context.memory?.lastCorridorId || null,
+      unitId: resolvedHintedUnitId || focusUnit?.id || context.memory?.lastUnitId || null,
       trustScore: focusUnit?.trustScore ?? context.memory?.lastKnownTrustScore ?? null,
       activeComplaintsCount: Number(focusUnit?.activeComplaints ?? 0),
       focusUnit,
@@ -133,8 +147,8 @@ async function buildResolvedContext(req, context) {
     const topCorridor = analytics?.data?.corridors?.[0] || null;
     return {
       role: "admin",
-      corridorId: topCorridor?.corridorId || context.memory?.lastCorridorId || null,
-      unitId: context.memory?.lastUnitId || null,
+      corridorId: resolvedHintedCorridorId || topCorridor?.corridorId || context.memory?.lastCorridorId || null,
+      unitId: resolvedHintedUnitId || context.memory?.lastUnitId || null,
       trustScore: null,
       activeComplaintsCount: Number(topCorridor?.complaintDensity ?? 0),
       corridorAnalytics: topCorridor,
@@ -143,8 +157,8 @@ async function buildResolvedContext(req, context) {
 
   return {
     role: req.user.role,
-    corridorId: context.memory?.lastCorridorId || null,
-    unitId: context.memory?.lastUnitId || null,
+    corridorId: resolvedHintedCorridorId || context.memory?.lastCorridorId || null,
+    unitId: resolvedHintedUnitId || context.memory?.lastUnitId || null,
     trustScore: context.memory?.lastKnownTrustScore || null,
     activeComplaintsCount: context.memory?.lastKnownComplaintCount || 0,
   };
@@ -199,10 +213,61 @@ async function explainUnitOverview({ req, context }) {
   };
 }
 
+async function buildStudentDecisionSnapshot(unitId, context) {
+  try {
+    const [details, riskForecast] = await Promise.all([
+      context.callApi(`/student/unit/${unitId}/details`),
+      forecastUnitRisk(unitId),
+    ]);
+
+    const trustSignals = details?.trustSignals || {};
+    const complaintSummary = trustSignals?.complaintSummary || {};
+
+    return {
+      unitId,
+      trustScore: Number(trustSignals?.trustScore ?? 0),
+      trustBand: trustSignals?.trustBand || null,
+      complaints: Number(complaintSummary?.complaintsLast30Days ?? 0),
+      activeComplaints: Number(complaintSummary?.activeComplaints ?? 0),
+      riskLevel: riskForecast?.riskLevel || "STABLE",
+      riskIndicators: Array.isArray(riskForecast?.indicators) ? riskForecast.indicators : [],
+      discovery: details?.discovery || {},
+      recommendation: riskForecast?.recommendation || "Review this unit before making a decision.",
+    };
+  } catch {
+    const [trust, riskForecast, complaintPayload] = await Promise.all([
+      explainTrust(unitId, { callApi: context.callApi }).catch(() => ({ trustScore: 0 })),
+      forecastUnitRisk(unitId).catch(() => ({ riskLevel: "STABLE", indicators: [], recommendation: "Review this unit before making a decision." })),
+      context.callApi(`/unit/${unitId}/complaints`).catch(() => ({ summary: {} })),
+    ]);
+    const complaintSummary = complaintPayload?.summary || {};
+
+    return {
+      unitId,
+      trustScore: Number(trust?.trustScore ?? 0),
+      trustBand: null,
+      complaints: Number(complaintSummary?.complaintsLast30Days ?? 0),
+      activeComplaints: Number(complaintSummary?.activeComplaints ?? 0),
+      riskLevel: riskForecast?.riskLevel || "STABLE",
+      riskIndicators: Array.isArray(riskForecast?.indicators) ? riskForecast.indicators : [],
+      discovery: {},
+      recommendation: riskForecast?.recommendation || "Review this unit before making a decision.",
+    };
+  }
+}
+
 async function recommendUnitDecision({ req, context }) {
+  if (req.user.role !== "student") {
+    return {
+      message: "I couldn’t fully resolve that. Try specifying a unit or corridor.",
+      data: {
+        missing: "student_context",
+      },
+    };
+  }
+
   const explicitUnitId = parseRequestedUnitId(context.message) ?? parseRequestedUnitId(context.text);
   const unitId = explicitUnitId || context.resolvedContext?.unitId || context.memory?.lastUnitId || null;
-  const corridorId = context.resolvedContext?.corridorId || context.memory?.lastCorridorId || null;
 
   if (!unitId) {
     return {
@@ -213,32 +278,24 @@ async function recommendUnitDecision({ req, context }) {
     };
   }
 
-  const [trust, healthReport, riskForecast] = await Promise.all([
-    explainTrust(unitId, { callApi: context.callApi }),
-    getUnitHealthReport({
-      unitId,
-      corridorId,
-      callApi: context.callApi,
-    }),
-    forecastUnitRisk(unitId),
-  ]);
-
-  const trustScore = trust?.trustScore ?? healthReport?.trustScore ?? null;
-  const riskLevel = riskForecast?.riskLevel || "STABLE";
+  const snapshot = await buildStudentDecisionSnapshot(unitId, context);
+  const trustScore = snapshot.trustScore;
+  const riskLevel = snapshot.riskLevel;
   const reasons = [
     trustScore !== null && trustScore !== undefined ? `trust score ${trustScore}` : null,
-    Number(healthReport?.complaintsLast30Days || 0) > 0 ? `${healthReport.complaintsLast30Days} complaints in the last 30 days` : null,
+    Number(snapshot.complaints || 0) > 0 ? `${snapshot.complaints} complaints in the last 30 days` : null,
     riskLevel ? `risk level ${riskLevel}` : null,
+    ...(snapshot.riskIndicators || []).slice(0, 2),
   ].filter(Boolean);
 
-  let verdict = "This unit can work, but you should review the flagged risks before choosing it.";
+  let verdict = "CONDITIONAL";
   let recommendation = "Review the trust breakdown and recent complaint history before choosing this unit.";
 
   if ((trustScore !== null && trustScore >= 70) && (riskLevel === "LOW" || riskLevel === "STABLE")) {
-    verdict = "Yes, this unit is a strong option based on the current signals.";
+    verdict = "RECOMMENDED";
     recommendation = "You should verify the latest complaints and then move ahead if the unit still matches your budget and distance needs.";
   } else if ((trustScore !== null && trustScore < 45) || riskLevel === "HIGH" || riskLevel === "CRITICAL") {
-    verdict = "No, you should not take this unit until the risk signals improve.";
+    verdict = "AVOID";
     recommendation = "You should choose a safer unit or wait for this unit’s trust and complaint signals to improve.";
   }
 
@@ -247,7 +304,7 @@ async function recommendUnitDecision({ req, context }) {
     lastUnitId: unitId,
     lastViewedUnitId: unitId,
     lastKnownTrustScore: trustScore,
-    lastKnownComplaintCount: healthReport?.complaintsLast30Days ?? null,
+    lastKnownComplaintCount: snapshot.complaints ?? null,
     lastKnownRiskLevel: riskLevel,
   });
 
@@ -260,9 +317,168 @@ async function recommendUnitDecision({ req, context }) {
       verdict,
       recommendation,
       reasons,
-      trust,
-      healthReport,
-      riskForecast,
+      complaints: snapshot.complaints,
+      activeComplaints: snapshot.activeComplaints,
+      discovery: snapshot.discovery,
+    },
+  };
+}
+
+function parseRequestedUnitIds(...values) {
+  const ids = [];
+  const pattern = /\b(?:unit|room)\s*#?\s*(\d+)\b/gi;
+
+  values.forEach((value) => {
+    const text = String(value || "");
+    let match;
+    while ((match = pattern.exec(text)) !== null) {
+      const id = Number(match[1]);
+      if (!Number.isNaN(id)) ids.push(id);
+    }
+  });
+
+  return Array.from(new Set(ids));
+}
+
+async function compareUnits({ req, context }) {
+  if (req.user.role !== "student") {
+    return {
+      message: "I couldn’t fully resolve that. Try specifying a unit or corridor.",
+      data: {
+        missing: "student_context",
+      },
+    };
+  }
+
+  const explicitUnitIds = parseRequestedUnitIds(context.message, context.text);
+  const candidateIds = [...explicitUnitIds];
+  if (candidateIds.length === 1 && context.memory?.lastUnitId && !candidateIds.includes(Number(context.memory.lastUnitId))) {
+    candidateIds.unshift(Number(context.memory.lastUnitId));
+  }
+
+  const unitIds = candidateIds.slice(0, 2);
+  if (unitIds.length < 2) {
+    return {
+      message: "I couldn’t fully resolve that. Try specifying a unit or corridor.",
+      data: {
+        missing: "unitIds",
+      },
+    };
+  }
+
+  const [left, right] = await Promise.all(unitIds.map((unitId) => buildStudentDecisionSnapshot(unitId, context)));
+  const scoreFor = (item) =>
+    Number(item.trustScore || 0) * 2 - Number(item.complaints || 0) * 5 - (String(item.riskLevel) === "CRITICAL" ? 30 : String(item.riskLevel) === "HIGH" ? 20 : 0);
+  const leftScore = scoreFor(left);
+  const rightScore = scoreFor(right);
+  const winner = leftScore >= rightScore ? left : right;
+
+  context.updateMemory({
+    lastIntent: "compare_units",
+    lastUnitId: winner.unitId,
+    lastViewedUnitId: winner.unitId,
+    lastKnownTrustScore: winner.trustScore,
+    lastKnownComplaintCount: winner.complaints,
+    lastKnownRiskLevel: winner.riskLevel,
+  });
+
+  return {
+    message: `Here is the comparison for Units ${left.unitId} and ${right.unitId}.`,
+    data: {
+      units: [left, right],
+      recommendation: winner.unitId,
+      verdict:
+        leftScore === rightScore
+          ? "Both units are closely matched. Use rent and distance to break the tie."
+          : `Unit ${winner.unitId} is the stronger option based on trust, complaints, and risk.`,
+      reasons: [
+        `Unit ${winner.unitId} has the stronger combined trust and risk profile.`,
+      ],
+    },
+  };
+}
+
+async function systemHealthSummary({ req, context }) {
+  if (req.user.role === "student") {
+    const profile = await context.callApi("/profile");
+    const unitId = profile?.occupancy?.currentUnit?.unitId || profile?.currentAccommodation?.identity?.unitId || null;
+    const occupantId =
+      profile?.occupancy?.currentUnit?.occupantId || profile?.identity?.currentOccupantId || profile?.identity?.occupantId || null;
+    const corridorId =
+      profile?.occupancy?.currentUnit?.corridor?.id || profile?.identity?.corridor?.id || profile?.currentAccommodation?.identity?.corridor?.id || null;
+    const [healthReport, riskForecast] = await Promise.all([
+      getUnitHealthReport({ userId: req.user.id, unitId, occupantId, corridorId, callApi: context.callApi }),
+      forecastUnitRisk(unitId),
+    ]);
+
+    return {
+      message: "Here is the current system health summary for your housing:",
+      data: {
+        role: "student",
+        unitId,
+        trustScore: healthReport.trustScore,
+        complaintCount: healthReport.complaintsLast30Days,
+        riskLevel: riskForecast.riskLevel,
+        summary: healthReport.summary,
+      },
+    };
+  }
+
+  if (req.user.role === "landlord") {
+    const units = await context.callApi("/landlord/units");
+    const unitList = Array.isArray(units) ? units : [];
+    const forecasts = await Promise.all(unitList.map((unit) => forecastUnitRisk(unit.id).catch(() => null)));
+    const riskDistribution = forecasts.reduce(
+      (acc, forecast) => {
+        const level = String(forecast?.riskLevel || "STABLE");
+        const key = level === "CRITICAL" || level === "HIGH" ? "high" : level === "EARLY_WARNING" || level === "MEDIUM" ? "medium" : "low";
+        acc[key] += 1;
+        return acc;
+      },
+      { high: 0, medium: 0, low: 0 }
+    );
+
+    return {
+      message: "Here is the current system health summary for your portfolio:",
+      data: {
+        role: "landlord",
+        totalUnits: unitList.length,
+        activeComplaints: unitList.reduce((sum, unit) => sum + Number(unit.activeComplaints || 0), 0),
+        riskDistribution,
+        summary: `You manage ${unitList.length} units. ${riskDistribution.high} high-risk, ${riskDistribution.medium} medium-risk, and ${riskDistribution.low} lower-risk units are active right now.`,
+      },
+    };
+  }
+
+  const corridors = await context.callApi("/corridors").catch(() => []);
+  const reports = (
+    await Promise.all((Array.isArray(corridors) ? corridors : []).map(async (corridor) => ({
+      corridor,
+      report: await getCorridorInsights(corridor.id, { callApi: context.callApi }).catch(() => null),
+    })))
+  ).filter((item) => item.report);
+  const riskyCorridors = reports
+    .filter((item) => item.report.riskLevel === "HIGH" || Number(item.report.complaintDensity || 0) >= 2)
+    .sort((a, b) => Number(b.report.complaintDensity || 0) - Number(a.report.complaintDensity || 0))
+    .slice(0, 3)
+    .map((item) => ({
+      corridorId: item.corridor.id,
+      corridorName: item.corridor.name,
+      complaintDensity: item.report.complaintDensity,
+      riskLevel: item.report.riskLevel,
+    }));
+  const topIssues = reports
+    .flatMap((item) => Object.entries(item.report.incidentFrequency || {}).map(([incidentType, count]) => ({ incidentType, count })))
+    .sort((a, b) => Number(b.count || 0) - Number(a.count || 0))
+    .slice(0, 3);
+
+  return {
+    message: "Here is the current system health summary across NearNest:",
+    data: {
+      role: "admin",
+      topIssues,
+      riskyCorridors,
+      summary: `The main issues right now are ${topIssues.map((item) => item.incidentType).join(", ") || "not significant"}.`,
     },
   };
 }
@@ -353,6 +569,56 @@ function uniqueNumbers(values) {
         .filter((value) => !Number.isNaN(value))
     )
   );
+}
+
+function buildAlertActions(role, alert) {
+  const firstUnitId = Array.isArray(alert?.affectedUnits) && alert.affectedUnits.length > 0 ? alert.affectedUnits[0] : null;
+  if (role === "student") {
+    return [
+      { label: "View complaints", query: "show complaints" },
+      { label: "Check risk", query: "why is it risky?" },
+      { label: "Take action", query: "report an issue" },
+    ];
+  }
+  if (role === "landlord") {
+    return [
+      { label: "Take action", query: "what should I fix first?" },
+      { label: "Show recurring issues", query: "show recurring issues" },
+      ...(firstUnitId ? [{ label: "Explain this unit", query: `explain unit ${firstUnitId}` }] : []),
+    ];
+  }
+  return [
+    { label: "Units needing attention", query: "units needing attention" },
+    { label: "Take action", query: "how is the housing system doing right now" },
+    { label: "Risky corridors", query: "which corridor is risky?" },
+  ];
+}
+
+function decorateInsightAlert(alert, role) {
+  const firstUnitId = Array.isArray(alert?.affectedUnits) && alert.affectedUnits.length > 0 ? alert.affectedUnits[0] : null;
+  return {
+    ...alert,
+    severity: alert?.riskLevel || "LOW",
+    unitId: firstUnitId,
+    actions: buildAlertActions(role, alert),
+  };
+}
+
+function wrapOperationsAlerts(alerts, role) {
+  return (Array.isArray(alerts) ? alerts : []).map((alert) => {
+    const topUnit = Array.isArray(alert?.units) ? alert.units[0] : null;
+    const topCorridor = Array.isArray(alert?.corridors) ? alert.corridors[0] : null;
+    return {
+      ...decorateInsightAlert(alert, role),
+      priority: alert?.riskLevel || "LOW",
+      action: topUnit?.recommendation || topCorridor?.recommendation || "Review the current operating signals now.",
+      reason:
+        (Array.isArray(topUnit?.indicators) && topUnit.indicators[0]) ||
+        (Array.isArray(topCorridor?.indicators) && topCorridor.indicators[0]) ||
+        alert?.message ||
+        "Operational pressure detected.",
+    };
+  });
 }
 
 async function buildStudentInsightCards(req, context) {
@@ -532,13 +798,13 @@ async function buildAdminInsightCards(context) {
 
 async function buildProactiveInsightCards(req, context) {
   if (req.user.role === "student") {
-    return buildStudentInsightCards(req, context);
+    return (await buildStudentInsightCards(req, context)).map((item) => decorateInsightAlert(item, req.user.role));
   }
   if (req.user.role === "landlord") {
-    return buildLandlordInsightCards(context);
+    return (await buildLandlordInsightCards(context)).map((item) => decorateInsightAlert(item, req.user.role));
   }
   if (req.user.role === "admin") {
-    return buildAdminInsightCards(context);
+    return (await buildAdminInsightCards(context)).map((item) => decorateInsightAlert(item, req.user.role));
   }
   return [];
 }
@@ -561,6 +827,30 @@ function inferIntent(role, message) {
     text.includes("why is unit trust low")
   ) {
     return "explain_unit_trust";
+  }
+
+  if (
+    text.includes("system health summary") ||
+    text.includes("system health") ||
+    text.includes("health summary")
+  ) {
+    return "system_health_summary";
+  }
+
+  if (
+    text.includes("should i take this") ||
+    text.includes("should i choose this") ||
+    text.includes("recommend this unit")
+  ) {
+    return "recommend_unit_decision";
+  }
+
+  if (
+    text.includes("compare unit") ||
+    text.includes("compare room") ||
+    text.includes("compare these units")
+  ) {
+    return "compare_units";
   }
 
   if (role === "student") {
@@ -774,6 +1064,14 @@ function buildSuggestions(intent, role, result, resolvedContext) {
   if (intent === "recommend_unit_decision") {
     return ["See trust breakdown", "See risk forecast", "Report an issue"];
   }
+  if (intent === "compare_units") {
+    return ["Should I take this?", "See trust breakdown", "See risk forecast"];
+  }
+  if (intent === "system_health_summary") {
+    if (role === "student") return ["Why is it risky?", "View complaints", "Report an issue"];
+    if (role === "landlord") return ["What should I fix first?", "Which units are at risk?", "Show recurring issues"];
+    if (role === "admin") return ["Which corridor is risky?", "Units needing attention", "How is the housing system doing right now"];
+  }
   if (intent === "explain_unit_trust" || intent === "explain_unit_overview") {
     return ["See risk forecast", "View complaints", role === "student" ? "Report an issue" : "Which units are at risk?"];
   }
@@ -899,7 +1197,7 @@ router.get("/dawn/insights", verifyToken, async (req, res) => {
 
 router.post("/dawn/query", verifyToken, async (req, res) => {
   try {
-    const { message, confirm, action, intent: providedIntent } = req.body || {};
+    const { message, confirm, action, intent: providedIntent, unitId, corridorId } = req.body || {};
     if (!message || typeof message !== "string") {
       return res.status(400).json({ error: "message is required" });
     }
@@ -925,6 +1223,8 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
     }
 
     const baseContext = createDawnContext(req, token, memory);
+    baseContext.hintedUnitId = unitId;
+    baseContext.hintedCorridorId = corridorId;
     const resolvedContext = await buildResolvedContext(req, baseContext);
 
     let inferredIntent = inferIntent(role, normalizedText);

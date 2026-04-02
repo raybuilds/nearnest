@@ -11,6 +11,10 @@ import type { DawnAction, DawnCard, DawnResponse, DawnRole } from "@/types/dawn"
 type DawnChatProps = {
   open: boolean;
   onClose: () => void;
+  pageContext?: {
+    unitId?: number | null;
+    corridorId?: number | null;
+  };
 };
 
 type DawnSummary = NonNullable<DawnResponse["summary"]>;
@@ -196,6 +200,69 @@ function toCards(payload: any): DawnCard[] {
     ];
   }
 
+  if (intent === "compare_units") {
+    const data = payload?.data || {};
+    return [
+      {
+        type: "analytics_card",
+        title: "Unit comparison",
+        data,
+        why: payload?.assistant || data?.verdict || "Dawn compared the strongest unit signals side by side.",
+        actions: [],
+      },
+    ];
+  }
+
+  if (intent === "system_health_summary") {
+    const data = payload?.data || {};
+    return [
+      {
+        type: "analytics_card",
+        title: "System health summary",
+        data,
+        why: payload?.assistant || data?.summary || "Dawn summarized the current system health for your role.",
+        actions: [],
+      },
+    ];
+  }
+
+  if (intent === "operations_advisor") {
+    const alerts = Array.isArray(payload?.data?.alerts)
+      ? payload.data.alerts
+      : Array.isArray(payload?.alerts)
+        ? payload.alerts
+        : [];
+    return alerts.length > 0
+      ? alerts.map((alert: any, index: number) => ({
+          type: "analytics_card",
+          title: alert?.title || `Operations item ${index + 1}`,
+          data: {
+            priority: alert?.priority || alert?.riskLevel || "LOW",
+            action: alert?.action || null,
+            reason: alert?.reason || null,
+            message: alert?.message || "",
+            units: Array.isArray(alert?.units) ? alert.units : [],
+            corridors: Array.isArray(alert?.corridors) ? alert.corridors : [],
+          },
+          why: payload?.assistant || alert?.message || "Dawn ranked the next operational action for you.",
+          actions: Array.isArray(alert?.actions)
+            ? alert.actions.map((action: any) => ({
+                label: action?.label || "Open",
+                query: action?.query || "",
+              }))
+            : [],
+        }))
+      : [
+          {
+            type: "analytics_card",
+            title: payload?.message || "Operations advisor",
+            data: payload?.data || {},
+            why: payload?.assistant || "Dawn analyzed the available backend signals.",
+            actions: [],
+          },
+        ];
+  }
+
   if (intent === "landlord_remediation_advisor") {
     return [
       {
@@ -240,6 +307,31 @@ function toCards(payload: any): DawnCard[] {
   ];
 }
 
+function toInsightCards(payload: any): DawnCard[] {
+  const insights = Array.isArray(payload?.insights) ? payload.insights : [];
+  return insights.map((alert: any, index: number) => ({
+    type: "analytics_card",
+    title: alert?.title || `Proactive alert ${index + 1}`,
+    data: {
+      severity: alert?.severity || alert?.riskLevel || "LOW",
+      unitId: alert?.unitId ?? null,
+      message: alert?.message || "",
+      units: Array.isArray(alert?.units) ? alert.units : [],
+      corridors: Array.isArray(alert?.corridors) ? alert.corridors : [],
+      indicators: Array.isArray(alert?.indicators) ? alert.indicators : [],
+      action: alert?.action || null,
+      reason: alert?.reason || null,
+    },
+    why: alert?.message || payload?.assistant || "Dawn found something worth reviewing right away.",
+    actions: Array.isArray(alert?.actions)
+      ? alert.actions.map((action: any) => ({
+          label: action?.label || "Open",
+          query: action?.query || "",
+        }))
+      : [],
+  }));
+}
+
 function toResponse(payload: any, role: DawnRole): DawnResponse {
   return {
     intents: [String(payload?.intent || "operations_advisor")],
@@ -258,7 +350,7 @@ function summaryTitle(role: DawnRole | null, summary?: DawnSummary | null) {
   return summary.unitId ? `Unit ${summary.unitId}` : "Role context";
 }
 
-export default function DawnChat({ open, onClose }: DawnChatProps) {
+export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [response, setResponse] = useState<DawnResponse | null>(null);
@@ -300,15 +392,7 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
             service: "operations",
             role,
             message: payload?.assistant || "Proactive intelligence is available.",
-            cards: [
-              {
-                type: "analytics_card",
-                title: "Proactive alerts",
-                data: { units: payload.insights, corridors: payload.insights },
-                why: payload?.assistant || "Dawn found something worth reviewing right away.",
-                actions: [],
-              },
-            ],
+            cards: toInsightCards(payload),
             suggestions: Array.isArray(payload?.suggestions) ? payload.suggestions : STARTER_PROMPTS[role],
             summary: payload?.summary || undefined,
           });
@@ -356,7 +440,11 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
     setNotice("");
 
     try {
-      const payload = await queryDawn({ message: prompt });
+      const payload = await queryDawn({
+        message: prompt,
+        ...(pageContext?.unitId ? { unitId: pageContext.unitId } : {}),
+        ...(pageContext?.corridorId ? { corridorId: pageContext.corridorId } : {}),
+      });
       setBackendPayload(payload);
       const next = toResponse(payload, role);
       setResponse(next);
@@ -371,6 +459,11 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
   }
 
   function handleAction(action: DawnAction) {
+    if (action?.query) {
+      sendPrompt(action.query);
+      return;
+    }
+
     const label = String(action?.label || "").toLowerCase();
     if (label.includes("confirm")) {
       if (!role) return;
@@ -380,6 +473,8 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
         message: input.trim() || "confirm complaint",
         confirm: true,
         action: backendPayload?.action || null,
+        ...(pageContext?.unitId ? { unitId: pageContext.unitId } : {}),
+        ...(pageContext?.corridorId ? { corridorId: pageContext.corridorId } : {}),
       })
         .then((payload) => {
           setBackendPayload(payload);

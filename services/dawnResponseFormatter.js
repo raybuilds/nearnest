@@ -140,6 +140,35 @@ function formatUnitDecision(result) {
     .join(" ");
 }
 
+function formatCompareUnits(result) {
+  const units = Array.isArray(result?.data?.units) ? result.data.units : [];
+  if (units.length < 2) {
+    return result?.message || "I couldn’t fully resolve that. Try specifying a unit or corridor.";
+  }
+
+  const winner = result?.data?.recommendation;
+  const summary = units
+    .map((unit) => `Unit ${unit.unitId}: trust ${unit.trustScore}, ${unit.complaints} complaints, risk ${unit.riskLevel}`)
+    .join(" | ");
+  return `${summary}. Recommendation: choose Unit ${winner}.`;
+}
+
+function formatSystemHealthSummary(result) {
+  const data = result?.data || {};
+  if (data.role === "student") {
+    return `Your current housing status: trust ${data.trustScore}, complaints ${data.complaintCount}, risk ${data.riskLevel}.`;
+  }
+  if (data.role === "landlord") {
+    const distribution = data.riskDistribution || {};
+    return `Portfolio status: ${data.totalUnits} units, ${distribution.high || 0} high-risk, ${distribution.medium || 0} medium-risk, and ${distribution.low || 0} lower-risk units.`;
+  }
+  if (data.role === "admin") {
+    const riskyCorridors = Array.isArray(data.riskyCorridors) ? data.riskyCorridors : [];
+    return `System status: ${riskyCorridors.length} corridor(s) need attention. Top issues are ${Array.isArray(data.topIssues) ? data.topIssues.map((item) => item.incidentType).join(", ") : "not significant"}.`;
+  }
+  return result?.message || "I couldn’t fully resolve that. Try specifying a unit or corridor.";
+}
+
 function formatOperationsAdvisor(result) {
   const alerts = Array.isArray(result?.alerts)
     ? result.alerts
@@ -170,6 +199,8 @@ function formatDawnResponse(intent, result) {
   if (intent === "student_unit_health") return formatStudentUnitHealth(result);
   if (intent === "predict_unit_risk") return formatPredictUnitRisk(result);
   if (intent === "recommend_unit_decision") return formatUnitDecision(result);
+  if (intent === "compare_units") return formatCompareUnits(result);
+  if (intent === "system_health_summary") return formatSystemHealthSummary(result);
   if (intent === "operations_advisor") return formatOperationsAdvisor(result);
   if (intent === "corridor_behavioral_insight") return formatCorridorBehavioralInsight(result);
   if (intent === "landlord_remediation_advisor") return formatLandlordRemediationAdvisor(result);

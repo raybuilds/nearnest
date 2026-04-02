@@ -795,8 +795,58 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     assert.equal(unitDecision.status, 200);
     assert.equal(unitDecision.data.intent, "recommend_unit_decision");
     assert.equal(unitDecision.data.data.unitId, safeUnitId);
-    assert.ok(typeof unitDecision.data.data.verdict === "string");
+    assert.ok(["RECOMMENDED", "CONDITIONAL", "AVOID"].includes(unitDecision.data.data.verdict));
     assert.ok(typeof unitDecision.data.data.recommendation === "string");
+
+    const compareResponse = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: `Compare unit ${safeUnitId} and unit ${riskyUnitId}` },
+    });
+    assert.equal(compareResponse.status, 200);
+    assert.equal(compareResponse.data.intent, "compare_units");
+    assert.equal(compareResponse.data.data.units.length, 2);
+    assert.ok(typeof compareResponse.data.data.verdict === "string");
+
+    const studentSystemHealth = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "System health summary" },
+    });
+    assert.equal(studentSystemHealth.status, 200);
+    assert.equal(studentSystemHealth.data.intent, "system_health_summary");
+    assert.equal(studentSystemHealth.data.data.role, "student");
+    assert.ok(Object.prototype.hasOwnProperty.call(studentSystemHealth.data.data, "trustScore"));
+
+    const landlordSystemHealth = await api("/dawn/query", {
+      method: "POST",
+      token: landlordLogin.data.token,
+      body: { message: "System health summary" },
+    });
+    assert.equal(landlordSystemHealth.status, 200);
+    assert.equal(landlordSystemHealth.data.intent, "system_health_summary");
+    assert.equal(landlordSystemHealth.data.data.role, "landlord");
+    assert.ok(Object.prototype.hasOwnProperty.call(landlordSystemHealth.data.data, "riskDistribution"));
+
+    const adminSystemHealth = await api("/dawn/query", {
+      method: "POST",
+      token: adminLogin.data.token,
+      body: { message: "System health summary" },
+    });
+    assert.equal(adminSystemHealth.status, 200);
+    assert.equal(adminSystemHealth.data.intent, "system_health_summary");
+    assert.equal(adminSystemHealth.data.data.role, "admin");
+    assert.ok(Array.isArray(adminSystemHealth.data.data.riskyCorridors));
+
+    const studentOperations = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "How is the housing system doing right now" },
+    });
+    assert.equal(studentOperations.status, 200);
+    assert.equal(studentOperations.data.intent, "operations_advisor");
+    assert.ok(Array.isArray(studentOperations.data.alerts));
+    assert.ok(studentOperations.data.alerts.every((item) => item.priority && item.action && item.reason));
 
     const landlordRecurring = await api("/dawn/query", {
       method: "POST",
@@ -867,6 +917,11 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
           item.type === "trend_alert" &&
           Array.isArray(item.indicators) &&
           item.indicators.includes("Multiple SLA breaches detected")
+      )
+    );
+    assert.ok(
+      studentInsights.data.insights.every(
+        (item) => Array.isArray(item.actions) && item.actions.every((action) => action.label && action.query)
       )
     );
 

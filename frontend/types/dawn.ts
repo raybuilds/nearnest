@@ -43,6 +43,7 @@ export interface DawnAction {
   confirmable?: boolean;
   href?: string;
   actionType?: string;
+  query?: string;
 }
 
 export interface DawnCard {
