@@ -107,6 +107,14 @@ Endpoint: `POST /dawn/query`
 - Must not bypass RBAC, validation, trust logic, or DB constraints
 - Must not write directly to DB, mutate trust/status directly, or auto-trigger governance actions
 
+### Dawn Speech
+
+- `POST /dawn/speak` adds a dedicated text-to-speech layer for Dawn voice playback
+- requires the same bearer token auth as other Dawn routes
+- uses `OPENAI_API_KEY` with OpenAI TTS (`gpt-4o-mini-tts`) by default
+- caches generated audio in memory for repeated prompts
+- frontend falls back to browser speech only if the backend speech provider fails
+
 Phase 1 Dawn capabilities:
 - Student:
   - natural-language smart search (`maxRent`, `ac`, `maxDistance`) using `/units/:corridorId`

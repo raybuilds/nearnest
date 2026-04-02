@@ -5,7 +5,7 @@ import CardRenderer from "@/components/dawn/CardRenderer";
 import DawnAvatar from "@/components/dawn/DawnAvatar";
 import DawnHeader from "@/components/dawn/DawnHeader";
 import DawnVoiceControls from "@/components/dawn/DawnVoiceControls";
-import { getDawnInsights, queryDawn } from "@/lib/api";
+import { getDawnInsights, queryDawn, speakDawn } from "@/lib/api";
 import { getRiskTone, getTrustBand } from "@/lib/governance";
 import { getStoredRole } from "@/lib/session";
 import type { DawnAction, DawnAvatarState, DawnCard, DawnResponse, DawnRole } from "@/types/dawn";
@@ -428,6 +428,10 @@ function hasSpeechSynthesisSupport() {
   return typeof window !== "undefined" && "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance !== "undefined";
 }
 
+function hasAudioPlaybackSupport() {
+  return typeof window !== "undefined" && typeof Audio !== "undefined";
+}
+
 export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -444,12 +448,15 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
   const [speechSupported, setSpeechSupported] = useState(false);
   const [voiceSupported, setVoiceSupported] = useState(false);
   const [capabilitiesChecked, setCapabilitiesChecked] = useState(false);
-  const [voiceProfile, setVoiceProfile] = useState("Default");
+  const [voiceProfile, setVoiceProfile] = useState("indian_en_female");
+  const [activeVoiceLabel, setActiveVoiceLabel] = useState("System fallback");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<InstanceType<SpeechRecognitionConstructor> | null>(null);
   const speakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldSpeakNextResponseRef = useRef(false);
   const manualStopListeningRef = useRef(false);
+  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const currentAudioUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     const syncRole = () => {
@@ -468,7 +475,7 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
 
   useEffect(() => {
     setSpeechSupported(Boolean(getSpeechRecognitionConstructor()));
-    setVoiceSupported(hasSpeechSynthesisSupport());
+    setVoiceSupported(hasAudioPlaybackSupport());
     setCapabilitiesChecked(true);
   }, []);
 
@@ -477,8 +484,7 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
 
     const syncVoices = () => {
       const preferredVoice = getPreferredDawnVoice();
-      setVoiceProfile(preferredVoice?.name || "Default");
-      setVoiceSupported(window.speechSynthesis.getVoices().length > 0 || hasSpeechSynthesisSupport());
+      setActiveVoiceLabel(preferredVoice?.name || "System fallback");
     };
 
     syncVoices();
@@ -558,26 +564,8 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
       speakingTimerRef.current = setTimeout(() => setAvatarState("idle"), 900);
       return;
     }
-
-    window.speechSynthesis.cancel();
-    const utterance = new SpeechSynthesisUtterance(response.message);
-    const preferredVoice = getPreferredDawnVoice();
-    if (preferredVoice) {
-      utterance.voice = preferredVoice;
-      utterance.lang = preferredVoice.lang;
-    }
-    utterance.rate = 0.96;
-    utterance.pitch = 0.94;
-    utterance.volume = 1;
-    utterance.onstart = () => setAvatarState("speaking");
-    utterance.onend = () => setAvatarState("idle");
-    utterance.onerror = () => {
-      setAvatarState("alert");
-      setNotice("Voice output was interrupted. Dawn text responses still work normally.");
-      speakingTimerRef.current = setTimeout(() => setAvatarState("idle"), 900);
-    };
-    window.speechSynthesis.speak(utterance);
-  }, [response, voiceEnabled, voiceSupported]);
+    void playVoiceResponse(response.message);
+  }, [response, voiceEnabled, voiceSupported, voiceProfile]);
 
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "No session";
   const starterPrompts = role ? STARTER_PROMPTS[role] : [];
@@ -598,12 +586,86 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
   }
 
   function cancelSpeech() {
+    if (currentAudioRef.current) {
+      currentAudioRef.current.pause();
+      currentAudioRef.current.src = "";
+      currentAudioRef.current = null;
+    }
+    if (currentAudioUrlRef.current) {
+      URL.revokeObjectURL(currentAudioUrlRef.current);
+      currentAudioUrlRef.current = null;
+    }
     if (typeof window !== "undefined" && "speechSynthesis" in window) {
       window.speechSynthesis.cancel();
     }
     if (speakingTimerRef.current) {
       clearTimeout(speakingTimerRef.current);
       speakingTimerRef.current = null;
+    }
+  }
+
+  function speakWithBrowserFallback(text: string) {
+    if (!voiceSupported || typeof window === "undefined" || !("speechSynthesis" in window) || !text) {
+      setAvatarState("idle");
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(text);
+    const preferredVoice = getPreferredDawnVoice();
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+      utterance.lang = preferredVoice.lang;
+      setActiveVoiceLabel(`${preferredVoice.name} (fallback)`);
+    } else {
+      setActiveVoiceLabel("System fallback");
+    }
+    utterance.rate = 0.96;
+    utterance.pitch = 0.94;
+    utterance.volume = 1;
+    utterance.onstart = () => setAvatarState("speaking");
+    utterance.onend = () => setAvatarState("idle");
+    utterance.onerror = () => {
+      setAvatarState("alert");
+      setNotice("Voice playback was interrupted. Dawn text responses still work normally.");
+      speakingTimerRef.current = setTimeout(() => setAvatarState("idle"), 900);
+    };
+    window.speechSynthesis.speak(utterance);
+  }
+
+  async function playVoiceResponse(text: string) {
+    try {
+      setAvatarState("speaking");
+      const payload = await speakDawn({
+        text,
+        voiceProfile,
+      });
+
+      if (!payload?.blob) {
+        throw new Error("Speech audio was not returned.");
+      }
+
+      const audioUrl = URL.createObjectURL(payload.blob);
+      currentAudioUrlRef.current = audioUrl;
+      const audio = new Audio(audioUrl);
+      currentAudioRef.current = audio;
+      setActiveVoiceLabel(payload.headers.get("X-Dawn-Voice-Profile") || activeVoiceLabel);
+      audio.onended = () => {
+        setAvatarState("idle");
+        if (currentAudioUrlRef.current) {
+          URL.revokeObjectURL(currentAudioUrlRef.current);
+          currentAudioUrlRef.current = null;
+        }
+        currentAudioRef.current = null;
+      };
+      audio.onerror = () => {
+        setNotice("Dedicated Dawn voice failed. Falling back to browser voice.");
+        speakWithBrowserFallback(text);
+      };
+      await audio.play();
+    } catch {
+      setNotice("Dedicated Dawn voice is unavailable right now. Falling back to browser voice.");
+      speakWithBrowserFallback(text);
     }
   }
 
@@ -846,6 +908,7 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
           <DawnVoiceControls
             avatarEnabled={avatarEnabled}
             voiceEnabled={voiceEnabled}
+            voiceProfile={voiceProfile}
             listening={listening}
             speechSupported={speechSupported}
             voiceSupported={voiceSupported}
@@ -865,6 +928,7 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
               });
             }}
             onToggleListening={toggleListening}
+            onVoiceProfileChange={setVoiceProfile}
           />
           {capabilitiesChecked && (!speechSupported || !voiceSupported) ? (
             <p className="mt-3 text-xs text-slate-500">
@@ -873,7 +937,7 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
             </p>
           ) : null}
           {voiceSupported ? (
-            <p className="mt-2 text-xs text-slate-500">Voice profile: {voiceProfile}</p>
+            <p className="mt-2 text-xs text-slate-500">AI voice: {activeVoiceLabel}</p>
           ) : null}
           <div className="mt-3 flex items-center justify-between gap-3">
             <p className="text-xs text-slate-400">

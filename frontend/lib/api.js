@@ -41,6 +41,49 @@ export async function apiRequest(path, { method = "GET", body, isFormData = fals
   return data;
 }
 
+export async function audioRequest(path, { method = "POST", body } = {}) {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    "Content-Type": "application/json",
+  };
+
+  let response;
+
+  try {
+    response = await fetch(`${BASE}${path}`, {
+      method,
+      headers,
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch (error) {
+    const networkError = new Error(
+      "NearNest could not reach the backend. Please make sure the backend server is running."
+    );
+    networkError.cause = error;
+    networkError.code = "BACKEND_UNAVAILABLE";
+    throw networkError;
+  }
+
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login?reason=session-expired";
+    }
+    return undefined;
+  }
+
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    const data = contentType.includes("application/json") ? await response.json().catch(() => null) : null;
+    throw new Error(data?.message ?? data?.error ?? "Audio request failed");
+  }
+
+  return {
+    blob: await response.blob(),
+    headers: response.headers,
+  };
+}
+
 export const login = (body) => apiRequest("/auth/login", { method: "POST", body });
 export const register = (body) => apiRequest("/auth/register", { method: "POST", body });
 
@@ -96,5 +139,6 @@ export const getCorridorDemand = (corridorId) => apiRequest(`/corridor/${corrido
 
 export const getDawnInsights = () => apiRequest("/dawn/insights");
 export const queryDawn = (body) => apiRequest("/dawn/query", { method: "POST", body });
+export const speakDawn = (body) => audioRequest("/dawn/speak", { method: "POST", body });
 
 export { BASE };

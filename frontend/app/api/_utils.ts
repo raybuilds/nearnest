@@ -58,7 +58,8 @@ export async function fetchBackend(path: string, options: BackendOptions = {}) {
   }
 
   const contentType = response.headers.get("content-type") || "";
-  const data = contentType.includes("application/json") ? await response.json() : null;
+  const isJson = contentType.includes("application/json");
+  const data = isJson ? await response.json() : null;
 
   if (!response.ok) {
     return new Response(
@@ -72,5 +73,17 @@ export async function fetchBackend(path: string, options: BackendOptions = {}) {
     );
   }
 
-  return Response.json(data);
+  if (isJson) {
+    return Response.json(data);
+  }
+
+  const audioBuffer = await response.arrayBuffer();
+  return new Response(audioBuffer, {
+    status: response.status,
+    headers: {
+      "Content-Type": contentType || "application/octet-stream",
+      ...(response.headers.get("Cache-Control") ? { "Cache-Control": response.headers.get("Cache-Control") as string } : {}),
+      ...(response.headers.get("X-Dawn-Voice-Profile") ? { "X-Dawn-Voice-Profile": response.headers.get("X-Dawn-Voice-Profile") as string } : {}),
+    },
+  });
 }

@@ -1,5 +1,6 @@
 const express = require("express");
 const { verifyToken } = require("../middlewares/auth");
+const { speechLimiter } = require("../middlewares/rateLimiter");
 const { callApi, getBearerToken, parseRequestedUnitId, preprocessDawnText } = require("../services/dawnIntents/utils");
 const studentSearch = require("../services/dawnIntents/studentSearch");
 const studentComplaintDraft = require("../services/dawnIntents/studentComplaintDraft");
@@ -18,6 +19,7 @@ const { getCorridorInsights } = require("../services/intelligence/dawnCorridorIn
 const { forecastUnitRisk } = require("../services/intelligence/dawnRiskForecastService");
 const { generateOperationalInsights } = require("../services/intelligence/dawnOperationsAdvisor");
 const { explainTrust } = require("../services/intelligence/trustExplanationService");
+const { generateSpeech } = require("../services/speechService");
 
 const router = express.Router();
 
@@ -1252,6 +1254,28 @@ router.get("/dawn/insights", verifyToken, async (req, res) => {
     }
     console.error(error);
     return res.status(500).json({ error: error.message || "Dawn insights failed" });
+  }
+});
+
+router.post("/dawn/speak", verifyToken, speechLimiter, async (req, res) => {
+  try {
+    const { text, voiceProfile } = req.body || {};
+    const { audioBuffer, contentType, cacheHit, normalizedText, profile } = await generateSpeech(text, voiceProfile);
+
+    res.setHeader("Content-Type", contentType || "audio/mpeg");
+    res.setHeader("Content-Length", audioBuffer.length);
+    res.setHeader("Cache-Control", "private, max-age=600");
+    res.setHeader("X-Dawn-Voice-Profile", profile);
+    res.setHeader("X-Dawn-Speech-Cache", cacheHit ? "HIT" : "MISS");
+    res.setHeader("X-Dawn-Speech-Length", String(normalizedText.length));
+
+    return res.status(200).send(audioBuffer);
+  } catch (error) {
+    if (error?.statusCode) {
+      return res.status(error.statusCode).json({ error: error.message || "Dawn speech failed" });
+    }
+    console.error(error);
+    return res.status(500).json({ error: error.message || "Dawn speech failed" });
   }
 });
 

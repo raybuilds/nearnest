@@ -3,12 +3,14 @@
 type DawnVoiceControlsProps = {
   avatarEnabled: boolean;
   voiceEnabled: boolean;
+  voiceProfile: string;
   listening: boolean;
   speechSupported: boolean;
   voiceSupported: boolean;
   onToggleAvatar: () => void;
   onToggleVoice: () => void;
   onToggleListening: () => void;
+  onVoiceProfileChange: (value: string) => void;
 };
 
 function pillClass(active: boolean) {
@@ -20,38 +22,54 @@ function pillClass(active: boolean) {
 export default function DawnVoiceControls({
   avatarEnabled,
   voiceEnabled,
+  voiceProfile,
   listening,
   speechSupported,
   voiceSupported,
   onToggleAvatar,
   onToggleVoice,
   onToggleListening,
+  onVoiceProfileChange,
 }: DawnVoiceControlsProps) {
   return (
-    <div className="mt-4 flex flex-wrap items-center gap-2">
-      <button
-        type="button"
-        onClick={onToggleListening}
-        disabled={!speechSupported}
-        className={`rounded-full border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${pillClass(listening)}`}
-      >
-        {listening ? "Stop listening" : "Mic"}
-      </button>
-      <button
-        type="button"
-        onClick={onToggleVoice}
-        disabled={!voiceSupported}
-        className={`rounded-full border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${pillClass(voiceEnabled)}`}
-      >
-        {voiceEnabled ? "Voice on" : "Voice off"}
-      </button>
-      <button
-        type="button"
-        onClick={onToggleAvatar}
-        className={`rounded-full border px-3 py-2 text-sm transition ${pillClass(avatarEnabled)}`}
-      >
-        {avatarEnabled ? "Avatar on" : "Avatar off"}
-      </button>
+    <div className="mt-4 space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <button
+          type="button"
+          onClick={onToggleListening}
+          disabled={!speechSupported}
+          className={`rounded-full border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${pillClass(listening)}`}
+        >
+          {listening ? "Stop listening" : "Mic"}
+        </button>
+        <button
+          type="button"
+          onClick={onToggleVoice}
+          disabled={!voiceSupported}
+          className={`rounded-full border px-3 py-2 text-sm transition disabled:cursor-not-allowed disabled:opacity-50 ${pillClass(voiceEnabled)}`}
+        >
+          {voiceEnabled ? "Voice on" : "Voice off"}
+        </button>
+        <button
+          type="button"
+          onClick={onToggleAvatar}
+          className={`rounded-full border px-3 py-2 text-sm transition ${pillClass(avatarEnabled)}`}
+        >
+          {avatarEnabled ? "Avatar on" : "Avatar off"}
+        </button>
+      </div>
+      <label className="block">
+        <span className="mb-2 block text-[11px] uppercase tracking-[0.22em] text-slate-400">Voice profile</span>
+        <select
+          value={voiceProfile}
+          onChange={(event) => onVoiceProfileChange(event.target.value)}
+          className="w-full rounded-2xl border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none"
+        >
+          <option value="indian_en_female">Indian English female</option>
+          <option value="british_en_female">British English female</option>
+          <option value="us_en_female">US English female</option>
+        </select>
+      </label>
     </div>
   );
 }
