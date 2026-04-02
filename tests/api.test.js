@@ -760,6 +760,26 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     assert.ok(Object.prototype.hasOwnProperty.call(studentSummary.data.data, "trustScore"));
     assert.ok(Object.prototype.hasOwnProperty.call(studentSummary.data.data, "trustBand"));
 
+    const studentRisk = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Is this unit risky?" },
+    });
+    assert.equal(studentRisk.status, 200);
+    assert.equal(studentRisk.data.intent, "predict_unit_risk");
+
+    const riskFollowUp = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Why is it risky?" },
+    });
+    assert.equal(riskFollowUp.status, 200);
+    assert.equal(riskFollowUp.data.intent, "explain_unit_overview");
+    assert.equal(riskFollowUp.data.data.unitId, safeUnitId);
+    assert.ok(Object.prototype.hasOwnProperty.call(riskFollowUp.data.data, "trust"));
+    assert.ok(Object.prototype.hasOwnProperty.call(riskFollowUp.data.data, "healthReport"));
+    assert.ok(Object.prototype.hasOwnProperty.call(riskFollowUp.data.data, "riskForecast"));
+
     const landlordRecurring = await api("/dawn/query", {
       method: "POST",
       token: landlordLogin.data.token,

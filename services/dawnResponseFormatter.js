@@ -83,7 +83,7 @@ function formatPredictUnitRisk(result) {
 
   const riskSignal = forecast.riskSignal ?? forecast.riskLevel ?? "unknown";
   const indicators = Array.isArray(forecast.indicators) ? forecast.indicators : [];
-  const recommendation = forecast.recommendation || "Continue monitoring this unit.";
+  const recommendation = forecast.recommendation || "Review this unit and act on the leading indicators.";
   const indicatorText = indicators.length > 0 ? indicators.join("; ") : "No major early warning indicators right now";
   return `This unit is ${riskSignal}. Indicators: ${indicatorText}. Recommended next step: ${recommendation}`;
 }
@@ -135,10 +135,10 @@ function formatOperationsAdvisor(result) {
   if (units.length > 0 && units[0]?.unitId) {
     const top = units[0];
     const indicators = Array.isArray(top.indicators) ? top.indicators : [];
-    return `Operational Alert: ${lead.title || "Operational review"}. Unit ${top.unitId} should be reviewed first. Indicators: ${indicators.join("; ") || "See advisory details"}. Recommendation: ${top.recommendation || lead.message || "Review current operational signals."}`;
+    return `Operational Alert: ${lead.title || "Operational review"}. Unit ${top.unitId} should be reviewed first. Indicators: ${indicators.join("; ") || "See advisory details"}. Recommendation: ${top.recommendation || lead.message || "Review the current operational signals now."}`;
   }
 
-  return `Operational Alert: ${lead.title || "Operational review"}. ${lead.message || "Review current operational signals."}`;
+  return `Operational Alert: ${lead.title || "Operational review"}. ${lead.message || "Review the current operational signals now."}`;
 }
 
 function formatDawnResponse(intent, result) {
@@ -153,7 +153,7 @@ function formatDawnResponse(intent, result) {
   if (intent === "admin_density") return formatAdminDensity(result);
   if (intent === "explain_unit_trust") return formatTrustExplanation(result);
   if (intent === "explain_unit_overview") return formatUnitOverview(result);
-  return result?.assistant || "Done.";
+  return result?.assistant || "Dawn completed the request.";
 }
 
 module.exports = {

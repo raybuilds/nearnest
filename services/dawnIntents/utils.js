@@ -172,13 +172,13 @@ function buildSoftRecommendations({ waterCount, slaBreachCount, trendCurrent14d,
   const suggestions = [];
 
   if (waterCount >= WATER_COMPLAINT_THRESHOLD) {
-    suggestions.push("Recurring water issues detected. Consider inspecting plumbing infrastructure.");
+    suggestions.push("Recurring water issues detected. Inspect the plumbing infrastructure now.");
   }
   if (slaBreachCount >= SLA_BREACH_REVIEW_THRESHOLD) {
-    suggestions.push("Response delays detected. Faster resolution may improve trust score.");
+    suggestions.push("Response delays detected. Start faster resolution now to protect trust score.");
   }
   if (trendCurrent14d > trendPrevious14d) {
-    suggestions.push("Complaint density is rising versus the previous 14 days. Consider monitoring high-activity units.");
+    suggestions.push("Complaint density is rising versus the previous 14 days. Review the highest-activity units first.");
   }
 
   return suggestions;

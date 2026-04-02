@@ -604,6 +604,46 @@ function inferIntent(role, message) {
   return "unsupported";
 }
 
+function inferFollowUpIntent(role, message, memory, resolvedContext) {
+  const text = String(message || "").toLowerCase().trim();
+  const hasUnitContext = Boolean(resolvedContext?.unitId || memory?.lastUnitId || memory?.lastViewedUnitId);
+  const hasCorridorContext = Boolean(resolvedContext?.corridorId || memory?.lastCorridorId);
+
+  const wantsRiskExplanation =
+    /why is (it|this|that|my unit|my housing) risky/.test(text) ||
+    /why is (it|this|that) unsafe/.test(text) ||
+    /what is driving (the )?risk/.test(text) ||
+    /explain (the )?risk/.test(text) ||
+    /why is that a problem/.test(text);
+
+  if (wantsRiskExplanation) {
+    if (hasUnitContext) return "explain_unit_overview";
+    if (role === "admin" && hasCorridorContext) return "admin_density";
+    if (hasCorridorContext) return "corridor_behavioral_insight";
+  }
+
+  if (/see risk forecast|show risk forecast|forecast risk|what is the risk/.test(text) && hasUnitContext) {
+    return "predict_unit_risk";
+  }
+
+  if (
+    /see trust breakdown|show trust breakdown|why is trust low|why did trust drop|explain trust/.test(text) &&
+    hasUnitContext
+  ) {
+    return "explain_unit_trust";
+  }
+
+  if (/view complaints|show complaints|complaint history|show complaint summary/.test(text) && role === "student") {
+    return "student_complaint_summary";
+  }
+
+  if (/how is it doing|how is that doing|what about this unit|what about that unit/.test(text) && hasUnitContext) {
+    return "explain_unit_overview";
+  }
+
+  return null;
+}
+
 function buildSuggestions(intent, role, result, resolvedContext) {
   const unitId = resolvedContext?.unitId || result?.data?.unitId || result?.data?.trust?.unitId || null;
   const complaintCount =
@@ -623,7 +663,7 @@ function buildSuggestions(intent, role, result, resolvedContext) {
     return [
       complaintCount > 0 ? "View complaints" : "Report an issue",
       "See trust breakdown",
-      unitId ? `Explain unit ${unitId}` : "Explain this unit",
+      "Why is it risky?",
     ];
   }
   if (intent === "explain_unit_trust" || intent === "explain_unit_overview") {
@@ -781,6 +821,9 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
     let inferredIntent = inferIntent(role, normalizedText);
     if (memory?.pendingFollowUp?.intent === "student_complaint") {
       inferredIntent = "student_complaint";
+    }
+    if (inferredIntent === "unsupported") {
+      inferredIntent = inferFollowUpIntent(role, normalizedText, memory, resolvedContext) || inferredIntent;
     }
     if (inferredIntent === "unsupported" && memory?.lastIntent) {
       inferredIntent = memory.lastIntent;
