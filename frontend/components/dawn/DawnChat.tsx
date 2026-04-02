@@ -2,11 +2,13 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import CardRenderer from "@/components/dawn/CardRenderer";
+import DawnAvatar from "@/components/dawn/DawnAvatar";
 import DawnHeader from "@/components/dawn/DawnHeader";
+import DawnVoiceControls from "@/components/dawn/DawnVoiceControls";
 import { getDawnInsights, queryDawn } from "@/lib/api";
 import { getRiskTone, getTrustBand } from "@/lib/governance";
 import { getStoredRole } from "@/lib/session";
-import type { DawnAction, DawnCard, DawnResponse, DawnRole } from "@/types/dawn";
+import type { DawnAction, DawnAvatarState, DawnCard, DawnResponse, DawnRole } from "@/types/dawn";
 
 type DawnChatProps = {
   open: boolean;
@@ -18,6 +20,16 @@ type DawnChatProps = {
 };
 
 type DawnSummary = NonNullable<DawnResponse["summary"]>;
+type SpeechRecognitionConstructor = new () => {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start: () => void;
+  stop: () => void;
+  onresult: ((event: { results: ArrayLike<ArrayLike<{ transcript: string }>> }) => void) | null;
+  onerror: ((event: { error?: string }) => void) | null;
+  onend: (() => void) | null;
+};
 
 const STARTER_PROMPTS: Record<DawnRole, string[]> = {
   student: [
@@ -368,6 +380,19 @@ function summaryTitle(role: DawnRole | null, summary?: DawnSummary | null) {
   return summary.unitId ? `Unit ${summary.unitId}` : "Role context";
 }
 
+function getSpeechRecognitionConstructor(): SpeechRecognitionConstructor | null {
+  if (typeof window === "undefined") return null;
+  const speechWindow = window as typeof window & {
+    SpeechRecognition?: SpeechRecognitionConstructor;
+    webkitSpeechRecognition?: SpeechRecognitionConstructor;
+  };
+  return speechWindow.SpeechRecognition || speechWindow.webkitSpeechRecognition || null;
+}
+
+function hasSpeechSynthesisSupport() {
+  return typeof window !== "undefined" && "speechSynthesis" in window && typeof window.SpeechSynthesisUtterance !== "undefined";
+}
+
 export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -377,7 +402,17 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
   const [role, setRole] = useState<DawnRole | null>(null);
   const [insightMessage, setInsightMessage] = useState("");
   const [bootstrapped, setBootstrapped] = useState(false);
+  const [avatarEnabled, setAvatarEnabled] = useState(true);
+  const [voiceEnabled, setVoiceEnabled] = useState(false);
+  const [listening, setListening] = useState(false);
+  const [avatarState, setAvatarState] = useState<DawnAvatarState>("idle");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const recognitionRef = useRef<InstanceType<SpeechRecognitionConstructor> | null>(null);
+  const speakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const shouldSpeakNextResponseRef = useRef(false);
+  const manualStopListeningRef = useRef(false);
+  const speechSupported = Boolean(getSpeechRecognitionConstructor());
+  const voiceSupported = hasSpeechSynthesisSupport();
 
   useEffect(() => {
     const syncRole = () => {
@@ -393,6 +428,27 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
       window.removeEventListener("focus", syncRole);
     };
   }, []);
+
+  useEffect(() => {
+    return () => {
+      if (speakingTimerRef.current) clearTimeout(speakingTimerRef.current);
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+      recognitionRef.current?.stop();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      if (typeof window !== "undefined" && "speechSynthesis" in window) {
+        window.speechSynthesis.cancel();
+      }
+      recognitionRef.current?.stop();
+      setListening(false);
+      setAvatarState("idle");
+    }
+  }, [open]);
 
   useEffect(() => {
     let active = true;
@@ -426,6 +482,36 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
     };
   }, [open, role]);
 
+  useEffect(() => {
+    if (!response || !shouldSpeakNextResponseRef.current) return;
+    shouldSpeakNextResponseRef.current = false;
+
+    if (speakingTimerRef.current) {
+      clearTimeout(speakingTimerRef.current);
+      speakingTimerRef.current = null;
+    }
+
+    if (!voiceEnabled || !voiceSupported || !response.message) {
+      setAvatarState("alert");
+      speakingTimerRef.current = setTimeout(() => setAvatarState("idle"), 900);
+      return;
+    }
+
+    window.speechSynthesis.cancel();
+    const utterance = new SpeechSynthesisUtterance(response.message);
+    utterance.rate = 1;
+    utterance.pitch = 1;
+    utterance.volume = 1;
+    utterance.onstart = () => setAvatarState("speaking");
+    utterance.onend = () => setAvatarState("idle");
+    utterance.onerror = () => {
+      setAvatarState("alert");
+      setNotice("Voice output was interrupted. Dawn text responses still work normally.");
+      speakingTimerRef.current = setTimeout(() => setAvatarState("idle"), 900);
+    };
+    window.speechSynthesis.speak(utterance);
+  }, [response, voiceEnabled, voiceSupported]);
+
   const roleLabel = role ? role.charAt(0).toUpperCase() + role.slice(1) : "No session";
   const starterPrompts = role ? STARTER_PROMPTS[role] : [];
   const summary = response?.summary || null;
@@ -444,6 +530,23 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
     requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
+  function cancelSpeech() {
+    if (typeof window !== "undefined" && "speechSynthesis" in window) {
+      window.speechSynthesis.cancel();
+    }
+    if (speakingTimerRef.current) {
+      clearTimeout(speakingTimerRef.current);
+      speakingTimerRef.current = null;
+    }
+  }
+
+  function stopListening() {
+    manualStopListeningRef.current = true;
+    recognitionRef.current?.stop();
+    setListening(false);
+    setAvatarState("idle");
+  }
+
   function sendPrompt(prompt: string) {
     setInput(prompt);
     void handleSubmit(undefined, prompt);
@@ -456,6 +559,10 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
 
     setLoading(true);
     setNotice("");
+    setAvatarState("thinking");
+    shouldSpeakNextResponseRef.current = true;
+    cancelSpeech();
+    if (listening) stopListening();
 
     try {
       const payload = await queryDawn({
@@ -470,10 +577,71 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
         setInput(promptOverride);
       }
     } catch (error) {
+      shouldSpeakNextResponseRef.current = false;
+      setAvatarState("alert");
       setNotice(error instanceof Error ? error.message : "Unable to retrieve data");
     } finally {
       setLoading(false);
+      if (!shouldSpeakNextResponseRef.current && !voiceEnabled) {
+        speakingTimerRef.current = setTimeout(() => setAvatarState("idle"), 900);
+      }
     }
+  }
+
+  function toggleListening() {
+    if (!speechSupported) {
+      setNotice("Speech input is not supported in this browser.");
+      return;
+    }
+
+    if (listening) {
+      stopListening();
+      return;
+    }
+
+    const Recognition = getSpeechRecognitionConstructor();
+    if (!Recognition) {
+      setNotice("Speech input is not supported in this browser.");
+      return;
+    }
+
+    cancelSpeech();
+    manualStopListeningRef.current = false;
+    const recognition = new Recognition();
+    recognition.continuous = false;
+    recognition.interimResults = false;
+    recognition.lang = "en-IN";
+    recognition.onresult = (event) => {
+      const transcript = event.results?.[0]?.[0]?.transcript?.trim();
+      if (transcript) {
+        setInput(transcript);
+        void handleSubmit(undefined, transcript);
+      }
+    };
+    recognition.onerror = (event) => {
+      setListening(false);
+      setAvatarState("alert");
+      if (event?.error === "not-allowed" || event?.error === "service-not-allowed") {
+        setNotice("Microphone access was denied. You can keep using Dawn with typing.");
+      } else {
+        setNotice("Voice input could not start. You can keep using Dawn with typing.");
+      }
+    };
+    recognition.onend = () => {
+      recognitionRef.current = null;
+      setListening(false);
+      if (!loading) {
+        setAvatarState(manualStopListeningRef.current ? "idle" : "alert");
+        speakingTimerRef.current = setTimeout(() => setAvatarState("idle"), 700);
+      }
+      manualStopListeningRef.current = false;
+    };
+
+    recognitionRef.current = recognition;
+    setListening(true);
+    setAvatarState("listening");
+    setNotice("Listening for your query...");
+    recognition.start();
   }
 
   function handleAction(action: DawnAction) {
@@ -487,6 +655,9 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
       if (!role) return;
       setLoading(true);
       setNotice("");
+      setAvatarState("thinking");
+      shouldSpeakNextResponseRef.current = true;
+      cancelSpeech();
       void queryDawn({
         message: input.trim() || "confirm complaint",
         confirm: true,
@@ -499,6 +670,8 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
           setResponse(toResponse(payload, role));
         })
         .catch((error) => {
+          shouldSpeakNextResponseRef.current = false;
+          setAvatarState("alert");
           setNotice(error instanceof Error ? error.message : "Unable to confirm complaint");
         })
         .finally(() => {
@@ -521,9 +694,19 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
       }`}
     >
       <div className="overflow-hidden rounded-[32px] border border-white/12 bg-[linear-gradient(180deg,rgba(15,18,34,0.94),rgba(10,12,24,0.98))] shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
-        <DawnHeader roleLabel={roleLabel} />
+        <DawnHeader
+          roleLabel={roleLabel}
+          rightSlot={
+            voiceEnabled ? (
+              <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-emerald-100">
+                Voice on
+              </span>
+            ) : null
+          }
+        />
 
         <div className="border-b border-white/8 px-5 py-3">
+          <DawnAvatar state={avatarState} enabled={avatarEnabled} />
           <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Intent queue</p>
           <p className="mt-2 text-sm text-slate-200">{intentSummary}</p>
           {!bootstrapped && role ? <p className="mt-2 text-xs text-slate-400">Loading proactive insights...</p> : null}
@@ -587,8 +770,30 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
             }
             className="mt-3 w-full rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
           />
+          <DawnVoiceControls
+            avatarEnabled={avatarEnabled}
+            voiceEnabled={voiceEnabled}
+            listening={listening}
+            speechSupported={speechSupported}
+            voiceSupported={voiceSupported}
+            onToggleAvatar={() => setAvatarEnabled((value) => !value)}
+            onToggleVoice={() => {
+              if (!voiceSupported) {
+                setNotice("Voice output is not supported in this browser.");
+                return;
+              }
+              setVoiceEnabled((value) => {
+                if (value) cancelSpeech();
+                return !value;
+              });
+            }}
+            onToggleListening={toggleListening}
+          />
           <div className="mt-3 flex items-center justify-between gap-3">
-            <p className="text-xs text-slate-400">Dawn now guides the next step instead of waiting for perfect phrasing.</p>
+            <p className="text-xs text-slate-400">
+              Dawn now guides the next step instead of waiting for perfect phrasing.
+              {listening ? " Voice input is active." : ""}
+            </p>
             <div className="flex gap-2">
               <button
                 type="button"

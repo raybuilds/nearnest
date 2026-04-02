@@ -91,3 +91,5 @@ export interface DawnCardProps {
   loading?: boolean;
   empty?: boolean;
 }
+
+export type DawnAvatarState = "idle" | "thinking" | "speaking" | "alert" | "listening";

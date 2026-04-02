@@ -1,10 +1,13 @@
 "use client";
 
+import type { ReactNode } from "react";
+
 type DawnHeaderProps = {
   roleLabel: string;
+  rightSlot?: ReactNode;
 };
 
-export default function DawnHeader({ roleLabel }: DawnHeaderProps) {
+export default function DawnHeader({ roleLabel, rightSlot }: DawnHeaderProps) {
   return (
     <div className="flex items-center justify-between gap-3 border-b border-white/10 px-5 py-4">
       <div>
@@ -14,10 +17,12 @@ export default function DawnHeader({ roleLabel }: DawnHeaderProps) {
           Online
         </p>
       </div>
-      <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.24em] text-cyan-100">
-        {roleLabel}
-      </span>
+      <div className="flex items-center gap-3">
+        {rightSlot}
+        <span className="rounded-full border border-cyan-300/30 bg-cyan-300/10 px-3 py-1 text-xs uppercase tracking-[0.24em] text-cyan-100">
+          {roleLabel}
+        </span>
+      </div>
     </div>
   );
 }
-
