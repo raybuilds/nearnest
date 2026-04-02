@@ -688,8 +688,29 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     });
     assert.equal(studentDraft.status, 200);
     assert.equal(studentDraft.data.intent, "student_complaint");
-    assert.equal(studentDraft.data.requiresConfirmation, true);
-    assert.equal(studentDraft.data.action.payload.incidentType, "common_area");
+    assert.equal(studentDraft.data.requiresConfirmation, false);
+    assert.deepEqual(studentDraft.data.data.missingFields, ["severity", "duration"]);
+    assert.equal(studentDraft.data.data.preview.incidentType, "common_area");
+
+    const studentDraftFollowUp = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Severity 3 for 2 days" },
+    });
+    assert.equal(studentDraftFollowUp.status, 200);
+    assert.equal(studentDraftFollowUp.data.intent, "student_complaint");
+    assert.equal(studentDraftFollowUp.data.requiresConfirmation, true);
+    assert.equal(studentDraftFollowUp.data.action.payload.incidentType, "common_area");
+    assert.equal(studentDraftFollowUp.data.action.payload.severity, 3);
+    assert.equal(studentDraftFollowUp.data.action.payload.duration, "2 days");
+
+    const resetContext = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "reset context" },
+    });
+    assert.equal(resetContext.status, 200);
+    assert.equal(resetContext.data.intent, "context_reset");
 
     const electricalDraft = await api("/dawn/query", {
       method: "POST",
@@ -698,9 +719,22 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
     });
     assert.equal(electricalDraft.status, 200);
     assert.equal(electricalDraft.data.intent, "student_complaint");
-    assert.equal(electricalDraft.data.requiresConfirmation, true);
-    assert.equal(electricalDraft.data.action.payload.incidentType, "electrical");
-    assert.ok(Number(electricalDraft.data.action.payload.severity) >= 4);
+    assert.equal(electricalDraft.data.requiresConfirmation, false);
+    assert.deepEqual(electricalDraft.data.data.missingFields, ["severity", "duration"]);
+    assert.equal(electricalDraft.data.data.preview.incidentType, "electrical");
+    assert.ok(Number(electricalDraft.data.data.preview.severity) >= 4);
+
+    const electricalDraftFollowUp = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Severity 4 since today" },
+    });
+    assert.equal(electricalDraftFollowUp.status, 200);
+    assert.equal(electricalDraftFollowUp.data.intent, "student_complaint");
+    assert.equal(electricalDraftFollowUp.data.requiresConfirmation, true);
+    assert.equal(electricalDraftFollowUp.data.action.payload.incidentType, "electrical");
+    assert.ok(Number(electricalDraftFollowUp.data.action.payload.severity) >= 4);
+    assert.equal(electricalDraftFollowUp.data.action.payload.duration, "since today");
 
     const studentSubmit = await api("/dawn/query", {
       method: "POST",
@@ -708,7 +742,7 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
       body: {
         message: "Lift not working on my floor",
         confirm: true,
-        action: studentDraft.data.action,
+        action: studentDraftFollowUp.data.action,
       },
     });
     assert.equal(studentSubmit.status, 200);
