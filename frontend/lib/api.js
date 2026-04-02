@@ -139,6 +139,44 @@ export const getCorridorDemand = (corridorId) => apiRequest(`/corridor/${corrido
 
 export const getDawnInsights = () => apiRequest("/dawn/insights");
 export const queryDawn = (body) => apiRequest("/dawn/query", { method: "POST", body });
-export const speakDawn = (body) => audioRequest("/dawn/speak", { method: "POST", body });
+async function audioRequestAbsolute(path, { method = "POST", body } = {}) {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
+  const headers = {
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+    "Content-Type": "application/json",
+  };
+
+  const response = await fetch(path, {
+    method,
+    headers,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
+  if (response.status === 401) {
+    if (typeof window !== "undefined") {
+      window.location.href = "/login?reason=session-expired";
+    }
+    return undefined;
+  }
+
+  if (!response.ok) {
+    const contentType = response.headers.get("content-type") || "";
+    const data = contentType.includes("application/json") ? await response.json().catch(() => null) : null;
+    throw new Error(data?.message ?? data?.error ?? "Audio request failed");
+  }
+
+  return {
+    blob: await response.blob(),
+    headers: response.headers,
+  };
+}
+
+export async function speakDawn(body) {
+  try {
+    return await audioRequestAbsolute("/api/dawn/speak", { method: "POST", body });
+  } catch (_) {
+    return audioRequest("/dawn/speak", { method: "POST", body });
+  }
+}
 
 export { BASE };
