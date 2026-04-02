@@ -6,11 +6,11 @@ import type { ReactNode } from "react";
 import type { DawnAction, DawnCardProps } from "@/types/dawn";
 
 const toneClasses = {
-  recommendation: "border-sky-400/50 bg-sky-500/8",
-  risk: "border-rose-400/50 bg-rose-500/8",
-  health: "border-emerald-400/50 bg-emerald-500/8",
-  analytics: "border-violet-400/50 bg-violet-500/8",
-  explanation: "border-white/15 bg-white/5",
+  recommendation: "border-emerald-400/35 bg-emerald-500/8 shadow-md shadow-emerald-950/20",
+  risk: "border-rose-400/35 bg-rose-500/8 shadow-md shadow-rose-950/20",
+  health: "border-amber-300/30 bg-amber-400/8 shadow-md shadow-amber-950/10",
+  analytics: "border-white/12 bg-white/[0.04] shadow-md shadow-black/30",
+  explanation: "border-sky-300/25 bg-sky-400/8 shadow-md shadow-sky-950/10",
 };
 
 type CardFrameProps = DawnCardProps & {
@@ -32,31 +32,35 @@ function SkeletonRows() {
 
 export default function CardFrame({ card, loading, empty, tone, metrics = [], children, onAction }: CardFrameProps) {
   const [expanded, setExpanded] = useState(false);
+  const shouldCollapse = children || metrics.length > 2 || card.actions.length > 0;
 
   return (
-    <article className={`rounded-[28px] border p-4 backdrop-blur-xl ${toneClasses[tone]}`}>
+    <article className={`mb-4 rounded-2xl border p-5 backdrop-blur-xl ${toneClasses[tone]}`}>
       <div className="flex items-start justify-between gap-3">
-        <div>
-          <h4 className="font-[family:var(--font-display)] text-xl text-white">{card.title}</h4>
-          <p className="mt-2 text-sm text-slate-300">
+        <div className="max-w-[85%]">
+          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Assistant card</p>
+          <h4 className="mt-2 font-[family:var(--font-display)] text-xl text-white">{card.title}</h4>
+          <p className="mt-3 text-sm leading-6 text-slate-300">
             {loading ? "Analyzing system data..." : empty ? "No relevant data found" : card.why}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => setExpanded((value) => !value)}
-          className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.24em] text-slate-300"
-        >
-          {expanded ? "Hide" : "Details"}
-        </button>
+        {shouldCollapse ? (
+          <button
+            type="button"
+            onClick={() => setExpanded((value) => !value)}
+            className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.24em] text-slate-300"
+          >
+            {expanded ? "Hide details" : "View details"}
+          </button>
+        ) : null}
       </div>
 
       {loading ? <div className="mt-4"><SkeletonRows /></div> : null}
 
       {!loading && !empty && metrics.length > 0 ? (
-        <div className="mt-4 grid grid-cols-2 gap-3">
+        <div className="mt-5 grid grid-cols-2 gap-3">
           {metrics.map((metric) => (
-            <div key={metric.label} className="rounded-2xl border border-white/8 bg-black/10 px-3 py-3">
+            <div key={metric.label} className="rounded-xl border border-white/8 bg-black/10 px-4 py-3">
               <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">{metric.label}</p>
               <p className="mt-2 text-lg font-semibold text-white">{metric.value ?? "--"}</p>
             </div>
@@ -65,17 +69,17 @@ export default function CardFrame({ card, loading, empty, tone, metrics = [], ch
       ) : null}
 
       {!loading && empty ? (
-        <div className="mt-4 rounded-2xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-300">
+        <div className="mt-5 rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-300">
           No relevant data found
         </div>
       ) : null}
 
-      {!loading && !empty && expanded ? (
-        <div className="mt-4 rounded-2xl border border-white/8 bg-black/10 p-3">{children}</div>
+      {!loading && !empty && expanded && children ? (
+        <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-4">{children}</div>
       ) : null}
 
       {!loading && !empty && card.actions.length > 0 ? (
-        <div className="mt-4 flex flex-wrap gap-2">
+        <div className="mt-5 flex flex-wrap gap-2">
           {card.actions.map((action) =>
             action.href ? (
               <Link

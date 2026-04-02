@@ -22,7 +22,7 @@ export default function CardRenderer({ cards, loading, onAction }: CardRendererP
   }
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {cards.map((card, index) => {
         const key = `${card.type}-${card.title}-${index}`;
 
@@ -48,4 +48,3 @@ export default function CardRenderer({ cards, loading, onAction }: CardRendererP
     </div>
   );
 }
-
