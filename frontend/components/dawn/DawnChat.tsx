@@ -4,7 +4,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import CardRenderer from "@/components/dawn/CardRenderer";
 import DawnHeader from "@/components/dawn/DawnHeader";
 import { getDawnInsights, queryDawn } from "@/lib/api";
-import { pushHistory, readContext, resetContext, updateContext } from "@/lib/contextStore";
 import { getRiskTone, getTrustBand } from "@/lib/governance";
 import { getStoredRole } from "@/lib/session";
 import type { DawnAction, DawnCard, DawnResponse, DawnRole } from "@/types/dawn";
@@ -184,6 +183,19 @@ function toCards(payload: any): DawnCard[] {
     ];
   }
 
+  if (intent === "recommend_unit_decision") {
+    const data = payload?.data || {};
+    return [
+      {
+        type: "analytics_card",
+        title: `Decision guidance for Unit ${data?.unitId ?? payload?.summary?.unitId ?? ""}`.trim(),
+        data,
+        why: payload?.assistant || data?.verdict || "Dawn summarized the current decision signals for this unit.",
+        actions: [],
+      },
+    ];
+  }
+
   if (intent === "landlord_remediation_advisor") {
     return [
       {
@@ -246,21 +258,6 @@ function summaryTitle(role: DawnRole | null, summary?: DawnSummary | null) {
   return summary.unitId ? `Unit ${summary.unitId}` : "Role context";
 }
 
-function syncLocalContext(role: DawnRole, payload: any) {
-  if (payload?.intent === "context_reset") {
-    resetContext(role);
-    return;
-  }
-
-  const summary = payload?.summary || {};
-  const context = payload?.context || {};
-  updateContext(role, {
-    lastIntent: payload?.intent || summary?.intent || null,
-    lastUnitId: summary?.unitId ?? context?.unitId ?? null,
-    lastCorridorId: summary?.corridorId ?? context?.corridorId ?? null,
-  });
-}
-
 export default function DawnChat({ open, onClose }: DawnChatProps) {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -288,15 +285,6 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
   }, []);
 
   useEffect(() => {
-    if (!role) return;
-    const stored = readContext(role);
-    const lastPrompt = stored.sessionHistory[stored.sessionHistory.length - 1] || "";
-    if (lastPrompt) {
-      setInput((current) => current || lastPrompt);
-    }
-  }, [role]);
-
-  useEffect(() => {
     let active = true;
     async function bootstrap() {
       if (!open || !role) return;
@@ -305,14 +293,6 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
         const payload = await getDawnInsights();
         if (!active) return;
         setInsightMessage(payload?.assistant || "");
-        syncLocalContext(role, {
-          intent: payload?.summary?.intent || "insights",
-          summary: payload?.summary,
-          context: {
-            unitId: payload?.unit,
-            corridorId: payload?.summary?.corridorId ?? null,
-          },
-        });
         if (Array.isArray(payload?.insights) && payload.insights.length > 0) {
           setBackendPayload(payload);
           setResponse((current) => current || {
@@ -362,6 +342,11 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
     requestAnimationFrame(() => textareaRef.current?.focus());
   }
 
+  function sendPrompt(prompt: string) {
+    setInput(prompt);
+    void handleSubmit(undefined, prompt);
+  }
+
   async function handleSubmit(event?: React.FormEvent, promptOverride?: string) {
     event?.preventDefault();
     const prompt = (promptOverride ?? input).trim();
@@ -372,8 +357,6 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
 
     try {
       const payload = await queryDawn({ message: prompt });
-      pushHistory(role, prompt);
-      syncLocalContext(role, payload);
       setBackendPayload(payload);
       const next = toResponse(payload, role);
       setResponse(next);
@@ -399,8 +382,6 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
         action: backendPayload?.action || null,
       })
         .then((payload) => {
-          pushHistory(role, input.trim() || "confirm complaint");
-          syncLocalContext(role, payload);
           setBackendPayload(payload);
           setResponse(toResponse(payload, role));
         })
@@ -469,7 +450,7 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
                 <button
                   key={prompt}
                   type="button"
-                  onClick={() => fillPrompt(prompt)}
+                  onClick={() => sendPrompt(prompt)}
                   className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
                 >
                   {prompt}
@@ -546,7 +527,7 @@ export default function DawnChat({ open, onClose }: DawnChatProps) {
                   <button
                     key={suggestion}
                     type="button"
-                    onClick={() => fillPrompt(suggestion)}
+                    onClick={() => sendPrompt(suggestion)}
                     className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition hover:border-emerald-300/40 hover:bg-emerald-300/10"
                   >
                     {suggestion}

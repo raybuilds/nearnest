@@ -1,3 +1,16 @@
+function normalizeResponse(text) {
+  const value = String(text || "").trim();
+  if (!value) {
+    return "I couldn’t fully resolve that. Try specifying a unit or corridor.";
+  }
+
+  return value
+    .replace(/Consider/gi, "You should")
+    .replace(/may improve/gi, "will improve")
+    .replace(/^Done\.?$/gi, "Here’s what I found based on your request:")
+    .replace(/^Dawn completed the request\.?$/gi, "Here’s what I found based on your request:");
+}
+
 function formatStudentSearch(result) {
   const recommendations = Array.isArray(result?.data?.recommendations) ? result.data.recommendations : [];
   if (recommendations.length === 0) {
@@ -117,6 +130,16 @@ function formatLandlordRemediationAdvisor(result) {
   return `Here are the highest priority issues to address: Unit ${top.unitId} should be reviewed first for ${String(top.issue || "").toLowerCase()}.`;
 }
 
+function formatUnitDecision(result) {
+  const data = result?.data || {};
+  const verdict = data.verdict || "I couldn’t fully resolve that. Try specifying a unit or corridor.";
+  const recommendation = data.recommendation || "Review this unit before making a decision.";
+  const reasons = Array.isArray(data.reasons) ? data.reasons : [];
+  return [verdict, `Next step: ${recommendation}`, reasons.length > 0 ? `Why: ${reasons.join("; ")}` : ""]
+    .filter(Boolean)
+    .join(" ");
+}
+
 function formatOperationsAdvisor(result) {
   const alerts = Array.isArray(result?.alerts)
     ? result.alerts
@@ -146,6 +169,7 @@ function formatDawnResponse(intent, result) {
   if (intent === "student_complaint") return formatStudentComplaint(result);
   if (intent === "student_unit_health") return formatStudentUnitHealth(result);
   if (intent === "predict_unit_risk") return formatPredictUnitRisk(result);
+  if (intent === "recommend_unit_decision") return formatUnitDecision(result);
   if (intent === "operations_advisor") return formatOperationsAdvisor(result);
   if (intent === "corridor_behavioral_insight") return formatCorridorBehavioralInsight(result);
   if (intent === "landlord_remediation_advisor") return formatLandlordRemediationAdvisor(result);
@@ -153,10 +177,11 @@ function formatDawnResponse(intent, result) {
   if (intent === "admin_density") return formatAdminDensity(result);
   if (intent === "explain_unit_trust") return formatTrustExplanation(result);
   if (intent === "explain_unit_overview") return formatUnitOverview(result);
-  return result?.assistant || "Dawn completed the request.";
+  return result?.assistant || "I couldn’t fully resolve that. Try specifying a unit or corridor.";
 }
 
 module.exports = {
   formatDawnResponse,
+  normalizeResponse,
 };
 

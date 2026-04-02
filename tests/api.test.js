@@ -774,11 +774,29 @@ test("dawn phase-1 intents: student, landlord, and admin flows are reachable and
       body: { message: "Why is it risky?" },
     });
     assert.equal(riskFollowUp.status, 200);
-    assert.equal(riskFollowUp.data.intent, "explain_unit_overview");
+    assert.equal(riskFollowUp.data.intent, "explain_unit_trust");
     assert.equal(riskFollowUp.data.data.unitId, safeUnitId);
-    assert.ok(Object.prototype.hasOwnProperty.call(riskFollowUp.data.data, "trust"));
-    assert.ok(Object.prototype.hasOwnProperty.call(riskFollowUp.data.data, "healthReport"));
-    assert.ok(Object.prototype.hasOwnProperty.call(riskFollowUp.data.data, "riskForecast"));
+    assert.ok(Array.isArray(riskFollowUp.data.data.drivers));
+
+    const safeFollowUp = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Is it safe?" },
+    });
+    assert.equal(safeFollowUp.status, 200);
+    assert.equal(safeFollowUp.data.intent, "explain_unit_trust");
+    assert.equal(safeFollowUp.data.data.unitId, safeUnitId);
+
+    const unitDecision = await api("/dawn/query", {
+      method: "POST",
+      token: studentLogin.data.token,
+      body: { message: "Should I take this?" },
+    });
+    assert.equal(unitDecision.status, 200);
+    assert.equal(unitDecision.data.intent, "recommend_unit_decision");
+    assert.equal(unitDecision.data.data.unitId, safeUnitId);
+    assert.ok(typeof unitDecision.data.data.verdict === "string");
+    assert.ok(typeof unitDecision.data.data.recommendation === "string");
 
     const landlordRecurring = await api("/dawn/query", {
       method: "POST",

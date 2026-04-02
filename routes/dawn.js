@@ -12,7 +12,7 @@ const landlordRemediationAdvisor = require("../services/dawnIntents/landlordReme
 const adminCorridorAnalytics = require("../services/dawnIntents/adminCorridorAnalytics");
 const explainUnitTrust = require("../services/dawnIntents/explainUnitTrust");
 const { clearContext, getContext, updateContext } = require("../services/dawnContextStore");
-const { formatDawnResponse } = require("../services/dawnResponseFormatter");
+const { formatDawnResponse, normalizeResponse } = require("../services/dawnResponseFormatter");
 const { getUnitHealthReport } = require("../services/intelligence/dawnUnitHealthService");
 const { getCorridorInsights } = require("../services/intelligence/dawnCorridorInsightService");
 const { forecastUnitRisk } = require("../services/intelligence/dawnRiskForecastService");
@@ -27,6 +27,7 @@ const intentMap = {
   student_complaint_summary: studentComplaintSummary,
   student_unit_health: studentUnitHealth,
   predict_unit_risk: studentUnitHealth,
+  recommend_unit_decision: recommendUnitDecision,
   operations_advisor: async ({ req, context }) => {
     const alerts = await generateOperationalInsights(req.user.role, req.user.id, {
       callApi: context.callApi,
@@ -194,6 +195,74 @@ async function explainUnitOverview({ req, context }) {
       trustScore: trust?.trustScore ?? healthReport?.trustScore ?? null,
       complaintCount: healthReport?.complaintsLast30Days ?? 0,
       riskLevel: riskForecast?.riskLevel ?? "STABLE",
+    },
+  };
+}
+
+async function recommendUnitDecision({ req, context }) {
+  const explicitUnitId = parseRequestedUnitId(context.message) ?? parseRequestedUnitId(context.text);
+  const unitId = explicitUnitId || context.resolvedContext?.unitId || context.memory?.lastUnitId || null;
+  const corridorId = context.resolvedContext?.corridorId || context.memory?.lastCorridorId || null;
+
+  if (!unitId) {
+    return {
+      message: "I couldn’t fully resolve that. Try specifying a unit or corridor.",
+      data: {
+        missing: "unitId",
+      },
+    };
+  }
+
+  const [trust, healthReport, riskForecast] = await Promise.all([
+    explainTrust(unitId, { callApi: context.callApi }),
+    getUnitHealthReport({
+      unitId,
+      corridorId,
+      callApi: context.callApi,
+    }),
+    forecastUnitRisk(unitId),
+  ]);
+
+  const trustScore = trust?.trustScore ?? healthReport?.trustScore ?? null;
+  const riskLevel = riskForecast?.riskLevel || "STABLE";
+  const reasons = [
+    trustScore !== null && trustScore !== undefined ? `trust score ${trustScore}` : null,
+    Number(healthReport?.complaintsLast30Days || 0) > 0 ? `${healthReport.complaintsLast30Days} complaints in the last 30 days` : null,
+    riskLevel ? `risk level ${riskLevel}` : null,
+  ].filter(Boolean);
+
+  let verdict = "This unit can work, but you should review the flagged risks before choosing it.";
+  let recommendation = "Review the trust breakdown and recent complaint history before choosing this unit.";
+
+  if ((trustScore !== null && trustScore >= 70) && (riskLevel === "LOW" || riskLevel === "STABLE")) {
+    verdict = "Yes, this unit is a strong option based on the current signals.";
+    recommendation = "You should verify the latest complaints and then move ahead if the unit still matches your budget and distance needs.";
+  } else if ((trustScore !== null && trustScore < 45) || riskLevel === "HIGH" || riskLevel === "CRITICAL") {
+    verdict = "No, you should not take this unit until the risk signals improve.";
+    recommendation = "You should choose a safer unit or wait for this unit’s trust and complaint signals to improve.";
+  }
+
+  context.updateMemory({
+    lastIntent: "recommend_unit_decision",
+    lastUnitId: unitId,
+    lastViewedUnitId: unitId,
+    lastKnownTrustScore: trustScore,
+    lastKnownComplaintCount: healthReport?.complaintsLast30Days ?? null,
+    lastKnownRiskLevel: riskLevel,
+  });
+
+  return {
+    message: `Here is the decision guidance for Unit ${unitId}.`,
+    data: {
+      unitId,
+      trustScore,
+      riskLevel,
+      verdict,
+      recommendation,
+      reasons,
+      trust,
+      healthReport,
+      riskForecast,
     },
   };
 }
@@ -604,10 +673,38 @@ function inferIntent(role, message) {
   return "unsupported";
 }
 
+function isFollowUpQuery(query) {
+  return /\b(it|this|that)\b/i.test(String(query || "").trim());
+}
+
+function resolveFollowUpIntent(query, memory) {
+  const text = String(query || "").toLowerCase().trim();
+  if (/risk|safe|trust/i.test(text) && (memory?.lastUnitId || memory?.lastViewedUnitId)) {
+    return {
+      intent: "explain_unit_trust",
+      unitId: memory?.lastUnitId || memory?.lastViewedUnitId || null,
+    };
+  }
+
+  if (/should|take|choose/i.test(text) && (memory?.lastUnitId || memory?.lastViewedUnitId)) {
+    return {
+      intent: "recommend_unit_decision",
+      unitId: memory?.lastUnitId || memory?.lastViewedUnitId || null,
+    };
+  }
+
+  return null;
+}
+
 function inferFollowUpIntent(role, message, memory, resolvedContext) {
   const text = String(message || "").toLowerCase().trim();
   const hasUnitContext = Boolean(resolvedContext?.unitId || memory?.lastUnitId || memory?.lastViewedUnitId);
   const hasCorridorContext = Boolean(resolvedContext?.corridorId || memory?.lastCorridorId);
+
+  const semanticFollowUp = isFollowUpQuery(text) ? resolveFollowUpIntent(text, memory) : null;
+  if (semanticFollowUp?.intent) {
+    return semanticFollowUp.intent;
+  }
 
   const wantsRiskExplanation =
     /why is (it|this|that|my unit|my housing) risky/.test(text) ||
@@ -617,9 +714,17 @@ function inferFollowUpIntent(role, message, memory, resolvedContext) {
     /why is that a problem/.test(text);
 
   if (wantsRiskExplanation) {
-    if (hasUnitContext) return "explain_unit_overview";
+    if (hasUnitContext) return "explain_unit_trust";
     if (role === "admin" && hasCorridorContext) return "admin_density";
     if (hasCorridorContext) return "corridor_behavioral_insight";
+  }
+
+  if (/is it safe|is this safe|is that safe/.test(text) && hasUnitContext) {
+    return "explain_unit_trust";
+  }
+
+  if (/should i take this|should i choose this|should i take it|should i choose it/.test(text) && hasUnitContext) {
+    return "recommend_unit_decision";
   }
 
   if (/see risk forecast|show risk forecast|forecast risk|what is the risk/.test(text) && hasUnitContext) {
@@ -653,7 +758,7 @@ function buildSuggestions(intent, role, result, resolvedContext) {
     0;
 
   if (intent === "student_search") {
-    return ["Explain this unit", "Why is my unit risky?", "Report an issue"];
+    return ["Explain this unit", "Why is it risky?", "Should I take this?"];
   }
   if (intent === "student_complaint") {
     if (result?.requiresConfirmation) return ["Confirm complaint", "Change severity", "Add duration"];
@@ -665,6 +770,9 @@ function buildSuggestions(intent, role, result, resolvedContext) {
       "See trust breakdown",
       "Why is it risky?",
     ];
+  }
+  if (intent === "recommend_unit_decision") {
+    return ["See trust breakdown", "See risk forecast", "Report an issue"];
   }
   if (intent === "explain_unit_trust" || intent === "explain_unit_overview") {
     return ["See risk forecast", "View complaints", role === "student" ? "Report an issue" : "Which units are at risk?"];
@@ -757,7 +865,7 @@ router.get("/dawn/insights", verifyToken, async (req, res) => {
       complaintCount: insightContext.unresolvedComplaints ?? 0,
     };
 
-    const assistant =
+    const assistant = normalizeResponse(
       req.user.role === "student"
         ? summary.complaintCount > 0
           ? `You have ${summary.complaintCount} unresolved complaint${summary.complaintCount === 1 ? "" : "s"} linked to your unit.`
@@ -768,7 +876,8 @@ router.get("/dawn/insights", verifyToken, async (req, res) => {
             : "Your portfolio looks stable right now. I can still check risk and recurring issues."
           : summary.corridorId
             ? `Complaint density is rising around corridor ${summary.corridorId}.`
-            : "I can highlight the corridors and units that need governance attention.";
+            : "I can highlight the corridors and units that need governance attention."
+    );
 
     return res.json({
       role: req.user.role,
@@ -810,7 +919,7 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
       clearContext(userId);
       return res.json({
         intent: "context_reset",
-        assistant: "Context cleared. We can start fresh.",
+        assistant: normalizeResponse("Context cleared. We can start fresh."),
         suggestions: buildSuggestions("context_reset", role, {}, {}),
       });
     }
@@ -835,7 +944,7 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
     if (!handler) {
       return res.json({
         intent: "unsupported",
-        assistant: unsupportedMessageForRole(role),
+        assistant: normalizeResponse("I couldn’t fully resolve that. Try specifying a unit or corridor."),
         suggestions: buildSuggestions("unsupported", role, {}, resolvedContext),
         summary: buildResponseSummary("unsupported", {}, resolvedContext),
       });
@@ -852,8 +961,13 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
     };
 
     const result = await handler({ req, context });
-    const summary = buildResponseSummary(intent, result || {}, resolvedContext);
-    const suggestions = buildSuggestions(intent, role, result || {}, resolvedContext);
+    const normalizedResult = {
+      ...(result || {}),
+      ...(typeof result?.assistant === "string" ? { assistant: normalizeResponse(result.assistant) } : {}),
+      ...(typeof result?.message === "string" ? { message: normalizeResponse(result.message) } : {}),
+    };
+    const summary = buildResponseSummary(intent, normalizedResult || {}, resolvedContext);
+    const suggestions = buildSuggestions(intent, role, normalizedResult || {}, resolvedContext);
 
     updateContext(userId, {
       lastIntent: intent,
@@ -868,10 +982,10 @@ router.post("/dawn/query", verifyToken, async (req, res) => {
       currentActiveComplaints: resolvedContext.activeComplaintsCount,
     });
 
-    const assistant = formatDawnResponse(intent, result || {});
+    const assistant = normalizeResponse(formatDawnResponse(intent, normalizedResult || {}));
     return res.json({
       intent,
-      ...(result || {}),
+      ...(normalizedResult || {}),
       assistant,
       suggestions,
       summary,
