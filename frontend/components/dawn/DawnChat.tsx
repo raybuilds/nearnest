@@ -31,6 +31,41 @@ type SpeechRecognitionConstructor = new () => {
   onend: (() => void) | null;
 };
 
+function scoreVoice(voice: SpeechSynthesisVoice) {
+  const name = String(voice.name || "").toLowerCase();
+  const lang = String(voice.lang || "").toLowerCase();
+  let score = 0;
+
+  if (lang.startsWith("en-in")) score += 60;
+  else if (lang.startsWith("en-gb")) score += 45;
+  else if (lang.startsWith("en-us")) score += 35;
+  else if (lang.startsWith("en")) score += 20;
+
+  if (/female|woman|zira|hazel|susan|samantha|serena|karen|moira|veena|rishi|aria|jenny|salli|sonia/i.test(name)) {
+    score += 70;
+  }
+
+  if (/google uk english female|microsoft zira|microsoft hazel|samantha|susan|serena|aria/i.test(name)) {
+    score += 40;
+  }
+
+  if (/male|david|mark|guy|james|george|richard|ryan/i.test(name)) {
+    score -= 30;
+  }
+
+  if (voice.default) score += 8;
+
+  return score;
+}
+
+function getPreferredDawnVoice() {
+  if (typeof window === "undefined" || !("speechSynthesis" in window)) return null;
+  const voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return null;
+
+  return [...voices].sort((left, right) => scoreVoice(right) - scoreVoice(left))[0] || null;
+}
+
 const STARTER_PROMPTS: Record<DawnRole, string[]> = {
   student: [
     "Find safe rooms under ₹8000",
@@ -406,13 +441,15 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
   const [voiceEnabled, setVoiceEnabled] = useState(false);
   const [listening, setListening] = useState(false);
   const [avatarState, setAvatarState] = useState<DawnAvatarState>("idle");
+  const [speechSupported, setSpeechSupported] = useState(false);
+  const [voiceSupported, setVoiceSupported] = useState(false);
+  const [capabilitiesChecked, setCapabilitiesChecked] = useState(false);
+  const [voiceProfile, setVoiceProfile] = useState("Default");
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<InstanceType<SpeechRecognitionConstructor> | null>(null);
   const speakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldSpeakNextResponseRef = useRef(false);
   const manualStopListeningRef = useRef(false);
-  const speechSupported = Boolean(getSpeechRecognitionConstructor());
-  const voiceSupported = hasSpeechSynthesisSupport();
 
   useEffect(() => {
     const syncRole = () => {
@@ -426,6 +463,31 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
     return () => {
       window.removeEventListener("nearnest:session-changed", syncRole);
       window.removeEventListener("focus", syncRole);
+    };
+  }, []);
+
+  useEffect(() => {
+    setSpeechSupported(Boolean(getSpeechRecognitionConstructor()));
+    setVoiceSupported(hasSpeechSynthesisSupport());
+    setCapabilitiesChecked(true);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !("speechSynthesis" in window)) return;
+
+    const syncVoices = () => {
+      const preferredVoice = getPreferredDawnVoice();
+      setVoiceProfile(preferredVoice?.name || "Default");
+      setVoiceSupported(window.speechSynthesis.getVoices().length > 0 || hasSpeechSynthesisSupport());
+    };
+
+    syncVoices();
+    window.speechSynthesis.onvoiceschanged = syncVoices;
+
+    return () => {
+      if (window.speechSynthesis.onvoiceschanged === syncVoices) {
+        window.speechSynthesis.onvoiceschanged = null;
+      }
     };
   }, []);
 
@@ -499,8 +561,13 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
 
     window.speechSynthesis.cancel();
     const utterance = new SpeechSynthesisUtterance(response.message);
-    utterance.rate = 1;
-    utterance.pitch = 1;
+    const preferredVoice = getPreferredDawnVoice();
+    if (preferredVoice) {
+      utterance.voice = preferredVoice;
+      utterance.lang = preferredVoice.lang;
+    }
+    utterance.rate = 0.96;
+    utterance.pitch = 0.94;
     utterance.volume = 1;
     utterance.onstart = () => setAvatarState("speaking");
     utterance.onend = () => setAvatarState("idle");
@@ -589,6 +656,10 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
   }
 
   function toggleListening() {
+    if (!capabilitiesChecked) {
+      setNotice("Checking voice support...");
+      return;
+    }
     if (!speechSupported) {
       setNotice("Speech input is not supported in this browser.");
       return;
@@ -706,7 +777,6 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
         />
 
         <div className="border-b border-white/8 px-5 py-3">
-          <DawnAvatar state={avatarState} enabled={avatarEnabled} />
           <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Intent queue</p>
           <p className="mt-2 text-sm text-slate-200">{intentSummary}</p>
           {!bootstrapped && role ? <p className="mt-2 text-xs text-slate-400">Loading proactive insights...</p> : null}
@@ -770,6 +840,9 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
             }
             className="mt-3 w-full rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-white outline-none placeholder:text-slate-500"
           />
+          <div className="mt-4">
+            <DawnAvatar state={avatarState} enabled={avatarEnabled} compact />
+          </div>
           <DawnVoiceControls
             avatarEnabled={avatarEnabled}
             voiceEnabled={voiceEnabled}
@@ -778,6 +851,10 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
             voiceSupported={voiceSupported}
             onToggleAvatar={() => setAvatarEnabled((value) => !value)}
             onToggleVoice={() => {
+              if (!capabilitiesChecked) {
+                setNotice("Checking voice support...");
+                return;
+              }
               if (!voiceSupported) {
                 setNotice("Voice output is not supported in this browser.");
                 return;
@@ -789,6 +866,15 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
             }}
             onToggleListening={toggleListening}
           />
+          {capabilitiesChecked && (!speechSupported || !voiceSupported) ? (
+            <p className="mt-3 text-xs text-slate-500">
+              {!speechSupported ? "Mic input is unavailable in this browser. " : ""}
+              {!voiceSupported ? "Voice output is unavailable in this browser." : ""}
+            </p>
+          ) : null}
+          {voiceSupported ? (
+            <p className="mt-2 text-xs text-slate-500">Voice profile: {voiceProfile}</p>
+          ) : null}
           <div className="mt-3 flex items-center justify-between gap-3">
             <p className="text-xs text-slate-400">
               Dawn now guides the next step instead of waiting for perfect phrasing.

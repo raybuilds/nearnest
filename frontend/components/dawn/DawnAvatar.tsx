@@ -5,6 +5,7 @@ type DawnAvatarState = "idle" | "thinking" | "speaking" | "alert" | "listening";
 type DawnAvatarProps = {
   state: DawnAvatarState;
   enabled?: boolean;
+  compact?: boolean;
 };
 
 const STATE_LABELS: Record<DawnAvatarState, string> = {
@@ -15,14 +16,14 @@ const STATE_LABELS: Record<DawnAvatarState, string> = {
   listening: "Listening",
 };
 
-export default function DawnAvatar({ state, enabled = true }: DawnAvatarProps) {
+export default function DawnAvatar({ state, enabled = true, compact = false }: DawnAvatarProps) {
   if (!enabled) return null;
 
   return (
-    <div className="dawn-avatar-shell">
-      <div className={`dawn-avatar dawn-avatar-${state}`} aria-hidden="true">
+    <div className={`dawn-avatar-shell ${compact ? "dawn-avatar-shell-compact" : ""}`}>
+      <div className={`dawn-avatar dawn-avatar-${state} ${compact ? "dawn-avatar-compact" : ""}`} aria-hidden="true">
         <div className="dawn-avatar-halo" />
-        <div className="dawn-avatar-core">
+        <div className={`dawn-avatar-core ${compact ? "dawn-avatar-core-compact" : ""}`}>
           <div className="dawn-avatar-face">
             <span className="dawn-avatar-eye dawn-avatar-eye-left" />
             <span className="dawn-avatar-eye dawn-avatar-eye-right" />
