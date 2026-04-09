@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useMemo, useState } from "react";
-import { inferVisibilityReasons, getRiskTone, getStatusTone, getTrustBand } from "@/lib/governance";
+import { inferVisibilityReasons, getRiskTone, getTrustBand } from "@/lib/governance";
 import { shortlistUnit } from "@/lib/api";
 
 export default function UnitCard({ unit, onShortlist, showForStudent = false, compact = false }) {
@@ -14,9 +14,35 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
   const visibilityReasons = useMemo(() => inferVisibilityReasons(unit), [unit]);
   const unitId = unit?.unitId || unit?.id;
   const complaintCount = Number(unit?.activeComplaints || unit?.complaintSummary?.activeComplaints || unit?.openIssues || 0);
+  const capacity = Number(unit?.capacity || unit?.availability?.capacity || 0);
+  const availableSlots = Number(unit?.availableSlots || unit?.availability?.availableSlots || 0);
+  const rent = Number(unit?.rent || 0);
   const riskLevel =
     unit?.riskLevel ||
     (unit?.auditRequired ? "Critical" : complaintCount >= 3 ? "Warning" : Number(unit?.trustScore || 0) >= 75 ? "Stable" : "Warning");
+  const trustScore = Number(unit?.trustScore || 0);
+  const trustContext =
+    trustScore >= 90
+      ? "Top 10% in corridor"
+      : trustScore >= 80
+        ? "Higher than most nearby units"
+        : trustScore >= 70
+          ? "Steady compared with nearby units"
+          : "Below stronger nearby units";
+  const visibilitySummary = unit?.auditRequired
+    ? "Governance review required. Access may stay limited until audits clear."
+    : trustScore >= 80 && complaintCount <= 1
+      ? "Governance checks clear. Trust remains high."
+      : complaintCount >= 3
+        ? "Complaint pressure is elevated. Visibility may tighten."
+        : visibilityReasons[0] || "Governance signals are stable right now.";
+  const compactSignals = [
+    unit?.status === "approved" ? "Approved" : unit?.status || null,
+    trustScore >= 80 ? "High trust" : trustScore >= 65 ? "Stable trust" : "Watch trust",
+    riskLevel?.toLowerCase() === "stable" ? "Low risk" : `${riskLevel} risk`,
+    unit?.ac ? "AC" : null,
+  ].filter(Boolean);
+  const ctaLabel = unit?.visibleToStudents === false ? "Request Access" : "Express Interest";
 
   if (!unit || (showForStudent && unit.visibleToStudents === false)) {
     return null;
@@ -42,84 +68,114 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
 
   return (
     <Link href={`/unit/${unitId}`} prefetch={false} className="glass-panel blueprint-border group flex h-full flex-col overflow-hidden p-5 transition hover:-translate-y-1">
-      <div className="flex items-start justify-between gap-3">
-        <div>
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
           <div className="eyebrow mb-3">Unit {unitId}</div>
-          <h3 className="text-xl font-semibold" style={{ color: "var(--text-main)" }}>
+          <h3 className="text-xl font-semibold leading-tight sm:text-[1.4rem]" style={{ color: "var(--text-main)" }}>
             {unit?.name || `Governed Unit ${unitId}`}
           </h3>
-          <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+          <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
             {unit?.occupancyType || "Student housing"} / {Number(unit?.distanceKm || 0).toFixed(1)} km from demand corridor
           </p>
         </div>
-        <div className="text-right">
+        <div className="min-w-[8.5rem] text-right">
           <p className="text-xs uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
             Trust score
           </p>
-          <strong className="mt-1 block text-3xl" style={{ color: "var(--text-main)" }}>
-            {Number(unit?.trustScore || 0)}
+          <strong className="mt-1 block text-4xl font-semibold leading-none sm:text-[2.75rem]" style={{ color: "var(--text-main)" }}>
+            {trustScore}
           </strong>
-          <span className={`signal-chip mt-2 ${trust.tone}`}>{trust.label}</span>
+          <p className="mt-2 text-xs leading-5" style={{ color: "var(--text-muted)" }}>
+            {trustContext}
+          </p>
+          <div className="mt-3 inline-flex items-center gap-2">
+            <span className={`signal-chip ${trust.tone}`}>{trust.label}</span>
+          </div>
         </div>
       </div>
 
-      <div className="mt-5 trust-track">
-        <div className={`trust-fill ${trust.fillClass}`} style={{ width: `${Math.min(Number(unit?.trustScore || 0), 100)}%` }} />
+      <div className="mt-6 trust-track">
+        <div className={`trust-fill ${trust.fillClass}`} style={{ width: `${Math.min(trustScore, 100)}%` }} />
       </div>
 
-      <div className="mt-5 flex flex-wrap gap-2">
-        <span className={`signal-chip ${getStatusTone(unit?.status)}`}>{unit?.status || "unknown status"}</span>
-        <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel} risk</span>
-        {unit?.auditRequired ? <span className="signal-chip signal-danger">Audit required</span> : null}
-        {unit?.ac ? <span className="signal-chip signal-info">AC</span> : null}
-      </div>
-
-      <div className={`mt-5 grid gap-3 ${compact ? "sm:grid-cols-2" : "sm:grid-cols-4"}`}>
-        {[
-          { label: "Complaints", value: complaintCount },
-          { label: "Capacity", value: Number(unit?.capacity || unit?.availability?.capacity || 0) },
-          { label: "Available", value: Number(unit?.availableSlots || unit?.availability?.availableSlots || 0) },
-          { label: "Rent", value: `Rs ${Number(unit?.rent || 0)}` },
-        ].map((item) => (
-          <div key={item.label} className="rounded-2xl p-3" style={{ border: "1px solid var(--border)", background: "var(--bg-soft)" }}>
-            <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>
-              {item.label}
-            </p>
-            <strong className="mt-2 block text-xl" style={{ color: "var(--text-main)" }}>
-              {item.value}
-            </strong>
-          </div>
+      <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" style={{ color: "var(--text-muted)" }}>
+        {compactSignals.map((signal, index) => (
+          <span key={signal} className="inline-flex items-center">
+            {index > 0 ? <span className="mr-2" style={{ color: "var(--text-soft)" }}>|</span> : null}
+            <span>{signal}</span>
+          </span>
         ))}
       </div>
 
-      <div className="mt-5 rounded-[24px] p-4" style={{ border: "1px solid var(--border)", background: "var(--bg-soft)" }}>
-        <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
-          Why visible or hidden
-        </p>
-        <div className="mt-3 grid gap-2">
-          {visibilityReasons.length ? (
-            visibilityReasons.slice(0, compact ? 2 : 3).map((reason) => (
-              <div key={reason} className="flex items-start gap-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
-                <span className="mt-2 h-1.5 w-1.5 rounded-full" style={{ background: "var(--accent-teal)" }} />
-                <span>{reason}</span>
-              </div>
-            ))
-          ) : (
-            <p className="text-sm leading-6" style={{ color: "var(--text-muted)" }}>
-              Visibility rationale will appear here once governance signals are available.
+      <div className={`mt-6 grid gap-3 ${compact ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
+        <div className="rounded-[24px] p-4" style={{ border: "1px solid var(--border)", background: "var(--bg-soft)" }}>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
+              Operational
             </p>
-          )}
+            <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel === "Stable" ? "Low risk" : `${riskLevel} risk`}</span>
+          </div>
+          <div className="mt-3 grid grid-cols-3 gap-2">
+            {[
+              { label: "Complaints", value: complaintCount },
+              { label: "Capacity", value: capacity },
+              { label: "Available", value: availableSlots },
+            ].map((item) => (
+              <div key={item.label} className="rounded-2xl px-3 py-2.5" style={{ background: "var(--bg-soft-strong)" }}>
+                <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>
+                  {item.label}
+                </p>
+                <strong className="mt-1.5 block text-lg" style={{ color: "var(--text-main)" }}>
+                  {item.value}
+                </strong>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="rounded-[24px] p-4" style={{ border: "1px solid var(--border)", background: "var(--bg-soft)" }}>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
+            Financial
+          </p>
+          <div className="mt-3 rounded-2xl px-3 py-2.5" style={{ background: "var(--bg-soft-strong)" }}>
+            <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>
+              Rent
+            </p>
+            <strong className="mt-1.5 block text-2xl" style={{ color: "var(--text-main)" }}>
+              Rs {rent}
+            </strong>
+            <p className="mt-1 text-xs leading-5" style={{ color: "var(--text-muted)" }}>
+              Decision cue: {trustScore >= 80 ? "strong trust posture" : "review governance signals first"}
+            </p>
+          </div>
         </div>
       </div>
 
+      <div className="mt-5 flex items-start gap-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+        <span className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-xs" style={{ background: "var(--bg-soft-strong)", color: "var(--text-main)" }}>
+          {unit?.auditRequired || complaintCount >= 3 ? "!" : "i"}
+        </span>
+        <p className="min-w-0">
+          <span className="font-medium" style={{ color: "var(--text-main)" }}>
+            {unit?.auditRequired || complaintCount >= 3 ? "Attention:" : "Visible now:"}
+          </span>{" "}
+          {visibilitySummary}
+        </p>
+      </div>
+
       {showForStudent ? (
-        <div className="mt-5 flex flex-wrap items-center gap-3">
-          <button className="btn-primary" disabled={submitting} onClick={handleShortlist} type="button">
-            {submitting ? "Recording..." : "Shortlist"}
-          </button>
-          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+        <div className="mt-6 flex flex-wrap items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <button className="btn-primary w-full sm:w-auto" disabled={submitting} onClick={handleShortlist} type="button">
+              {submitting ? "Recording..." : ctaLabel}
+            </button>
+            <p className="mt-2 text-xs leading-5" style={{ color: "var(--text-muted)" }}>
+              No booking yet. This helps unlock access.
+            </p>
+          </div>
+          <div className="pt-1 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
             Demand-gated interest only. This is not a marketplace booking flow.
-          </span>
+          </div>
         </div>
       ) : null}
 
