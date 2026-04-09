@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import CardRenderer from "@/components/dawn/CardRenderer";
 import DawnAvatar from "@/components/dawn/DawnAvatar";
-import DawnHeader from "@/components/dawn/DawnHeader";
 import DawnVoiceControls from "@/components/dawn/DawnVoiceControls";
 import { getDawnInsights, queryDawn, speakDawn } from "@/lib/api";
 import { getRiskTone, getTrustBand } from "@/lib/governance";
@@ -468,6 +467,7 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
   const [capabilitiesChecked, setCapabilitiesChecked] = useState(false);
   const [voiceProfile, setVoiceProfile] = useState("indian_en_female");
   const [activeVoiceLabel, setActiveVoiceLabel] = useState("System fallback");
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const recognitionRef = useRef<InstanceType<SpeechRecognitionConstructor> | null>(null);
   const speakingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -533,6 +533,7 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
       recognitionRef.current?.stop();
       setListening(false);
       setAvatarState("idle");
+      setSettingsOpen(false);
     }
   }, [open]);
 
@@ -591,12 +592,16 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
   const trustBand = summary?.trustScore !== null && summary?.trustScore !== undefined ? getTrustBand(summary.trustScore) : null;
   const nextSuggestions = response?.suggestions?.length ? response.suggestions : starterPrompts;
   const hasResponse = Boolean(response);
+  const leadingAlertCard = response?.intents?.includes("operations_advisor") && response?.cards?.length ? response.cards[0] : null;
+  const remainingCards = leadingAlertCard ? response?.cards?.slice(1) || [] : response?.cards || [];
 
   const intentSummary = useMemo(() => {
     if (loading) return "Reviewing the latest housing signals";
     if (response?.intents?.length) return response.intents.join(", ");
     return "Guided assistant ready";
   }, [loading, response]);
+
+  const onlineLabel = loading ? "Reviewing" : "Online";
 
   function fillPrompt(prompt: string) {
     setInput(prompt);
@@ -841,74 +846,102 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
 
   return (
     <div
-      className={`fixed bottom-24 right-4 z-50 w-[min(94vw,34rem)] transition duration-300 sm:right-6 ${
+      className={`fixed bottom-24 right-4 z-50 w-[min(94vw,40rem)] transition duration-300 sm:right-6 ${
         open ? "pointer-events-auto translate-y-0 opacity-100" : "pointer-events-none translate-y-6 opacity-0"
       }`}
     >
-      <div className="flex max-h-[82vh] flex-col overflow-hidden rounded-[32px] border border-white/12 bg-[linear-gradient(180deg,rgba(15,18,34,0.97),rgba(10,12,24,0.99))] shadow-[0_30px_80px_rgba(0,0,0,0.45)] backdrop-blur-2xl">
-        <DawnHeader
-          roleLabel={roleLabel}
-          rightSlot={
-            voiceEnabled ? (
-              <span className="rounded-full border border-emerald-300/30 bg-emerald-300/10 px-3 py-1 text-[11px] uppercase tracking-[0.2em] text-emerald-100">
-                Voice on
-              </span>
-            ) : null
-          }
-        />
-
-        <div className="border-b border-white/8 px-5 py-4">
-          <div className="mx-auto flex max-w-[30rem] items-start justify-between gap-4">
-            <div>
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Session status</p>
-              <p className="mt-2 text-sm text-slate-200">{intentSummary}</p>
-              {!bootstrapped && role ? <p className="mt-2 text-xs text-slate-400">Loading proactive insights...</p> : null}
-              {insightMessage ? <p className="mt-2 text-xs text-emerald-200">{insightMessage}</p> : null}
-            </div>
-            {summary ? (
-              <div className="hidden min-w-[9rem] rounded-2xl border border-white/8 bg-white/5 px-4 py-3 sm:block">
-                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">{summaryTitle(role, summary)}</p>
-                <p className="mt-2 text-lg font-semibold text-white">{summary.trustScore ?? "--"}</p>
-                <p className="mt-1 text-xs text-slate-400">Trust score</p>
+      <div className="dawn-panel flex max-h-[82vh] flex-col overflow-hidden">
+        <div className="px-5 py-4" style={{ borderBottom: "1px solid var(--border)" }}>
+          <div className="mx-auto flex max-w-xl items-center justify-between gap-4">
+            <div className="min-w-0">
+              <div className="flex items-center gap-2">
+                <p className="font-[family:var(--font-display)] text-xl" style={{ color: "var(--text-main)" }}>Dawn</p>
+                <span className="text-sm" style={{ color: "var(--accent-teal)" }}>Online {onlineLabel === "Reviewing" ? "/ reviewing" : ""}</span>
               </div>
-            ) : null}
+              <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>{intentSummary}</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="rounded-full px-3 py-1 text-[11px] uppercase tracking-[0.22em]" style={{ border: "1px solid var(--border)", color: "var(--text-muted)" }}>
+                {roleLabel}
+              </span>
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setSettingsOpen((value) => !value)}
+                  className="rounded-full px-3 py-2 text-sm transition"
+                  style={{ border: "1px solid var(--border)", color: "var(--text-main)", background: "var(--bg-soft)" }}
+                  aria-label="Dawn settings"
+                >
+                  Settings
+                </button>
+                {settingsOpen ? (
+                  <div className="absolute right-0 top-12 z-10 w-72">
+                    <DawnVoiceControls
+                      avatarEnabled={avatarEnabled}
+                      voiceEnabled={voiceEnabled}
+                      voiceProfile={voiceProfile}
+                      listening={listening}
+                      speechSupported={speechSupported}
+                      voiceSupported={voiceSupported}
+                      onToggleAvatar={() => setAvatarEnabled((value) => !value)}
+                      onToggleVoice={() => {
+                        if (!capabilitiesChecked) {
+                          setNotice("Checking voice support...");
+                          return;
+                        }
+                        if (!voiceSupported) {
+                          setNotice("Voice output is not supported in this browser.");
+                          return;
+                        }
+                        setVoiceEnabled((value) => {
+                          if (value) cancelSpeech();
+                          return !value;
+                        });
+                      }}
+                      onToggleListening={toggleListening}
+                      onVoiceProfileChange={setVoiceProfile}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            </div>
           </div>
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-          <div className="mx-auto flex max-w-[30rem] flex-col gap-5">
+          <div className="mx-auto flex max-w-xl flex-col gap-6">
             {summary ? (
-              <section className="rounded-2xl border border-white/8 bg-white/[0.03] p-4 shadow-md shadow-black/20">
+              <section className="rounded-2xl p-4" style={{ background: "var(--bg-soft)", border: "1px solid var(--border)" }}>
                 <div className="mb-4 flex items-center justify-between gap-3">
                   <div>
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">{summaryTitle(role, summary)}</p>
-                    <p className="mt-2 text-sm text-slate-300">Current context</p>
+                    <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>{summaryTitle(role, summary)}</p>
+                    <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>Current context</p>
                   </div>
                   {trustBand ? <span className={`signal-chip ${trustBand.tone}`}>{trustBand.label}</span> : null}
                 </div>
                 <div className="grid grid-cols-3 gap-3">
-                  <div className="rounded-xl border border-white/8 bg-black/10 px-4 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Trust</p>
-                    <p className="mt-2 text-lg font-semibold text-white">{summary.trustScore ?? "--"}</p>
+                  <div className="rounded-xl px-4 py-3" style={{ background: "var(--bg-soft-strong)" }}>
+                    <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Trust</p>
+                    <p className="mt-2 text-lg font-semibold" style={{ color: "var(--text-main)" }}>{summary.trustScore ?? "--"}</p>
                   </div>
-                  <div className="rounded-xl border border-white/8 bg-black/10 px-4 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Risk</p>
+                  <div className="rounded-xl px-4 py-3" style={{ background: "var(--bg-soft-strong)" }}>
+                    <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Risk</p>
                     <div className="mt-2">
                       <span className={`signal-chip ${getRiskTone(summary.riskLevel || "info")}`}>{summary.riskLevel || "--"}</span>
                     </div>
                   </div>
-                  <div className="rounded-xl border border-white/8 bg-black/10 px-4 py-3">
-                    <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Complaints</p>
-                    <p className="mt-2 text-lg font-semibold text-white">{summary.complaintCount ?? "--"}</p>
+                  <div className="rounded-xl px-4 py-3" style={{ background: "var(--bg-soft-strong)" }}>
+                    <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Complaints</p>
+                    <p className="mt-2 text-lg font-semibold" style={{ color: "var(--text-main)" }}>{summary.complaintCount ?? "--"}</p>
                   </div>
                 </div>
               </section>
             ) : null}
 
             {!hasResponse && !loading ? (
-              <section className="rounded-2xl border border-white/8 bg-white/[0.03] p-5 shadow-md shadow-black/20">
-                <p className="font-[family:var(--font-display)] text-2xl text-white">Ask Dawn anything about your housing</p>
-                <p className="mt-3 text-sm leading-6 text-slate-300">
+              <section className="rounded-2xl p-5" style={{ background: "var(--bg-soft)", border: "1px solid var(--border)" }}>
+                <p className="font-[family:var(--font-display)] text-2xl" style={{ color: "var(--text-main)" }}>Ask Dawn anything about your housing</p>
+                <p className="mt-3 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
                   Use a prompt below or type your own question. Dawn can explain trust, surface risk, guide complaints, and recommend next steps.
                 </p>
                 <div className="mt-4 flex flex-wrap gap-2">
@@ -917,148 +950,159 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
                       key={prompt}
                       type="button"
                       onClick={() => sendPrompt(prompt)}
-                      className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
+                      className="rounded-full px-3 py-2 text-sm transition"
+                      style={{ border: "1px solid var(--border)", background: "var(--bg-soft-strong)", color: "var(--text-main)" }}
                     >
                       {prompt}
                     </button>
-                  )) : <span className="text-sm text-slate-500">Sign in to unlock Dawn prompts.</span>}
+                  )) : <span className="text-sm" style={{ color: "var(--text-soft)" }}>Sign in to unlock Dawn prompts.</span>}
                 </div>
               </section>
             ) : null}
 
             {notice ? (
-              <div className="rounded-2xl border border-amber-300/20 bg-amber-400/10 px-4 py-3 text-sm text-amber-100">
+              <div className="rounded-2xl px-4 py-3 text-sm" style={{ background: "rgba(242,198,125,0.12)", color: "var(--text-main)" }}>
                 {notice}
               </div>
             ) : null}
 
-            <section className="rounded-2xl border border-white/8 bg-white/[0.03] p-5 shadow-md shadow-black/20">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">{conversationLabel(response)}</p>
-                  <p className="mt-2 font-[family:var(--font-display)] text-2xl text-white">Dawn says</p>
-                </div>
-                <DawnAvatar state={avatarState} enabled={avatarEnabled} compact />
-              </div>
-              <div className="mt-4 rounded-xl border border-white/8 bg-black/10 px-4 py-4">
-                {loading ? (
-                  <div className="space-y-3">
-                    {typingDots()}
-                    <p className="text-sm text-slate-300">Reviewing trust, risk, and operational signals...</p>
+            {leadingAlertCard ? (
+              <section className="rounded-2xl px-4 py-4" style={{ background: "rgba(242,198,125,0.1)", border: "1px solid rgba(242,198,125,0.18)" }}>
+                <div className="flex items-start gap-3">
+                  {avatarEnabled ? <DawnAvatar state="alert" enabled compact /> : null}
+                  <div className="min-w-0">
+                    <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Alert</p>
+                    <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-main)" }}>{leadingAlertCard.why}</p>
+                    {leadingAlertCard.actions.length > 0 ? (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {leadingAlertCard.actions.map((action) => (
+                          <button
+                            key={`${leadingAlertCard.title}-${action.label}`}
+                            type="button"
+                            onClick={() => handleAction(action)}
+                            className="rounded-full px-3 py-2 text-sm transition"
+                            style={{ border: "1px solid var(--border)", background: "var(--bg-soft-strong)", color: "var(--text-main)" }}
+                          >
+                            {action.label}
+                          </button>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
-                ) : (
-                  <p className="text-sm leading-7 text-slate-200">
-                    {response?.message || "Dawn is ready when you are."}
+                </div>
+              </section>
+            ) : null}
+
+            <section className="space-y-4">
+              <div className="flex items-start gap-3">
+                {avatarEnabled ? <DawnAvatar state={avatarState} enabled compact /> : null}
+                <div className="min-w-0 flex-1 rounded-2xl px-4 py-4" style={{ background: "var(--bg-soft)", border: "1px solid var(--border)" }}>
+                  <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>{conversationLabel(response)}</p>
+                  <p className="mt-3 text-sm leading-7" style={{ color: "var(--text-main)" }}>
+                    {loading ? "" : response?.message || "Dawn is ready when you are."}
                   </p>
-                )}
+                  {loading ? (
+                    <div className="space-y-3">
+                      {typingDots()}
+                      <p className="text-sm" style={{ color: "var(--text-muted)" }}>Reviewing trust, risk, and operational signals...</p>
+                    </div>
+                  ) : null}
+                </div>
               </div>
 
-              {response ? (
-                <div className="mt-5">
-                  <CardRenderer cards={response.cards} loading={loading} onAction={handleAction} />
+              {response && remainingCards.length > 0 ? (
+                <div className="ml-0 sm:ml-[3.25rem] max-w-[34rem]">
+                  <CardRenderer cards={remainingCards} loading={loading} onAction={handleAction} />
                 </div>
               ) : null}
 
-              <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-4">
-                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Suggested next steps</p>
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {nextSuggestions.length > 0 ? (
-                    nextSuggestions.map((suggestion) => (
-                      <button
-                        key={suggestion}
-                        type="button"
-                        onClick={() => sendPrompt(suggestion)}
-                        className="rounded-full border border-white/10 bg-white/5 px-3 py-2 text-sm text-slate-200 transition hover:border-emerald-300/40 hover:bg-emerald-300/10"
-                      >
-                        {suggestion}
-                      </button>
-                    ))
-                  ) : (
-                    <span className="text-sm text-slate-500">Dawn will suggest follow-up actions after the first response.</span>
-                  )}
-                </div>
+              <div className="ml-0 flex flex-wrap gap-2 sm:ml-[3.25rem]">
+                {nextSuggestions.length > 0 ? (
+                  nextSuggestions.map((suggestion) => (
+                    <button
+                      key={suggestion}
+                      type="button"
+                      onClick={() => sendPrompt(suggestion)}
+                      className="rounded-full px-3 py-2 text-sm transition"
+                      style={{ border: "1px solid var(--border)", background: "var(--bg-soft-strong)", color: "var(--text-main)" }}
+                    >
+                      {suggestion}
+                    </button>
+                  ))
+                ) : (
+                  <span className="text-sm" style={{ color: "var(--text-soft)" }}>Dawn will suggest follow-up actions after the first response.</span>
+                )}
               </div>
             </section>
           </div>
         </div>
 
-        <form onSubmit={handleSubmit} className="border-t border-white/8 bg-[rgba(9,12,24,0.96)] px-5 py-4 backdrop-blur-xl">
-          <div className="mx-auto max-w-[30rem] space-y-4">
+        <form onSubmit={handleSubmit} className="px-5 py-4 backdrop-blur-xl" style={{ borderTop: "1px solid var(--border)", background: "color-mix(in srgb, var(--bg-surface-strong) 96%, transparent)" }}>
+          <div className="mx-auto max-w-xl space-y-3">
             <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Ask Dawn</p>
-                <p className="mt-1 text-sm text-slate-300">Type a question or use voice to start a guided response.</p>
+              <div className="min-w-0">
+                <p className="text-sm" style={{ color: "var(--text-main)" }}>Ask Dawn anything...</p>
+                {!bootstrapped && role ? <p className="mt-1 text-xs" style={{ color: "var(--text-soft)" }}>Loading proactive insights...</p> : null}
+                {insightMessage ? <p className="mt-1 text-xs" style={{ color: "var(--accent-teal)" }}>{insightMessage}</p> : null}
               </div>
               <button
                 type="button"
                 onClick={onClose}
-                className="rounded-full border border-white/10 px-3 py-2 text-sm text-slate-200"
+                className="rounded-full px-3 py-2 text-sm"
+                style={{ border: "1px solid var(--border)", color: "var(--text-main)" }}
               >
                 Close
               </button>
             </div>
 
-            <DawnVoiceControls
-              avatarEnabled={avatarEnabled}
-              voiceEnabled={voiceEnabled}
-              voiceProfile={voiceProfile}
-              listening={listening}
-              speechSupported={speechSupported}
-              voiceSupported={voiceSupported}
-              onToggleAvatar={() => setAvatarEnabled((value) => !value)}
-              onToggleVoice={() => {
-                if (!capabilitiesChecked) {
-                  setNotice("Checking voice support...");
-                  return;
-                }
-                if (!voiceSupported) {
-                  setNotice("Voice output is not supported in this browser.");
-                  return;
-                }
-                setVoiceEnabled((value) => {
-                  if (value) cancelSpeech();
-                  return !value;
-                });
-              }}
-              onToggleListening={toggleListening}
-              onVoiceProfileChange={setVoiceProfile}
-            />
-
-            <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-3">
+            <div className="rounded-[28px] p-3" style={{ background: "var(--bg-soft)", border: "1px solid var(--border)" }}>
               <textarea
                 ref={textareaRef}
                 value={input}
                 onChange={(event) => setInput(event.target.value)}
-                rows={4}
+                rows={3}
                 placeholder={
                   role
-                    ? "Ask Dawn to explain trust, forecast risk, guide a complaint, or recommend your next step"
+                    ? "Ask Dawn anything..."
                     : "Sign in as Student, Landlord, or Admin to use Dawn"
                 }
-                className="w-full rounded-2xl border border-white/10 bg-black/10 px-4 py-4 text-base text-white outline-none placeholder:text-slate-500"
+                className="w-full resize-none rounded-2xl bg-transparent px-3 py-3 text-base outline-none placeholder:text-slate-500"
+                style={{ color: "var(--text-main)" }}
               />
-              <div className="mt-3 flex items-center justify-between gap-3">
+              <div className="mt-2 flex items-center justify-between gap-3">
                 <div className="space-y-1">
                   {capabilitiesChecked && (!speechSupported || !voiceSupported) ? (
-                    <p className="text-xs text-slate-500">
+                    <p className="text-xs" style={{ color: "var(--text-soft)" }}>
                       {!speechSupported ? "Mic input is unavailable in this browser. " : ""}
                       {!voiceSupported ? "Voice output is unavailable in this browser." : ""}
                     </p>
                   ) : (
-                    <p className="text-xs text-slate-400">
-                      Dawn now guides the next step instead of waiting for perfect phrasing.
-                      {listening ? " Voice input is active." : ""}
+                    <p className="text-xs" style={{ color: "var(--text-soft)" }}>
+                      Calm, guided answers with contextual follow-ups.
+                      {listening ? " Listening now." : ""}
                     </p>
                   )}
-                  {voiceSupported ? <p className="text-xs text-slate-500">AI voice: {activeVoiceLabel}</p> : null}
+                  {voiceEnabled && voiceSupported ? <p className="text-xs" style={{ color: "var(--text-soft)" }}>AI voice: {activeVoiceLabel}</p> : null}
                 </div>
-                <button
-                  type="submit"
-                  disabled={!role || loading}
-                  className="rounded-full bg-[linear-gradient(135deg,rgba(160,120,255,0.95),rgba(82,188,255,0.95),rgba(125,255,218,0.95))] px-5 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading ? "Analyzing" : "Send"}
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={toggleListening}
+                    disabled={!speechSupported}
+                    className="rounded-full px-3 py-3 text-sm transition disabled:cursor-not-allowed disabled:opacity-50"
+                    style={{ border: "1px solid var(--border)", color: "var(--text-main)", background: "var(--bg-soft-strong)" }}
+                    aria-label={listening ? "Stop listening" : "Start listening"}
+                  >
+                    {listening ? "Stop" : "Mic"}
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={!role || loading}
+                    className="rounded-full bg-[linear-gradient(135deg,rgba(160,120,255,0.95),rgba(82,188,255,0.95),rgba(125,255,218,0.95))] px-5 py-3 text-sm font-semibold text-slate-950 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loading ? "..." : "Send"}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

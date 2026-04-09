@@ -25,10 +25,27 @@ export default function DawnLauncher() {
       <button
         type="button"
         onClick={() => setOpen((value) => !value)}
-        className="fixed bottom-6 right-4 z-50 flex h-16 w-16 items-center justify-center rounded-full bg-[linear-gradient(135deg,rgba(160,120,255,0.95),rgba(82,188,255,0.95),rgba(125,255,218,0.95))] text-2xl font-semibold text-slate-950 shadow-[0_18px_45px_rgba(82,188,255,0.35)] transition hover:scale-[1.03] sm:right-6"
+        className="fixed bottom-6 right-4 z-50 overflow-hidden rounded-[26px] border border-white/10 transition hover:-translate-y-1 sm:right-6"
+        style={{
+          background:
+            "radial-gradient(circle at top right, rgba(130,202,255,0.24), transparent 38%), linear-gradient(135deg, rgba(12,28,34,0.96), rgba(8,18,24,0.98))",
+          boxShadow: "0 24px 60px rgba(3, 10, 14, 0.28)",
+        }}
         aria-label="Open Dawn"
       >
-        D
+        <span className="flex h-16 w-[13.25rem] items-center justify-between px-4">
+          <span className="grid h-11 w-11 place-items-center rounded-full bg-[linear-gradient(135deg,var(--accent-mint),var(--accent-cyan),#d9fff4)] text-base font-bold" style={{ color: "var(--text-inverse)" }}>
+            D
+          </span>
+          <span className="text-left">
+            <span className="block text-[10px] font-semibold uppercase tracking-[0.28em]" style={{ color: "var(--text-soft)" }}>
+              NearNest AI
+            </span>
+            <span className="block text-sm font-semibold" style={{ color: "var(--text-main)" }}>
+              Dawn Assistant
+            </span>
+          </span>
+        </span>
       </button>
     </>
   );

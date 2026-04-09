@@ -19,16 +19,31 @@ export const metadata = {
 };
 
 export default function RootLayout({ children }) {
+  const themeScript = `
+    (() => {
+      try {
+        const stored = window.localStorage.getItem("nearnest-theme");
+        const system = window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+        const theme = stored === "light" || stored === "dark" ? stored : system;
+        document.documentElement.dataset.theme = theme;
+      } catch {
+        document.documentElement.dataset.theme = "dark";
+      }
+    })();
+  `;
+
   return (
     <html
       lang="en"
+      suppressHydrationWarning
       style={{
         "--font-display": displayFont.style.fontFamily,
         "--font-body": bodyFont.style.fontFamily,
       }}
     >
       <body>
-        <div className="relative min-h-screen pb-20">
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <div className="app-frame relative min-h-screen pb-24">
           <Navbar />
           <main className="page-shell pt-8 pb-8 sm:pt-10">{children}</main>
           <DawnLauncher />

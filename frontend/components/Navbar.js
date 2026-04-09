@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { getRoleClass } from "@/lib/governance";
 import { clearSession, getStoredRole, getStoredUser } from "@/lib/session";
+import ThemeToggle from "@/components/ThemeToggle";
 
 const publicLinks = [
   { href: "/login", label: "Login" },
@@ -81,8 +82,13 @@ export default function Navbar() {
             key={item.href}
             href={item.href}
             className={`rounded-2xl px-4 py-2 text-sm transition ${
-              active ? "bg-white/10 text-white shadow-glow" : "text-slate-300 hover:bg-white/5 hover:text-white"
+              active ? "shadow-glow" : ""
             }`}
+            style={
+              active
+                ? { background: "var(--bg-soft-strong)", color: "var(--text-main)" }
+                : { color: "var(--text-muted)" }
+            }
           >
             {item.label}
           </Link>
@@ -92,16 +98,18 @@ export default function Navbar() {
   );
 
   return (
-    <header className="sticky top-0 z-50 border-b border-white/10 bg-[rgba(11,13,24,0.72)] backdrop-blur-2xl">
-      <div className="page-shell flex min-h-[78px] items-center justify-between gap-4">
+    <header className="nav-shell sticky top-0 z-50">
+      <div className="page-shell flex min-h-[84px] items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <Link href="/" className="flex items-center gap-3">
-            <span className="h-3 w-3 rounded-full bg-gradient-to-br from-violet-300 via-sky-300 to-emerald-200 shadow-[0_0_26px_rgba(99,179,255,0.6)]" />
+            <span className="h-3.5 w-3.5 rounded-full bg-[linear-gradient(135deg,var(--accent-mint),var(--accent-cyan),#d9fff4)] shadow-[0_0_28px_rgba(70,209,189,0.45)]" />
             <div className="flex flex-col">
               <span className="text-lg font-semibold text-gradient" style={{ fontFamily: "var(--font-display)" }}>
                 NearNest
               </span>
-              <span className="text-[10px] uppercase tracking-[0.24em] text-slate-500">Trust Governance Platform</span>
+              <span className="text-[10px] uppercase tracking-[0.28em]" style={{ color: "var(--text-soft)" }}>
+                Student housing trust platform
+              </span>
             </div>
           </Link>
 
@@ -109,16 +117,17 @@ export default function Navbar() {
         </div>
 
         <div className="hidden items-center gap-3 lg:flex">
+          <ThemeToggle />
           {role ? (
             <>
               <span className={getRoleClass(role)}>{role}</span>
-              <div className="flex items-center gap-3 rounded-full border border-white/10 bg-white/5 px-2 py-1.5">
-                <div className="grid h-9 w-9 place-items-center rounded-full bg-gradient-to-br from-violet-300 via-sky-300 to-emerald-200 text-xs font-bold text-slate-950">
+              <div className="flex items-center gap-3 rounded-full px-2 py-1.5" style={{ border: "1px solid var(--border)", background: "var(--bg-soft)" }}>
+                <div className="grid h-9 w-9 place-items-center rounded-full bg-[linear-gradient(135deg,var(--accent-mint),var(--accent-cyan),#d9fff4)] text-xs font-bold" style={{ color: "var(--text-inverse)" }}>
                   {initials || "N"}
                 </div>
                 <div className="pr-2">
-                  <p className="text-sm font-medium text-white">{name || "Governance user"}</p>
-                  <p className="text-xs text-slate-400">Role-based visibility enforced</p>
+                  <p className="text-sm font-medium" style={{ color: "var(--text-main)" }}>{name || "Governance user"}</p>
+                  <p className="text-xs" style={{ color: "var(--text-soft)" }}>Role-based visibility enforced</p>
                 </div>
               </div>
               <button className="btn-ghost" onClick={handleLogout} type="button">
@@ -137,7 +146,8 @@ export default function Navbar() {
         </div>
 
         <button
-          className="inline-flex h-11 w-11 items-center justify-center rounded-2xl border border-white/10 bg-white/5 text-white lg:hidden"
+          className="inline-flex h-11 w-11 items-center justify-center rounded-2xl lg:hidden"
+          style={{ border: "1px solid var(--border)", background: "var(--bg-soft)", color: "var(--text-main)" }}
           onClick={() => setOpen((value) => !value)}
           type="button"
         >
@@ -149,13 +159,16 @@ export default function Navbar() {
       {open ? (
         <div className="page-shell pb-4 lg:hidden">
           <div className="glass-panel p-4">
+            <div className="mb-3 flex items-center justify-between gap-3">
+              <ThemeToggle />
+            </div>
             <div className="grid gap-2">{navContent}</div>
             <div className="mt-4 soft-divider pt-4">
               {role ? (
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
                     <span className={getRoleClass(role)}>{role}</span>
-                    <p className="mt-2 text-sm text-slate-300">{name || "Governance user"}</p>
+                    <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>{name || "Governance user"}</p>
                   </div>
                   <button className="btn-secondary" onClick={handleLogout} type="button">
                     Logout

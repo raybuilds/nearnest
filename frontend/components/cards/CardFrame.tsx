@@ -6,11 +6,11 @@ import type { ReactNode } from "react";
 import type { DawnAction, DawnCardProps } from "@/types/dawn";
 
 const toneClasses = {
-  recommendation: "border-emerald-400/35 bg-emerald-500/8 shadow-md shadow-emerald-950/20",
-  risk: "border-rose-400/35 bg-rose-500/8 shadow-md shadow-rose-950/20",
-  health: "border-amber-300/30 bg-amber-400/8 shadow-md shadow-amber-950/10",
-  analytics: "border-white/12 bg-white/[0.04] shadow-md shadow-black/30",
-  explanation: "border-sky-300/25 bg-sky-400/8 shadow-md shadow-sky-950/10",
+  recommendation: "border border-emerald-400/20 shadow-md shadow-black/20",
+  risk: "border border-rose-400/22 shadow-md shadow-black/20",
+  health: "border border-amber-300/20 shadow-md shadow-black/20",
+  analytics: "border shadow-md shadow-black/20",
+  explanation: "border border-sky-300/18 shadow-md shadow-black/20",
 };
 
 type CardFrameProps = DawnCardProps & {
@@ -35,12 +35,12 @@ export default function CardFrame({ card, loading, empty, tone, metrics = [], ch
   const shouldCollapse = children || metrics.length > 2 || card.actions.length > 0;
 
   return (
-    <article className={`mb-4 rounded-2xl border p-5 backdrop-blur-xl ${toneClasses[tone]}`}>
+    <article className={`mb-4 rounded-2xl p-5 backdrop-blur-sm ${toneClasses[tone]}`} style={{ background: "var(--bg-soft)", borderColor: "var(--border)" }}>
       <div className="flex items-start justify-between gap-3">
         <div className="max-w-[85%]">
-          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Assistant card</p>
-          <h4 className="mt-2 font-[family:var(--font-display)] text-xl text-white">{card.title}</h4>
-          <p className="mt-3 text-sm leading-6 text-slate-300">
+          <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Assistant card</p>
+          <h4 className="mt-2 font-[family:var(--font-display)] text-xl" style={{ color: "var(--text-main)" }}>{card.title}</h4>
+          <p className="mt-3 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
             {loading ? "Analyzing system data..." : empty ? "No relevant data found" : card.why}
           </p>
         </div>
@@ -48,7 +48,8 @@ export default function CardFrame({ card, loading, empty, tone, metrics = [], ch
           <button
             type="button"
             onClick={() => setExpanded((value) => !value)}
-            className="rounded-full border border-white/10 px-3 py-1 text-xs uppercase tracking-[0.24em] text-slate-300"
+            className="rounded-full border px-3 py-1 text-[11px] uppercase tracking-[0.22em]"
+            style={{ borderColor: "var(--border)", color: "var(--text-muted)" }}
           >
             {expanded ? "Hide details" : "View details"}
           </button>
@@ -60,22 +61,22 @@ export default function CardFrame({ card, loading, empty, tone, metrics = [], ch
       {!loading && !empty && metrics.length > 0 ? (
         <div className="mt-5 grid grid-cols-2 gap-3">
           {metrics.map((metric) => (
-            <div key={metric.label} className="rounded-xl border border-white/8 bg-black/10 px-4 py-3">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">{metric.label}</p>
-              <p className="mt-2 text-lg font-semibold text-white">{metric.value ?? "--"}</p>
+            <div key={metric.label} className="rounded-xl px-4 py-3" style={{ background: "var(--bg-soft-strong)" }}>
+              <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>{metric.label}</p>
+              <p className="mt-2 text-lg font-semibold" style={{ color: "var(--text-main)" }}>{metric.value ?? "--"}</p>
             </div>
           ))}
         </div>
       ) : null}
 
       {!loading && empty ? (
-        <div className="mt-5 rounded-xl border border-dashed border-white/10 px-4 py-5 text-sm text-slate-300">
+        <div className="mt-5 rounded-xl px-4 py-5 text-sm" style={{ background: "var(--bg-soft-strong)", color: "var(--text-muted)" }}>
           No relevant data found
         </div>
       ) : null}
 
       {!loading && !empty && expanded && children ? (
-        <div className="mt-5 rounded-xl border border-white/8 bg-black/10 p-4">{children}</div>
+        <div className="mt-5 rounded-xl p-4" style={{ background: "var(--bg-soft-strong)" }}>{children}</div>
       ) : null}
 
       {!loading && !empty && card.actions.length > 0 ? (

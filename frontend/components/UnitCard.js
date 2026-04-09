@@ -45,14 +45,20 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
       <div className="flex items-start justify-between gap-3">
         <div>
           <div className="eyebrow mb-3">Unit {unitId}</div>
-          <h3 className="text-xl font-semibold text-white">{unit?.name || `Governed Unit ${unitId}`}</h3>
-          <p className="mt-2 text-sm text-slate-400">
-            {unit?.occupancyType || "Student housing"} • {Number(unit?.distanceKm || 0).toFixed(1)} km from demand corridor
+          <h3 className="text-xl font-semibold" style={{ color: "var(--text-main)" }}>
+            {unit?.name || `Governed Unit ${unitId}`}
+          </h3>
+          <p className="mt-2 text-sm" style={{ color: "var(--text-muted)" }}>
+            {unit?.occupancyType || "Student housing"} / {Number(unit?.distanceKm || 0).toFixed(1)} km from demand corridor
           </p>
         </div>
         <div className="text-right">
-          <p className="text-xs uppercase tracking-[0.24em] text-slate-500">Trust score</p>
-          <strong className="mt-1 block text-3xl text-white">{Number(unit?.trustScore || 0)}</strong>
+          <p className="text-xs uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
+            Trust score
+          </p>
+          <strong className="mt-1 block text-3xl" style={{ color: "var(--text-main)" }}>
+            {Number(unit?.trustScore || 0)}
+          </strong>
           <span className={`signal-chip mt-2 ${trust.tone}`}>{trust.label}</span>
         </div>
       </div>
@@ -69,36 +75,39 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
       </div>
 
       <div className={`mt-5 grid gap-3 ${compact ? "sm:grid-cols-2" : "sm:grid-cols-4"}`}>
-        <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
-          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Complaints</p>
-          <strong className="mt-2 block text-xl text-white">{complaintCount}</strong>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
-          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Capacity</p>
-          <strong className="mt-2 block text-xl text-white">{Number(unit?.capacity || unit?.availability?.capacity || 0)}</strong>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
-          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Available</p>
-          <strong className="mt-2 block text-xl text-white">{Number(unit?.availableSlots || unit?.availability?.availableSlots || 0)}</strong>
-        </div>
-        <div className="rounded-2xl border border-white/8 bg-white/5 p-3">
-          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Rent</p>
-          <strong className="mt-2 block text-xl text-white">£{Number(unit?.rent || 0)}</strong>
-        </div>
+        {[
+          { label: "Complaints", value: complaintCount },
+          { label: "Capacity", value: Number(unit?.capacity || unit?.availability?.capacity || 0) },
+          { label: "Available", value: Number(unit?.availableSlots || unit?.availability?.availableSlots || 0) },
+          { label: "Rent", value: `Rs ${Number(unit?.rent || 0)}` },
+        ].map((item) => (
+          <div key={item.label} className="rounded-2xl p-3" style={{ border: "1px solid var(--border)", background: "var(--bg-soft)" }}>
+            <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>
+              {item.label}
+            </p>
+            <strong className="mt-2 block text-xl" style={{ color: "var(--text-main)" }}>
+              {item.value}
+            </strong>
+          </div>
+        ))}
       </div>
 
-      <div className="mt-5 rounded-[24px] border border-white/8 bg-black/20 p-4">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.24em] text-slate-500">Why visible or hidden</p>
+      <div className="mt-5 rounded-[24px] p-4" style={{ border: "1px solid var(--border)", background: "var(--bg-soft)" }}>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
+          Why visible or hidden
+        </p>
         <div className="mt-3 grid gap-2">
           {visibilityReasons.length ? (
             visibilityReasons.slice(0, compact ? 2 : 3).map((reason) => (
-              <div key={reason} className="flex items-start gap-2 text-sm leading-6 text-slate-300">
-                <span className="mt-2 h-1.5 w-1.5 rounded-full bg-sky-300" />
+              <div key={reason} className="flex items-start gap-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+                <span className="mt-2 h-1.5 w-1.5 rounded-full" style={{ background: "var(--accent-teal)" }} />
                 <span>{reason}</span>
               </div>
             ))
           ) : (
-            <p className="text-sm leading-6 text-slate-400">Visibility rationale will appear here once governance signals are available.</p>
+            <p className="text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+              Visibility rationale will appear here once governance signals are available.
+            </p>
           )}
         </div>
       </div>
@@ -108,7 +117,9 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
           <button className="btn-primary" disabled={submitting} onClick={handleShortlist} type="button">
             {submitting ? "Recording..." : "Shortlist"}
           </button>
-          <span className="text-sm text-slate-400">Demand-gated interest only. This is not a marketplace booking flow.</span>
+          <span className="text-sm" style={{ color: "var(--text-muted)" }}>
+            Demand-gated interest only. This is not a marketplace booking flow.
+          </span>
         </div>
       ) : null}
 

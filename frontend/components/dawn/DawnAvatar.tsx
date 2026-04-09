@@ -20,7 +20,7 @@ export default function DawnAvatar({ state, enabled = true, compact = false }: D
   if (!enabled) return null;
 
   return (
-    <div className={`dawn-avatar-shell ${compact ? "dawn-avatar-shell-compact" : ""}`}>
+    <div className={`dawn-avatar-shell ${compact ? "dawn-avatar-shell-compact dawn-avatar-shell-inline" : ""}`}>
       <div className={`dawn-avatar dawn-avatar-${state} ${compact ? "dawn-avatar-compact" : ""}`} aria-hidden="true">
         <div className="dawn-avatar-halo" />
         <div className={`dawn-avatar-core ${compact ? "dawn-avatar-core-compact" : ""}`}>
@@ -31,10 +31,12 @@ export default function DawnAvatar({ state, enabled = true, compact = false }: D
           </div>
         </div>
       </div>
-      <div>
-        <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Presence</p>
-        <p className="mt-2 text-sm text-slate-200">{STATE_LABELS[state]}</p>
-      </div>
+      {!compact ? (
+        <div>
+          <p className="text-[11px] uppercase tracking-[0.22em] text-slate-400">Presence</p>
+          <p className="mt-2 text-sm text-slate-200">{STATE_LABELS[state]}</p>
+        </div>
+      ) : null}
     </div>
   );
 }
