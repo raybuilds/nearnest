@@ -18,7 +18,7 @@ export default function RemediationCard(props: DawnCardProps & { onAction?: (act
       ]}
       onAction={props.onAction}
     >
-      <div className="space-y-3 text-sm text-slate-300">
+      <div className="space-y-3 text-sm" style={{ color: "var(--text-muted)" }}>
         {selected ? (
           <>
             <p>Issue: {selected.issue}</p>
@@ -31,4 +31,3 @@ export default function RemediationCard(props: DawnCardProps & { onAction?: (act
     </CardFrame>
   );
 }
-

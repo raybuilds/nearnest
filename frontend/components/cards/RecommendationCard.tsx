@@ -18,17 +18,24 @@ export default function RecommendationCard(props: DawnCardProps & { onAction?: (
     >
       <div className="space-y-3">
         {units.length === 0 ? (
-          <p className="text-sm text-slate-300">No relevant data found</p>
+          <p className="text-sm" style={{ color: "var(--text-muted)" }}>No relevant data found</p>
         ) : (
           units.slice(0, 4).map((unit) => (
-            <div key={unit.id} className="rounded-2xl border border-white/8 bg-white/[0.03] p-3">
+            <div
+              key={unit.id}
+              className="rounded-2xl border p-3"
+              style={{ borderColor: "var(--border)", background: "var(--bg-soft-strong)" }}
+            >
               <div className="flex items-center justify-between gap-3">
-                <p className="text-sm font-semibold text-white">Unit {unit.id}</p>
-                <span className="rounded-full bg-cyan-400/15 px-2 py-1 text-xs text-cyan-100">
+                <p className="text-sm font-semibold" style={{ color: "var(--text-main)" }}>Unit {unit.id}</p>
+                <span
+                  className="rounded-full px-2 py-1 text-xs"
+                  style={{ background: "rgba(130, 202, 255, 0.16)", color: "var(--text-main)" }}
+                >
                   Trust {unit.trustScore}
                 </span>
               </div>
-              <div className="mt-2 grid grid-cols-3 gap-2 text-xs text-slate-300">
+              <div className="mt-2 grid grid-cols-3 gap-2 text-xs" style={{ color: "var(--text-muted)" }}>
                 <span>Band {unit.trustBand}</span>
                 <span>Rent {unit.rent}</span>
                 <span>{unit.distanceKm} km</span>
@@ -40,4 +47,3 @@ export default function RecommendationCard(props: DawnCardProps & { onAction?: (
     </CardFrame>
   );
 }
-

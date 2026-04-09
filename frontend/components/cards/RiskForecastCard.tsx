@@ -18,11 +18,10 @@ export default function RiskForecastCard(props: DawnCardProps & { onAction?: (ac
       ]}
       onAction={props.onAction}
     >
-      <div className="space-y-2 text-sm text-slate-300">
+      <div className="space-y-2 text-sm" style={{ color: "var(--text-muted)" }}>
         {indicators.length > 0 ? indicators.map((indicator) => <p key={indicator}>{indicator}</p>) : <p>No relevant data found</p>}
-        {data.recommendation ? <p className="text-amber-100">Recommended next step: {String(data.recommendation)}</p> : null}
+        {data.recommendation ? <p style={{ color: "#ffe0aa" }}>Recommended next step: {String(data.recommendation)}</p> : null}
       </div>
     </CardFrame>
   );
 }
-

@@ -17,10 +17,9 @@ export default function ExplanationCard(props: DawnCardProps & { onAction?: (act
       ]}
       onAction={props.onAction}
     >
-      <div className="space-y-2 text-sm text-slate-300">
+      <div className="space-y-2 text-sm" style={{ color: "var(--text-muted)" }}>
         {drivers.length > 0 ? drivers.map((driver) => <p key={driver}>{driver}</p>) : <p>No relevant data found</p>}
       </div>
     </CardFrame>
   );
 }
-

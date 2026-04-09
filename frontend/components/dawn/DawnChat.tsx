@@ -1066,7 +1066,7 @@ export default function DawnChat({ open, onClose, pageContext }: DawnChatProps) 
                     ? "Ask Dawn anything..."
                     : "Sign in as Student, Landlord, or Admin to use Dawn"
                 }
-                className="w-full resize-none rounded-2xl bg-transparent px-3 py-3 text-base outline-none placeholder:text-slate-500"
+                className="w-full resize-none rounded-2xl bg-transparent px-3 py-3 text-base outline-none"
                 style={{ color: "var(--text-main)" }}
               />
               <div className="mt-2 flex items-center justify-between gap-3">

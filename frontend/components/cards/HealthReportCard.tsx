@@ -19,23 +19,22 @@ export default function HealthReportCard(props: DawnCardProps & { onAction?: (ac
       ]}
       onAction={props.onAction}
     >
-      <div className="space-y-2 text-sm text-slate-200">
+      <div className="space-y-2 text-sm" style={{ color: "var(--text-main)" }}>
         <p>Status: {String(data.status || "--")}</p>
         <p>Audit required: {data.auditRequired ? "Yes" : "No"}</p>
         <div>
-          <p className="mb-2 text-xs uppercase tracking-[0.22em] text-slate-400">Why</p>
+          <p className="mb-2 text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Why</p>
           {reasons.length > 0 ? (
-            <ul className="space-y-1 text-slate-300">
+            <ul className="space-y-1" style={{ color: "var(--text-muted)" }}>
               {reasons.map((reason) => (
                 <li key={reason}>{reason}</li>
               ))}
             </ul>
           ) : (
-            <p className="text-slate-300">Backend did not report additional visibility reasons.</p>
+            <p style={{ color: "var(--text-muted)" }}>Backend did not report additional visibility reasons.</p>
           )}
         </div>
       </div>
     </CardFrame>
   );
 }
-

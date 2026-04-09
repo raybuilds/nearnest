@@ -23,9 +23,9 @@ type CardFrameProps = DawnCardProps & {
 function SkeletonRows() {
   return (
     <div className="space-y-3">
-      <div className="h-4 w-1/2 animate-pulse rounded-full bg-white/10" />
-      <div className="h-16 animate-pulse rounded-2xl bg-white/5" />
-      <div className="h-10 animate-pulse rounded-2xl bg-white/5" />
+      <div className="h-4 w-1/2 animate-pulse rounded-full" style={{ background: "var(--bg-soft-strong)" }} />
+      <div className="h-16 animate-pulse rounded-2xl" style={{ background: "var(--bg-soft)" }} />
+      <div className="h-10 animate-pulse rounded-2xl" style={{ background: "var(--bg-soft)" }} />
     </div>
   );
 }
@@ -86,7 +86,12 @@ export default function CardFrame({ card, loading, empty, tone, metrics = [], ch
               <Link
                 key={`${card.title}-${action.label}`}
                 href={action.href}
-                className="rounded-full border border-white/10 px-3 py-2 text-sm text-white transition hover:border-cyan-300/50 hover:bg-cyan-400/10"
+                className="rounded-full border px-3 py-2 text-sm transition"
+                style={{
+                  borderColor: "var(--border)",
+                  background: "var(--bg-soft-strong)",
+                  color: "var(--text-main)",
+                }}
               >
                 {action.label}
               </Link>
@@ -97,11 +102,25 @@ export default function CardFrame({ card, loading, empty, tone, metrics = [], ch
                 onClick={() => onAction?.(action)}
                 className={`rounded-full px-3 py-2 text-sm transition ${
                   action.variant === "confirm"
-                    ? "bg-emerald-400/20 text-emerald-100 hover:bg-emerald-400/30"
+                    ? "bg-emerald-400/20 text-emerald-50 hover:bg-emerald-400/30"
                     : action.variant === "cancel"
-                      ? "bg-white/8 text-slate-200 hover:bg-white/12"
-                      : "border border-white/10 text-white hover:bg-white/10"
+                      ? "hover:opacity-90"
+                      : "border hover:opacity-90"
                 }`}
+                style={
+                  action.variant === "cancel"
+                    ? {
+                        background: "var(--bg-soft-strong)",
+                        color: "var(--text-main)",
+                      }
+                    : action.variant === "confirm"
+                      ? undefined
+                      : {
+                          borderColor: "var(--border)",
+                          background: "var(--bg-soft-strong)",
+                          color: "var(--text-main)",
+                        }
+                }
               >
                 {action.label}
               </button>

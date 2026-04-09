@@ -19,7 +19,7 @@ export default function CorridorInsightCard(props: DawnCardProps & { onAction?: 
       ]}
       onAction={props.onAction}
     >
-      <div className="space-y-2 text-sm text-slate-300">
+      <div className="space-y-2 text-sm" style={{ color: "var(--text-muted)" }}>
         {incidentFrequency.length > 0 ? (
           incidentFrequency.slice(0, 4).map(([key, value]) => (
             <p key={key}>
@@ -33,4 +33,3 @@ export default function CorridorInsightCard(props: DawnCardProps & { onAction?: 
     </CardFrame>
   );
 }
-

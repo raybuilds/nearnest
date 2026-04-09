@@ -31,7 +31,7 @@ export default function AnalyticsCard(props: DawnCardProps & { onAction?: (actio
       ]}
       onAction={props.onAction}
     >
-      <div className="space-y-2 text-sm text-slate-300">
+      <div className="space-y-2 text-sm" style={{ color: "var(--text-muted)" }}>
         {data.message ? <p>{String(data.message)}</p> : null}
         {data.action ? <p>Action: {String(data.action)}</p> : null}
         {data.reason ? <p>Reason: {String(data.reason)}</p> : null}

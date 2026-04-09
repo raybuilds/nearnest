@@ -16,11 +16,10 @@ export default function ComplaintDraftCard(props: DawnCardProps & { onAction?: (
       ]}
       onAction={props.onAction}
     >
-      <div className="space-y-3 text-sm text-slate-300">
+      <div className="space-y-3 text-sm" style={{ color: "var(--text-muted)" }}>
         <p>{String(data.message || "")}</p>
         <p>{String(data.trustImpact || "")}</p>
       </div>
     </CardFrame>
   );
 }
-
