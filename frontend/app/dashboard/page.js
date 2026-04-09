@@ -306,21 +306,39 @@ function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, unit
     units.filter((unit) => getTrustBand(unit.trustScore).key === "B").length,
     units.filter((unit) => getTrustBand(unit.trustScore).key === "C").length,
   ];
+  const selectedCorridorMeta = corridors.find((corridor) => String(corridor.id) === String(selectedCorridor));
+
+  function governanceActionLabel(unit) {
+    if (unit.auditRequired) return "Review audit escalation";
+    if (unit.status === "submitted" || unit.status === "admin_review") return "Complete governance review";
+    if (unit.status === "suspended") return "Resolve suspension status";
+    if (unit.status === "rejected") return "Confirm rejection outcome";
+    return `Review ${unit.status || "governance"} status`;
+  }
+
+  function pressureSeverity(unit) {
+    const trustScore = Number(unit?.trustScore || 0);
+    if (unit?.auditRequired || trustScore < 45) return { label: "High", width: Math.max(trustScore, 72) };
+    if (trustScore < 75) return { label: "Medium", width: Math.max(trustScore, 48) };
+    return { label: "Low", width: Math.max(trustScore, 26) };
+  }
 
   return (
-    <div className="grid gap-6">
+    <div className="grid gap-8">
       <section className="governance-grid">
-        <div className="glass-panel-strong blueprint-border lg:col-span-8 p-8 sm:p-10">
+        <div className="glass-panel-strong blueprint-border lg:col-span-8 p-7 sm:p-8">
           <div className="eyebrow">Admin Governance View</div>
-          <h1 className="page-title mt-5 text-gradient">Govern the reasons visibility exists.</h1>
-          <p className="subtle-copy mt-4 max-w-3xl">
-            Admins do not manage listings. They govern trust distribution, complaint clusters, and the system-triggered reasons
-            units are approved, suspended, or hidden.
+          <h1 className="mt-4 max-w-4xl text-4xl font-semibold leading-tight tracking-[-0.04em] sm:text-5xl" style={{ color: "var(--text-main)" }}>
+            Act on corridor risk before visibility slips.
+          </h1>
+          <p className="mt-4 max-w-3xl text-[15px] leading-7" style={{ color: "var(--text-muted)" }}>
+            Review trust distribution, clear complaint escalation, and push the next governance action for units drifting
+            toward suspension or hidden status.
           </p>
 
           <div className="mt-8 max-w-sm">
             <label className="grid gap-2">
-              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Corridor</span>
+              <span className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Active Corridor</span>
               <select className="input-shell" onChange={(event) => setSelectedCorridor(event.target.value)} value={selectedCorridor}>
                 <option value="">Select corridor</option>
                 {corridors.map((corridor) => (
@@ -329,43 +347,55 @@ function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, unit
                   </option>
                 ))}
               </select>
+              <span className="text-xs leading-5" style={{ color: "var(--text-muted)" }}>
+                {selectedCorridorMeta ? `${units.length} governed units in ${selectedCorridorMeta.name}` : `${units.length} governed units in view`}
+              </span>
             </label>
           </div>
 
           <div className="mt-6 grid gap-4 md:grid-cols-3">
             <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Corridor heatmap</p>
-              <strong className="mt-2 block text-2xl text-white">{demand?.totalVdpStudents || 0}</strong>
-              <span className="mt-2 block text-sm leading-6 text-slate-400">Verified demand concentration in the selected corridor.</span>
+              <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Corridor heatmap</p>
+              <strong className="mt-2 block text-2xl" style={{ color: "var(--text-main)" }}>{demand?.totalVdpStudents || 0}</strong>
+              <span className="mt-2 block text-sm leading-6" style={{ color: "var(--text-muted)" }}>Verified demand concentration in the selected corridor.</span>
             </div>
             <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Complaint clusters</p>
-              <strong className="mt-2 block text-2xl text-white">{auditQueue.length}</strong>
-              <span className="mt-2 block text-sm leading-6 text-slate-400">Units already escalated into governance review.</span>
+              <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Complaint clusters</p>
+              <strong className="mt-2 block text-2xl" style={{ color: "var(--text-main)" }}>{auditQueue.length}</strong>
+              <span className="mt-2 block text-sm leading-6" style={{ color: "var(--text-muted)" }}>Units already escalated into governance review.</span>
             </div>
             <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Trust distribution</p>
-              <strong className="mt-2 block text-2xl text-white">{units.length}</strong>
-              <span className="mt-2 block text-sm leading-6 text-slate-400">Governed units included in the trust split below.</span>
+              <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Trust distribution</p>
+              <strong className="mt-2 block text-2xl" style={{ color: "var(--text-main)" }}>{units.length}</strong>
+              <span className="mt-2 block text-sm leading-6" style={{ color: "var(--text-muted)" }}>Governed units included in the trust split below.</span>
             </div>
           </div>
         </div>
 
         <div className="grid gap-4 lg:col-span-4">
-          <div className="metric-tile">
+          <div className="metric-tile" style={{ borderColor: "var(--border-strong)" }}>
             <p>Band A</p>
-            <strong>{trustDistribution[0]}</strong>
-            <span>Strong trust standing.</span>
+            <strong className="text-[2.4rem]">{trustDistribution[0]}</strong>
+            <span><span className="font-semibold" style={{ color: "var(--text-main)" }}>Stable.</span> Strong trust standing.</span>
           </div>
-          <div className="metric-tile">
+          <div className="metric-tile" style={{ borderColor: "var(--border-strong)" }}>
             <p>Band B</p>
-            <strong>{trustDistribution[1]}</strong>
-            <span>Visible, but under active monitoring.</span>
+            <strong className="text-[2.55rem]">{trustDistribution[1]}</strong>
+            <span><span className="font-semibold" style={{ color: "var(--text-main)" }}>Monitor.</span> Visible, but under active monitoring.</span>
           </div>
-          <div className="metric-tile">
+          <div className="metric-tile" style={{ borderColor: "var(--border-strong)", boxShadow: "var(--shadow-soft)" }}>
             <p>Band C</p>
-            <strong>{trustDistribution[2]}</strong>
-            <span>Below threshold or at governance risk.</span>
+            <strong className="text-[2.7rem]">{trustDistribution[2]}</strong>
+            <span><span className="font-semibold" style={{ color: "var(--text-main)" }}>Needs attention.</span> Below threshold or at governance risk.</span>
+          </div>
+          <div className="rounded-[28px] border p-5" style={{ borderColor: "var(--border-strong)", background: "var(--bg-soft)", boxShadow: "var(--shadow-soft)" }}>
+            <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Risk Alert</p>
+            <p className="mt-3 text-base font-semibold leading-6" style={{ color: "var(--text-main)" }}>
+              ⚠️ {auditQueue.length > 0 ? `${auditQueue.length} unit${auditQueue.length === 1 ? "" : "s"} need immediate governance review.` : "No urgent corridor escalation right now."}
+            </p>
+            <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+              {auditQueue.length > 0 ? "Action required" : "Stable"}: complaint and audit pressure should be reviewed before visibility degrades.
+            </p>
           </div>
         </div>
       </section>
@@ -381,7 +411,7 @@ function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, unit
               <h2 className="section-title mt-4">Units requiring decisions</h2>
             </div>
           </div>
-          <div className="mt-6 grid gap-4">
+          <div className="mt-8 grid gap-5">
             {units.length ? (
               units.map((unit) => (
                 <Link
@@ -391,10 +421,19 @@ function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, unit
                 >
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
-                      <strong className="text-white">Unit {unit.id}</strong>
-                      <p className="mt-1 text-sm text-slate-400">System-triggered reason: {unit.auditRequired ? "Auto-flagged due to audit pressure" : `Status is ${unit.status}`}</p>
+                      <strong className="text-white">Unit {unit.id} | {governanceActionLabel(unit)}</strong>
+                      <p className="mt-1 text-sm" style={{ color: "var(--text-muted)" }}>
+                        {unit.auditRequired
+                          ? "Action required: audit pressure is blocking a clean governance state."
+                          : unit.status === "submitted" || unit.status === "admin_review"
+                            ? "Monitoring: this unit is waiting for the next approval decision."
+                            : `Stable check: current status is ${unit.status}.`}
+                      </p>
                     </div>
-                    <div className="flex flex-wrap gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--text-soft)" }}>
+                        {unit.auditRequired ? "Action required" : unit.status === "submitted" || unit.status === "admin_review" ? "Monitoring" : "Stable"}
+                      </span>
                       <span className={`signal-chip ${getStatusTone(unit.status)}`}>{unit.status}</span>
                       <span className={`signal-chip ${getTrustBand(unit.trustScore).tone}`}>{getTrustBand(unit.trustScore).label}</span>
                     </div>
@@ -410,7 +449,7 @@ function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, unit
         <article className="glass-panel p-6">
           <div className="eyebrow">Audit Queue</div>
           <h2 className="section-title mt-4">Complaint and audit pressure</h2>
-          <div className="mt-6 grid gap-4">
+          <div className="mt-8 grid gap-5">
             {auditQueue.length ? (
               auditQueue.map((unit) => (
                 <Link
@@ -420,12 +459,16 @@ function AdminDashboard({ corridors, selectedCorridor, setSelectedCorridor, unit
                 >
                   <div className="flex items-center justify-between gap-3">
                     <strong className="text-white">Unit {unit.id}</strong>
-                    <span className="signal-chip signal-danger">Audit required</span>
+                    <span className="signal-chip signal-danger">{pressureSeverity(unit).label}</span>
                   </div>
-                  <div className="mt-3 trust-track">
-                    <div className={`trust-fill ${getTrustBand(unit.trustScore).fillClass}`} style={{ width: `${Number(unit.trustScore || 0)}%` }} />
+                  <div className="mt-4 flex items-center justify-between gap-3">
+                    <p className="text-xs uppercase tracking-[0.18em]" style={{ color: "var(--text-soft)" }}>Complaint + audit pressure</p>
+                    <span className="text-sm font-medium" style={{ color: "var(--text-main)" }}>{pressureSeverity(unit).label} severity</span>
                   </div>
-                  <p className="mt-3 text-sm leading-6 text-slate-400">
+                  <div className="mt-3 h-3 overflow-hidden rounded-full" style={{ background: "color-mix(in srgb, var(--bg-soft-strong) 96%, transparent)" }}>
+                    <div className={`trust-fill ${getTrustBand(unit.trustScore).fillClass}`} style={{ width: `${pressureSeverity(unit).width}%` }} />
+                  </div>
+                  <p className="mt-4 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
                     Trust {unit.trustScore || 0} • Status {unit.status}
                   </p>
                 </Link>
