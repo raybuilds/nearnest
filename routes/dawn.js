@@ -37,6 +37,11 @@ const intentMap = {
       callApi: context.callApi,
     });
     const wrappedAlerts = wrapOperationsAlerts(alerts, req.user.role);
+    const operationsData = {
+      alerts: wrappedAlerts,
+      units: wrappedAlerts.flatMap((item) => item.units || []),
+      corridors: wrappedAlerts.flatMap((item) => item.corridors || []),
+    };
 
     context.updateMemory({
       lastIntent: "operations_advisor",
@@ -47,11 +52,8 @@ const intentMap = {
       message: "Here is the current operational advisory summary:",
       assistant: `Prepared ${wrappedAlerts.length} operational insight alert(s).`,
       alerts: wrappedAlerts,
-      data: {
-        alerts: wrappedAlerts,
-        units: wrappedAlerts.flatMap((item) => item.units || []),
-        corridors: wrappedAlerts.flatMap((item) => item.corridors || []),
-      },
+      data: wrappedAlerts,
+      operationsData,
     };
   },
   corridor_behavioral_insight: corridorBehavioralInsight,
@@ -935,7 +937,9 @@ function inferIntent(role, message) {
       text.includes("is this unit risky") ||
       text.includes("is my room safe") ||
       text.includes("unit risk") ||
-      text.includes("housing risk")
+      text.includes("housing risk") ||
+      text.includes("high trust low risk") ||
+      text.includes("risky trust low")
     ) {
       return "predict_unit_risk";
     }

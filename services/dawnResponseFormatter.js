@@ -98,7 +98,7 @@ function formatPredictUnitRisk(result) {
   const indicators = Array.isArray(forecast.indicators) ? forecast.indicators : [];
   const recommendation = forecast.recommendation || "Review this unit and act on the leading indicators.";
   const indicatorText = indicators.length > 0 ? indicators.join("; ") : "No major early warning indicators right now";
-  return `This unit is ${riskSignal}. Indicators: ${indicatorText}. Recommended next step: ${recommendation}`;
+  return `Risk Signal: ${riskSignal}. Indicators: ${indicatorText}. Recommendation: ${recommendation}`;
 }
 
 function formatCorridorBehavioralInsight(result) {

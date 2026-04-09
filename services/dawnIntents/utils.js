@@ -121,8 +121,6 @@ function preprocessDawnText(text) {
   const replacements = [
     [/\bcheap\b/g, "budget under 8000"],
     [/\baffordable\b/g, "budget under 8000"],
-    [/\bsafe\b/g, "high trust low risk"],
-    [/\bunsafe\b/g, "risky trust low"],
     [/\bbad area\b/g, "corridor risk"],
     [/\brisky area\b/g, "corridor risk"],
     [/\breport an issue\b/g, "draft complaint"],
