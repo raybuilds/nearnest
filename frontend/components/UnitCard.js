@@ -43,6 +43,20 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
     unit?.ac ? "AC" : null,
   ].filter(Boolean);
   const ctaLabel = unit?.visibleToStudents === false ? "Request Access" : "Express Interest";
+  const whyChooseThis =
+    trustScore >= 80 && complaintCount <= 1
+      ? "High trust + low complaints"
+      : trustScore >= 70
+        ? "Strong safety signals + steady trust"
+        : complaintCount <= 1
+          ? "Low complaints + fair trust"
+          : "Worth reviewing if this location fits your needs";
+  const studentBadge =
+    trustScore >= 88
+      ? "Recommended"
+      : Number(unit?.shortlistCount || unit?.interestCount || 0) >= 3
+        ? "High demand"
+        : "";
 
   if (!unit || (showForStudent && unit.visibleToStudents === false)) {
     return null;
@@ -70,13 +84,21 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
     <Link href={`/unit/${unitId}`} prefetch={false} className="glass-panel blueprint-border group flex h-full flex-col overflow-hidden p-5 transition hover:-translate-y-1">
       <div className="flex items-start justify-between gap-4">
         <div className="min-w-0 flex-1">
-          <div className="eyebrow mb-3">Unit {unitId}</div>
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Unit {unitId}</div>
+            {showForStudent && studentBadge ? <span className="signal-chip signal-info">{studentBadge}</span> : null}
+          </div>
           <h3 className="text-xl font-semibold leading-tight sm:text-[1.4rem]" style={{ color: "var(--text-main)" }}>
             {unit?.name || `Governed Unit ${unitId}`}
           </h3>
           <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
             {unit?.occupancyType || "Student housing"} / {Number(unit?.distanceKm || 0).toFixed(1)} km from demand corridor
           </p>
+          {showForStudent ? (
+            <p className="mt-2 text-sm font-medium leading-6" style={{ color: "var(--text-main)" }}>
+              Why choose this: <span style={{ color: "var(--text-muted)" }}>{whyChooseThis}</span>
+            </p>
+          ) : null}
         </div>
         <div className="min-w-[8.5rem] text-right">
           <p className="text-xs uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>

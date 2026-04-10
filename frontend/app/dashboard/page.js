@@ -59,21 +59,35 @@ function StudentDashboard({
 }) {
   const averageTrust = corridorOverview?.stats?.averageTrustScore || 0;
   const riskLevel = corridorOverview?.riskSummary?.riskLevel || "Stable";
+  const visibleCount = corridorOverview?.stats?.visibleUnits || visibleUnits.length || 0;
+  const hiddenCount = corridorOverview?.stats?.hiddenUnits || hiddenReasons?.hiddenCount || 0;
+
+  function humanizeHiddenReason(reason) {
+    const normalized = String(reason || "").toLowerCase();
+    if (normalized.includes("audit")) return "Hidden because safety checks failed or are still under review.";
+    if (normalized.includes("trust")) return "Hidden because trust signals dropped below the safe visibility level.";
+    if (normalized.includes("status")) return "Hidden because approval is still pending.";
+    if (normalized.includes("complaint")) return "Hidden because recent complaints raised safety concerns.";
+    return "Hidden until safety and trust checks improve.";
+  }
 
   return (
     <div className="grid gap-6">
       <section className="governance-grid">
         <div className="glass-panel-strong blueprint-border lg:col-span-8 p-8 sm:p-10">
           <div className="eyebrow">Student Governance View</div>
-          <h1 className="page-title mt-5 text-gradient">See only the units that still earn visibility.</h1>
+          <h1 className="page-title mt-5 text-gradient">Choose from units that meet safety and trust standards</h1>
           <p className="subtle-copy mt-4 max-w-3xl">
-            NearNest does not surface every unit. It shows governed inventory that remains above trust thresholds, outside
-            critical audit pressure, and transparent about the reasons it is discoverable.
+            Browse options that are currently verified, safe to review, and still meeting the trust checks used across this area.
           </p>
 
-          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          <div className="mt-8">
+            <div className="mb-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Refine your options</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
             <label className="grid gap-2">
-              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Corridor</span>
+              <span className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Corridor</span>
               <select className="input-shell" onChange={(event) => setCorridorId(event.target.value)} value={corridorId}>
                 <option value="">Select corridor</option>
                 {corridors.map((corridor) => (
@@ -84,29 +98,30 @@ function StudentDashboard({
               </select>
             </label>
             <label className="grid gap-2">
-              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Max rent</span>
+              <span className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Max rent</span>
               <input className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, maxRent: event.target.value }))} type="number" value={filters.maxRent} />
             </label>
             <label className="grid gap-2">
-              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Max distance</span>
+              <span className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Max distance</span>
               <input className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, maxDistance: event.target.value }))} type="number" value={filters.maxDistance} />
             </label>
             <label className="grid gap-2">
-              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">AC filter</span>
+              <span className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>AC filter</span>
               <select className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, ac: event.target.value }))} value={filters.ac}>
                 <option value="">Any</option>
                 <option value="true">AC only</option>
                 <option value="false">No AC</option>
               </select>
             </label>
+            </div>
           </div>
 
           <div className="mt-6 flex flex-wrap gap-3">
             <button className="btn-primary" onClick={reload} type="button">
-              Refresh visibility
+              Apply filters
             </button>
             <div className="status-banner info">
-              Demand-gated inventory only. Units remain hidden when trust falls, audits open, or governance status changes.
+              Only verified, safe units are shown.
             </div>
           </div>
         </div>
@@ -132,14 +147,12 @@ function StudentDashboard({
 
       {error ? <div className="status-banner error">{error}</div> : null}
 
-      <InsightCards insights={insights} />
-
       <section className="grid gap-4 xl:grid-cols-[1.5fr,1fr]">
         <article className="glass-panel p-6">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="eyebrow">Trust Visibility Panel</div>
-              <h2 className="section-title mt-4">Visible inventory</h2>
+              <h2 className="section-title mt-4">Available units</h2>
             </div>
             <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel} corridor risk</span>
           </div>
@@ -160,25 +173,28 @@ function StudentDashboard({
             <div className="flex items-center justify-between gap-3">
               <div>
                 <div className="eyebrow">Corridor Intelligence</div>
-                <h2 className="section-title mt-4">Behavior signals</h2>
+                <h2 className="section-title mt-4">Area insights</h2>
               </div>
               <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel}</span>
             </div>
 
             <div className="mt-5 grid gap-3">
               <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
-                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Complaint density</p>
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Few complaints reported</p>
                 <strong className="mt-2 block text-2xl text-white">{corridorOverview?.riskSummary?.complaintDensity || 0}</strong>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">A lower number usually means fewer reported issues nearby.</span>
               </div>
               <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
-                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Visible vs hidden</p>
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Most units are visible</p>
                 <strong className="mt-2 block text-2xl text-white">
-                  {(corridorOverview?.stats?.visibleUnits || 0)}/{(corridorOverview?.stats?.hiddenUnits || 0)}
+                  {visibleCount}/{hiddenCount}
                 </strong>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">More visible units usually means the area is passing more checks.</span>
               </div>
               <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
-                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Verified demand pool</p>
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Students looking in this area</p>
                 <strong className="mt-2 block text-2xl text-white">{demand?.totalVdpStudents || 0}</strong>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">Higher interest can mean stronger demand for the safest options.</span>
               </div>
             </div>
           </article>
@@ -188,7 +204,7 @@ function StudentDashboard({
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="eyebrow">Hidden Units</div>
-                  <h2 className="section-title mt-4">Why supply is hidden</h2>
+                  <h2 className="section-title mt-4">Why some options are hidden</h2>
                 </div>
                 <span className="signal-chip signal-danger">{hiddenReasons?.hiddenCount || 0} hidden</span>
               </div>
@@ -203,7 +219,7 @@ function StudentDashboard({
                   <div className="mt-3 grid gap-2">
                     {(item.reasons || []).map((reason) => (
                       <div key={reason} className="text-sm leading-6 text-slate-300">
-                        {reason}
+                        {humanizeHiddenReason(reason)}
                       </div>
                     ))}
                   </div>
@@ -214,6 +230,8 @@ function StudentDashboard({
           </details>
         </div>
       </section>
+
+      {insights.length ? <InsightCards insights={insights} /> : null}
 
       <ComplaintForm />
     </div>

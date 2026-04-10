@@ -121,12 +121,14 @@ export default function ComplaintForm({ complaintId, initialUnitId = "" }) {
     <form className="glass-panel blueprint-border p-6" onSubmit={handleSubmit}>
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <div className="eyebrow">{complaintId ? "Resolution workflow" : "Complaint intake"}</div>
+          <div className="eyebrow">{complaintId ? "Resolution workflow" : "Report issues"}</div>
           <h3 className="mt-4 text-2xl font-semibold text-white" style={{ fontFamily: "var(--font-display)" }}>
-            {complaintId ? "Resolve issue with governance trace" : "Escalate behavior, not just defects"}
+            {complaintId ? "Resolve issue with governance trace" : "Report an issue"}
           </h3>
           <p className="mt-2 text-sm leading-6 text-slate-400">
-            Every complaint becomes a trust signal. The UI keeps the reasoning visible for students, landlords, and admins.
+            {complaintId
+              ? "Close the issue with a clear record of what was resolved."
+              : "Share what happened so unsafe conditions can be reviewed and fixed faster."}
           </p>
         </div>
         {!complaintId ? (
@@ -192,24 +194,28 @@ export default function ComplaintForm({ complaintId, initialUnitId = "" }) {
             <textarea
               className="textarea-shell"
               onChange={(event) => update("description", event.target.value)}
-              placeholder="Describe what happened, who is affected, and whether it may influence trust or SLA risk."
+              placeholder="Describe the issue clearly and what support is needed."
               value={form.description}
             />
           </label>
 
+          <p className="mt-3 text-sm leading-6 text-slate-400">
+            Reporting issues helps improve safety for everyone in this area.
+          </p>
+
           <div className="mt-5 grid gap-3 md:grid-cols-3">
             <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">SLA preview</p>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Expected resolution time</p>
               <strong className="mt-2 block text-lg text-white">24-48 hrs</strong>
               <span className="mt-2 block text-sm leading-6 text-slate-400">Expected resolution window if the issue is handled on time.</span>
             </div>
             <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Trust impact</p>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">May reduce trust score</p>
               <strong className="mt-2 block text-lg text-white">Visible to governance</strong>
               <span className="mt-2 block text-sm leading-6 text-slate-400">This may reduce trust score or trigger audit pressure depending on severity and SLA outcome.</span>
             </div>
             <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
-              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Context</p>
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Unit details</p>
               <strong className="mt-2 block text-lg text-white">{selectedUnit ? `Unit ${selectedUnit.id}` : "Select a unit"}</strong>
               <span className="mt-2 block text-sm leading-6 text-slate-400">
                 {selectedUnit ? `${Number(selectedUnit.distanceKm || 0).toFixed(1)} km away • trust ${selectedUnit.trustScore || 0}` : "Unit context will appear here."}
@@ -236,7 +242,7 @@ export default function ComplaintForm({ complaintId, initialUnitId = "" }) {
             : `Submitting as ${role || "current user"} records a governance event, not just a support ticket.`}
         </div>
         <button className="btn-primary" disabled={loading || (!complaintId && !form.unitId)} type="submit">
-          {loading ? (complaintId ? "Resolving..." : "Submitting...") : complaintId ? "Resolve issue" : "Submit complaint"}
+          {loading ? (complaintId ? "Resolving..." : "Submitting...") : complaintId ? "Resolve issue" : "Submit report"}
         </button>
       </div>
     </form>
