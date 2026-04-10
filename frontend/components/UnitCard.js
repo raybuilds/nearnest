@@ -95,7 +95,7 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
             {unit?.occupancyType || "Student housing"} / {Number(unit?.distanceKm || 0).toFixed(1)} km from demand corridor
           </p>
           {showForStudent ? (
-            <p className="mt-2 text-sm font-medium leading-6" style={{ color: "var(--text-main)" }}>
+            <p className="mt-3 text-sm font-medium leading-6" style={{ color: "var(--text-main)" }}>
               Why choose this: <span style={{ color: "var(--text-muted)" }}>{whyChooseThis}</span>
             </p>
           ) : null}
@@ -116,11 +116,11 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
         </div>
       </div>
 
-      <div className="mt-6 trust-track">
+      <div className="mt-6 trust-track h-2.5">
         <div className={`trust-fill ${trust.fillClass}`} style={{ width: `${Math.min(trustScore, 100)}%` }} />
       </div>
 
-      <div className="mt-4 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm" style={{ color: "var(--text-muted)" }}>
+      <div className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm" style={{ color: "var(--text-muted)" }}>
         {compactSignals.map((signal, index) => (
           <span key={signal} className="inline-flex items-center">
             {index > 0 ? <span className="mr-2" style={{ color: "var(--text-soft)" }}>|</span> : null}
@@ -130,24 +130,24 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
       </div>
 
       <div className={`mt-6 grid gap-3 ${compact ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
-        <div className="rounded-[24px] p-4" style={{ border: "1px solid var(--border)", background: "var(--bg-soft)" }}>
-          <div className="flex items-center justify-between gap-3">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
+        <div className="overflow-hidden rounded-[22px] p-3.5" style={{ border: "1px solid var(--border-strong)", background: "color-mix(in srgb, var(--bg-soft) 94%, transparent)" }}>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="min-w-0 flex-1 text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
               Operational
             </p>
-            <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel === "Stable" ? "Low risk" : `${riskLevel} risk`}</span>
+            <span className={`signal-chip shrink-0 ${getRiskTone(riskLevel)}`}>{riskLevel === "Stable" ? "Low risk" : `${riskLevel} risk`}</span>
           </div>
-          <div className="mt-3 grid grid-cols-3 gap-2">
+          <div className="mt-3.5 grid grid-cols-3 gap-2">
             {[
               { label: "Complaints", value: complaintCount },
               { label: "Capacity", value: capacity },
               { label: "Available", value: availableSlots },
             ].map((item) => (
-              <div key={item.label} className="rounded-2xl px-3 py-2.5" style={{ background: "var(--bg-soft-strong)" }}>
+              <div key={item.label} className="rounded-[18px] px-3 py-2" style={{ border: "1px solid var(--border)", background: "color-mix(in srgb, var(--bg-soft-strong) 94%, transparent)" }}>
                 <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>
                   {item.label}
                 </p>
-                <strong className="mt-1.5 block text-lg" style={{ color: "var(--text-main)" }}>
+                <strong className="mt-1 block text-base sm:text-[1.05rem]" style={{ color: "var(--text-main)" }}>
                   {item.value}
                 </strong>
               </div>
@@ -155,19 +155,24 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
           </div>
         </div>
 
-        <div className="rounded-[24px] p-4" style={{ border: "1px solid var(--border)", background: "var(--bg-soft)" }}>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
-            Financial
-          </p>
-          <div className="mt-3 rounded-2xl px-3 py-2.5" style={{ background: "var(--bg-soft-strong)" }}>
+        <div className="rounded-[22px] p-3.5" style={{ border: "1px solid var(--border-strong)", background: "color-mix(in srgb, var(--bg-soft) 94%, transparent)" }}>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
+              Financial
+            </p>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--text-soft)" }}>
+              {trustScore >= 80 ? "Strong value" : "Review budget"}
+            </span>
+          </div>
+          <div className="mt-3 rounded-[18px] px-3 py-3" style={{ border: "1px solid var(--border)", background: "color-mix(in srgb, var(--bg-soft-strong) 94%, transparent)" }}>
             <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>
               Rent
             </p>
-            <strong className="mt-1.5 block text-2xl" style={{ color: "var(--text-main)" }}>
+            <strong className="mt-1.5 block text-[2.15rem] font-semibold leading-none sm:text-[2.35rem]" style={{ color: "var(--text-main)" }}>
               Rs {rent}
             </strong>
-            <p className="mt-1 text-xs leading-5" style={{ color: "var(--text-muted)" }}>
-              Decision cue: {trustScore >= 80 ? "strong trust posture" : "review governance signals first"}
+            <p className="mt-2 text-xs leading-5" style={{ color: "var(--text-muted)" }}>
+              {trustScore >= 80 ? "Strong trust posture" : "Review trust signals first"}
             </p>
           </div>
         </div>
@@ -186,17 +191,14 @@ export default function UnitCard({ unit, onShortlist, showForStudent = false, co
       </div>
 
       {showForStudent ? (
-        <div className="mt-6 flex flex-wrap items-start gap-3">
+        <div className="mt-5 flex flex-wrap items-start gap-3">
           <div className="min-w-0 flex-1">
-            <button className="btn-primary w-full sm:w-auto" disabled={submitting} onClick={handleShortlist} type="button">
+            <button className="btn-primary w-full px-6 py-3.5 sm:w-auto" disabled={submitting} onClick={handleShortlist} type="button">
               {submitting ? "Recording..." : ctaLabel}
             </button>
             <p className="mt-2 text-xs leading-5" style={{ color: "var(--text-muted)" }}>
               No booking yet. This helps unlock access.
             </p>
-          </div>
-          <div className="pt-1 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
-            Demand-gated interest only. This is not a marketplace booking flow.
           </div>
         </div>
       ) : null}
