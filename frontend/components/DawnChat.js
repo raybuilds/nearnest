@@ -1,295 +1,204 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { getRoleClass, getStatusTone } from "@/lib/governance";
+import { getStoredRole } from "@/lib/session";
+import { getDawnInsights, queryDawn } from "@/lib/api";
 
-function formatValue(value) {
-  if (value === null || value === undefined) return "N/A";
-  if (typeof value === "boolean") return value ? "Yes" : "No";
-  if (typeof value === "object") return "";
-  return String(value);
-}
+const suggestionPrompts = [
+  "Explain why a unit is hidden",
+  "Draft a complaint about water leakage",
+  "Recommend safer units in my corridor",
+  "Show current corridor risk insights",
+];
 
-function pickDisplayFields(item) {
-  const preferred = [
-    "id",
-    "unitId",
-    "unitLabel",
-    "status",
-    "trustScore",
-    "trustBand",
-    "rent",
-    "distanceKm",
-    "institutionProximityKm",
-    "occupancyType",
-    "availableSlots",
-    "severity",
-    "incidentType",
-    "slaStatus",
-    "trustImpactHint",
-    "complaintsLast30Days",
-    "complaintCount",
-    "corridorId",
-  ];
-
-  const keys = preferred.filter((key) => Object.prototype.hasOwnProperty.call(item, key));
-  if (keys.length > 0) return keys;
-
-  return Object.keys(item).filter((key) => {
-    const value = item[key];
-    return value === null || ["string", "number", "boolean"].includes(typeof value);
-  }).slice(0, 8);
-}
-
-function DataCard({ item }) {
-  const fields = pickDisplayFields(item);
-  return (
-    <article className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
-      <div className="grid grid-cols-2 gap-2">
-        {fields.map((key) => (
-          <div key={key}>
-            <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-500">{key}</p>
-            <p className="text-xs text-slate-800">{formatValue(item[key])}</p>
-          </div>
-        ))}
-      </div>
-    </article>
-  );
-}
-
-function DataView({ data }) {
-  if (data === null || data === undefined) {
-    return <p className="text-xs text-slate-600">No data</p>;
-  }
-
-  if (data && typeof data === "object" && Array.isArray(data.recommendations)) {
-    const top = data.recommendations[0];
-    return (
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-slate-800">Recommendations ({data.totalMatched || data.recommendations.length} matched)</p>
-        {data.contextChained && (
-          <p className="rounded border border-indigo-200 bg-indigo-50 px-2 py-1 text-[11px] text-indigo-700">
-            Context chaining applied from your previous search.
-          </p>
-        )}
-        {top && (
-          <div className="rounded border border-emerald-200 bg-emerald-50 p-2">
-            <p className="text-xs font-semibold text-emerald-900">Top Recommendation: Unit #{top.id}</p>
-            <p className="text-[11px] text-emerald-800">
-              Rs {top.rent} • Trust {top.trustScore} • {top.distanceKm} km • {top.availableSlots} slots
-            </p>
-            {Array.isArray(top.recommendationReasons) && (
-              <ul className="mt-1 list-disc pl-4 text-[11px] text-emerald-800">
-                {top.recommendationReasons.slice(0, 4).map((reason) => (
-                  <li key={reason}>{reason}</li>
-                ))}
-              </ul>
-            )}
-          </div>
-        )}
-        <div className="space-y-2">
-          {data.recommendations.slice(0, 5).map((item) => (
-            <DataCard item={item} key={`rec-${item.id}`} />
-          ))}
-        </div>
-      </div>
-    );
-  }
-
-  if (data && typeof data === "object" && Array.isArray(data.topIssues)) {
-    return (
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-slate-800">Recurring Issues</p>
-        {Array.isArray(data.suggestions) && data.suggestions.length > 0 && (
-          <div className="space-y-1">
-            {data.suggestions.map((item) => (
-              <p key={item} className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
-                {item}
-              </p>
-            ))}
-          </div>
-        )}
-        {data.topIssues.slice(0, 5).map((item) => (
-          <DataCard item={item} key={`issue-${item.incidentType}-${item.complaintCount}`} />
-        ))}
-      </div>
-    );
-  }
-
-  if (data && typeof data === "object" && Array.isArray(data.corridors)) {
-    return (
-      <div className="space-y-2">
-        <p className="text-xs font-semibold text-slate-800">Corridor Analytics</p>
-        {data.corridors.slice(0, 5).map((item) => (
-          <div className="space-y-1" key={`corridor-${item.corridorId}`}>
-            <DataCard item={item} />
-            {Array.isArray(item.warnings) &&
-              item.warnings.map((warning) => (
-                <p key={`${item.corridorId}-${warning}`} className="rounded border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] text-rose-700">
-                  {warning}
-                </p>
-              ))}
-          </div>
-        ))}
-      </div>
-    );
-  }
-
-  if (data && typeof data === "object" && data.draft && typeof data.draft === "object") {
-    return (
-      <div className="space-y-2">
-        <p className="rounded border border-amber-200 bg-amber-50 px-2 py-1 text-[11px] text-amber-800">
-          Draft prepared. Confirm to submit this complaint.
-        </p>
-        <DataCard item={data.draft} />
-      </div>
-    );
-  }
-
-  if (Array.isArray(data)) {
-    if (data.length === 0) return <p className="text-xs text-slate-600">No records found.</p>;
-    return (
-      <div className="space-y-2">
-        {data.slice(0, 10).map((item, idx) => (
-          <DataCard item={typeof item === "object" && item !== null ? item : { value: item }} key={`row-${idx}`} />
-        ))}
-      </div>
-    );
-  }
-
-  if (typeof data === "object") {
-    if (Array.isArray(data.data)) return <DataView data={data.data} />;
-    if (Array.isArray(data.sampledUnits)) return <DataView data={data.sampledUnits} />;
-    if (Array.isArray(data.complaints)) return <DataView data={data.complaints} />;
-    if (Array.isArray(data.hiddenUnits)) return <DataView data={data.hiddenUnits} />;
-    return <DataCard item={data} />;
-  }
-
-  return <p className="text-xs text-slate-700">{String(data)}</p>;
+function extractInsights(payload) {
+  if (Array.isArray(payload?.insights)) return payload.insights;
+  if (Array.isArray(payload?.cards)) return payload.cards;
+  return [];
 }
 
 export default function DawnChat() {
-  const [open, setOpen] = useState(false);
+  const [open, setOpen] = useState(true);
+  const [input, setInput] = useState("");
   const [role, setRole] = useState("");
-  const [query, setQuery] = useState("");
   const [loading, setLoading] = useState(false);
-  const [messages, setMessages] = useState([]);
-  const [pendingAction, setPendingAction] = useState(null);
+  const [messages, setMessages] = useState([
+    {
+      id: "intro",
+      type: "assistant",
+      text: "Dawn exposes intelligence, not decisions. Ask why a unit is visible, how trust moved, or how to draft a complaint.",
+      cards: [],
+    },
+  ]);
 
   useEffect(() => {
-    const currentRole = localStorage.getItem("role") || "";
-    setRole(currentRole);
+    setRole(getStoredRole());
   }, []);
 
-  const greeting = useMemo(() => {
-    if (role === "student") return "Dawn: Ask about rooms, hidden reasons, or submit a complaint.";
-    if (role === "landlord") return "Dawn: Ask about audit risk, SLA breach, or trust drop.";
-    if (role === "admin") return "Dawn: Ask about density, suspension risk, or unit suspension reasons.";
-    return "Dawn: Login to use corridor intelligence.";
-  }, [role]);
+  useEffect(() => {
+    let active = true;
 
-  async function sendQuery(confirm = false) {
-    if (!query.trim() && !confirm) return;
+    async function bootstrap() {
+      const token = typeof window !== "undefined" ? localStorage.getItem("token") : "";
+      if (!token) return;
+
+      try {
+        const payload = await getDawnInsights();
+        const cards = extractInsights(payload);
+        if (!active || cards.length === 0) return;
+
+        setMessages((current) => [
+          ...current,
+          {
+            id: crypto.randomUUID(),
+            type: "assistant",
+            text: "Fresh governance intelligence is available.",
+            cards,
+          },
+        ]);
+      } catch {
+        // Keep Dawn available even if initial insight loading fails.
+      }
+    }
+
+    bootstrap();
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  const statusLabel = useMemo(() => (loading ? "Interpreting signals..." : "Intelligence available"), [loading]);
+
+  async function handleSend(prompt = input) {
+    if (!prompt.trim() || loading) return;
+
+    setMessages((current) => [
+      ...current,
+      { id: crypto.randomUUID(), type: "user", text: prompt.trim(), cards: [] },
+    ]);
+    setInput("");
     setLoading(true);
-    try {
-      const payload = await apiRequest("/dawn/query", {
-        method: "POST",
-        body: JSON.stringify({
-          message: query,
-          confirm,
-          action: confirm ? pendingAction : undefined,
-        }),
-      });
 
-      const next = [];
-      if (!confirm) {
-        next.push({ type: "user", text: query });
-      }
-      next.push({ type: "assistant", text: payload.assistant || "Done." });
-      if (payload.data) {
-        next.push({ type: "data", data: payload.data });
-      }
-      setMessages((prev) => [...prev, ...next]);
-      setPendingAction(payload.requiresConfirmation ? payload.action : null);
-      if (!payload.requiresConfirmation) {
-        setQuery("");
-      }
-    } catch (error) {
-      setMessages((prev) => [...prev, { type: "assistant", text: error.message || "Request failed." }]);
+    try {
+      const payload = await queryDawn({ message: prompt.trim() });
+      setMessages((current) => [
+        ...current,
+        {
+          id: crypto.randomUUID(),
+          type: "assistant",
+          text: payload?.assistant || "Dawn processed the available intelligence.",
+          cards: extractInsights(payload),
+        },
+      ]);
     } finally {
       setLoading(false);
     }
   }
 
-  if (!role) return null;
-
   return (
-    <div className="fixed bottom-4 right-4 z-50">
-      {!open && (
+    <div className="fixed bottom-4 right-4 z-[70] sm:bottom-6 sm:right-6">
+      {!open ? (
         <button
-          className="rounded-full bg-slate-900 px-4 py-3 text-sm font-semibold text-white shadow-lg"
+          className="blueprint-border relative grid h-16 w-16 place-items-center rounded-full bg-gradient-to-br from-violet-300 via-sky-300 to-emerald-200 text-lg font-semibold text-slate-950 shadow-[0_28px_60px_rgba(0,0,0,0.34)]"
           onClick={() => setOpen(true)}
           type="button"
         >
-          Dawn
+          D
         </button>
-      )}
-
-      {open && (
-        <div className="h-[78vh] w-[680px] max-w-[92vw] rounded-2xl border border-slate-200 bg-gradient-to-b from-slate-50 to-white shadow-2xl">
-          <div className="flex items-center justify-between border-b border-slate-200 px-4 py-3">
-            <p className="text-base font-semibold text-slate-900">Dawn - Corridor Intelligence</p>
-            <button className="text-sm text-slate-600" onClick={() => setOpen(false)} type="button">
-              Close
-            </button>
-          </div>
-          <div className="h-[62%] space-y-3 overflow-y-auto p-4">
-            <p className="rounded-lg border border-slate-200 bg-white p-3 text-xs text-slate-700">{greeting}</p>
-            {messages.map((item, idx) => (
-              <div
-                className={`rounded p-2 text-xs ${
-                  item.type === "user"
-                    ? "bg-blue-50 text-blue-900 border border-blue-100"
-                    : item.type === "data"
-                      ? "bg-slate-50 text-slate-800 border border-slate-200"
-                      : "bg-emerald-50 text-emerald-900 border border-emerald-100"
-                }`}
-                key={`${item.type}-${idx}`}
-              >
-                {item.type === "data" ? <DataView data={item.data} /> : item.text}
+      ) : (
+        <section className="glass-panel-strong blueprint-border grid h-[min(76vh,640px)] w-[min(390px,calc(100vw-1.5rem))] grid-rows-[auto,1fr,auto] overflow-hidden">
+          <header className="flex items-center justify-between gap-3 border-b border-white/10 px-4 py-4">
+            <div className="flex items-center gap-3">
+              <div className="grid h-11 w-11 place-items-center rounded-2xl bg-gradient-to-br from-violet-300 via-sky-300 to-emerald-200 text-sm font-bold text-slate-950">
+                D
               </div>
-            ))}
-          </div>
-          <div className="h-[38%] space-y-2 border-t border-slate-200 bg-white p-4">
-            <textarea
-              className="h-[110px] w-full rounded-lg border p-3 text-sm"
-              onChange={(e) => setQuery(e.target.value)}
-              placeholder="Ask Dawn..."
-              rows={4}
-              value={query}
-            />
-            <div className="flex gap-2">
-              <button
-                className="flex-1 rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                disabled={loading}
-                onClick={() => sendQuery(false)}
-                type="button"
-              >
-                {loading ? "Thinking..." : "Send"}
+              <div>
+                <p className="text-sm font-semibold text-white" style={{ fontFamily: "var(--font-display)" }}>
+                  Dawn Assistant
+                </p>
+                <p className="text-xs text-slate-400">{statusLabel}</p>
+              </div>
+            </div>
+            <div className="flex items-center gap-2">
+              {role ? <span className={getRoleClass(role)}>{role}</span> : null}
+              <button className="btn-ghost" onClick={() => setOpen(false)} type="button">
+                Close
               </button>
-              {pendingAction && (
+            </div>
+          </header>
+
+          <div className="flex flex-col gap-3 overflow-y-auto px-4 py-4">
+            <div className="grid gap-2">
+              {suggestionPrompts.map((prompt) => (
                 <button
-                  className="rounded-lg bg-amber-600 px-3 py-2 text-sm font-semibold text-white disabled:opacity-60"
-                  disabled={loading}
-                  onClick={() => sendQuery(true)}
+                  key={prompt}
+                  className="rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-left text-xs text-slate-300 transition hover:bg-white/8"
+                  onClick={() => handleSend(prompt)}
                   type="button"
                 >
-                  Confirm
+                  {prompt}
                 </button>
-              )}
+              ))}
             </div>
+
+            {messages.map((message) => (
+              <article
+                key={message.id}
+                className={`max-w-[92%] rounded-[24px] border px-4 py-3 text-sm ${
+                  message.type === "user"
+                    ? "ml-auto border-sky-300/20 bg-sky-300/12 text-white"
+                    : "border-white/10 bg-white/5 text-slate-100"
+                }`}
+              >
+                <p className="whitespace-pre-wrap leading-6">{message.text}</p>
+                {message.cards?.length ? (
+                  <div className="mt-3 grid gap-2">
+                    {message.cards.map((card, index) => {
+                      const title = card.title || card.type || "Insight";
+                      const body = card.message || card.body || card.summary || card.description || "";
+                      const recommendation = card.recommendation;
+                      const riskLevel = card.riskLevel || card.severity || card.tone;
+                      return (
+                        <div key={`${message.id}-${index}`} className="rounded-2xl border border-white/10 bg-black/20 p-3">
+                          <div className="mb-2 flex flex-wrap items-center gap-2">
+                            <span className={`signal-chip ${getStatusTone(riskLevel)}`}>{title}</span>
+                            {card.type ? <span className="text-[11px] uppercase tracking-[0.2em] text-slate-500">{card.type}</span> : null}
+                          </div>
+                          {body ? <p className="text-xs leading-6 text-slate-300">{body}</p> : null}
+                          {recommendation ? <p className="mt-2 text-xs text-emerald-200">Recommended action: {recommendation}</p> : null}
+                        </div>
+                      );
+                    })}
+                  </div>
+                ) : null}
+              </article>
+            ))}
           </div>
-        </div>
+
+          <footer className="border-t border-white/10 px-4 py-4">
+            <div className="mb-3 rounded-2xl border border-white/10 bg-white/5 px-3 py-2 text-xs text-slate-400">
+              Dawn can draft complaints, explain trust movements, recommend safer units, and summarize corridor risk.
+            </div>
+            <div className="flex items-end gap-3">
+              <textarea
+                className="textarea-shell min-h-[88px] flex-1"
+                onChange={(event) => setInput(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && !event.shiftKey) {
+                    event.preventDefault();
+                    handleSend();
+                  }
+                }}
+                placeholder="Ask why a unit is visible or hidden..."
+                value={input}
+              />
+              <button className="btn-primary h-12 px-4" disabled={loading} onClick={() => handleSend()} type="button">
+                Send
+              </button>
+            </div>
+          </footer>
+        </section>
       )}
     </div>
   );

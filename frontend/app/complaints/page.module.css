@@ -1,0 +1,191 @@
+.page {
+  display: grid;
+  gap: 24px;
+}
+
+.filters {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+
+.filterField {
+  display: grid;
+  gap: 8px;
+}
+
+.filterField span {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.distributionPanel {
+  display: grid;
+  gap: 14px;
+}
+
+.sectionLead {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.severityBars {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.severityBarRow {
+  display: grid;
+  gap: 8px;
+}
+
+.barLabel {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mainLayout {
+  display: grid;
+  grid-template-columns: 1.15fr 0.85fr;
+  gap: 18px;
+  align-items: start;
+}
+
+.cardGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+}
+
+.complaintCard {
+  padding: 16px;
+  display: grid;
+  gap: 12px;
+  cursor: pointer;
+}
+
+.cardHeader,
+.cardMeta,
+.drawerStack {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.cardFooter {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.metaText {
+  display: grid;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.formColumn {
+  display: grid;
+  gap: 12px;
+}
+
+.drawerOverlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(8, 10, 18, 0.76);
+  display: flex;
+  justify-content: flex-end;
+  z-index: 65;
+}
+
+.drawer {
+  width: min(520px, 100%);
+  min-height: 100%;
+  padding: 24px;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--border-mid);
+  overflow-y: auto;
+  display: grid;
+  align-content: start;
+  gap: 16px;
+}
+
+.drawerHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.drawerText {
+  margin: 0;
+  color: var(--text-muted);
+  line-height: 1.7;
+}
+
+.timeline {
+  display: grid;
+  gap: 10px;
+}
+
+@media (max-width: 1200px) {
+  .filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .metricGrid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .severityBars {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 900px) {
+  .mainLayout {
+    grid-template-columns: 1fr;
+  }
+
+  .metricGrid,
+  .filters,
+  .severityBars {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .metricGrid,
+  .filters,
+  .severityBars {
+    grid-template-columns: 1fr;
+  }
+
+  .sectionLead,
+  .cardFooter,
+  .drawerHeader {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}

@@ -2,252 +2,266 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import ComplaintForm from "@/components/ComplaintForm";
+import { getComplaints, resolveComplaint } from "@/lib/api";
+import { formatDateTime, getStatusTone } from "@/lib/governance";
+import { getStoredRole } from "@/lib/session";
+import { FadeIn, Reveal } from "@/components/ui/Motion";
 
-function formatDate(dateString) {
-  if (!dateString) return "N/A";
-  return new Date(dateString).toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+function Countdown({ ms }) {
+  const [remaining, setRemaining] = useState(Number(ms || 0));
 
-function formatCountdown(ms) {
-  if (ms === null || ms === undefined) return "N/A";
-  if (ms <= 0) return "Overdue";
-  const totalMinutes = Math.floor(ms / (1000 * 60));
-  const hours = Math.floor(totalMinutes / 60);
-  const minutes = totalMinutes % 60;
-  return `${hours}h ${minutes}m`;
-}
+  useEffect(() => {
+    setRemaining(Number(ms || 0));
+  }, [ms]);
 
-function severityClass(severity) {
-  if (severity >= 5) return "bg-rose-600 text-white";
-  if (severity >= 3) return "bg-amber-500 text-white";
-  if (severity === 2) return "bg-blue-100 text-blue-800";
-  return "bg-slate-200 text-slate-700";
-}
+  useEffect(() => {
+    if (ms == null) return undefined;
+    const id = window.setInterval(() => setRemaining((current) => current - 1000), 1000);
+    return () => window.clearInterval(id);
+  }, [ms]);
 
-function getSlaBadge(item) {
-  if (item.slaStatus === "late" || item.slaStatus === "sla_breached") {
-    return { label: "⚠ Breached", className: "bg-rose-600 text-white" };
-  }
-  if (item.slaStatus === "open" && item.slaCountdownMs !== null && item.slaCountdownMs <= 12 * 60 * 60 * 1000) {
-    return { label: "Due < 12h", className: "bg-amber-500 text-white" };
-  }
-  if (item.slaStatus === "resolved") {
-    return { label: "Resolved", className: "bg-slate-200 text-slate-700" };
-  }
-  return { label: "On Time", className: "bg-slate-200 text-slate-700" };
-}
+  if (ms == null) return null;
+  if (remaining <= 0) return <span className="signal-chip signal-danger">Breached</span>;
 
-function getTrustImpactMeta(trustImpactHint) {
-  const impact = Math.abs(Number(trustImpactHint || 0));
-  if (impact >= 11) return { label: "High", className: "text-rose-700" };
-  if (impact >= 6) return { label: "Moderate", className: "text-amber-700" };
-  return { label: "Low", className: "text-slate-700" };
-}
-
-function ComplaintCard({ item, showStudent }) {
-  const slaBadge = getSlaBadge(item);
-  const impactMeta = getTrustImpactMeta(item.trustImpactHint);
-
-  return (
-    <article className={`rounded-lg border p-3 ${item.slaStatus === "late" || item.slaStatus === "sla_breached" ? "border-rose-200 bg-rose-50" : "border-slate-200 bg-white"}`}>
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <p className="text-sm font-semibold text-slate-900">Complaint #{item.id}</p>
-        <div className="flex items-center gap-1">
-          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${severityClass(item.severity)}`}>S{item.severity}</span>
-          <span className={`rounded-full px-2 py-0.5 text-xs font-semibold ${slaBadge.className}`}>{slaBadge.label}</span>
-        </div>
-      </div>
-      <p className="text-sm text-slate-700">{item.unitLabel}</p>
-      <p className="text-sm text-slate-700">Incident: {item.incidentType}</p>
-      {item.message && <p className="text-sm text-slate-700">Message: {item.message}</p>}
-      <p className="text-sm text-slate-700">
-        Trust impact:{" "}
-        <span className={`font-semibold ${impactMeta.className}`}>
-          {item.trustImpactHint} trust ({impactMeta.label})
-        </span>
-      </p>
-      <p className="text-sm text-slate-700">
-        SLA countdown:{" "}
-        <span className={`font-semibold ${item.slaCountdownMs !== null && item.slaCountdownMs <= 0 ? "text-rose-700" : "text-slate-900"}`}>
-          {formatCountdown(item.slaCountdownMs)}
-        </span>
-      </p>
-      <p className="text-xs text-slate-500">Created: {formatDate(item.createdAt)}</p>
-      <p className="text-xs text-slate-500">Resolved: {formatDate(item.resolvedAt)}</p>
-      {showStudent && item.student?.name && (
-        <p className="text-sm text-slate-700">Student: {item.student.name} ({item.student.intake || "N/A"})</p>
-      )}
-      <div className="mt-2">
-        <Link className="text-sm text-blue-700 underline" href={`/unit/${item.unitId}/complaints`}>
-          Open Unit Complaint Ledger
-        </Link>
-      </div>
-    </article>
-  );
+  const totalSeconds = Math.floor(remaining / 1000);
+  const hours = String(Math.floor(totalSeconds / 3600)).padStart(2, "0");
+  const minutes = String(Math.floor((totalSeconds % 3600) / 60)).padStart(2, "0");
+  return <span className="signal-chip signal-warning">{`${hours}:${minutes} remaining`}</span>;
 }
 
 export default function ComplaintsPage() {
   const [role, setRole] = useState("");
+  const [payload, setPayload] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [payload, setPayload] = useState(null);
+  const [filters, setFilters] = useState({ unit: "", status: "", severity: "" });
 
-  const [unitId, setUnitId] = useState("");
-  const [status, setStatus] = useState("");
-  const [incidentType, setIncidentType] = useState("");
-  const [corridorId, setCorridorId] = useState("");
-  const [landlordId, setLandlordId] = useState("");
-  const [slaBreachOnly, setSlaBreachOnly] = useState(false);
-
-  useEffect(() => {
-    setRole(localStorage.getItem("role") || "");
-  }, []);
-
-  const queryString = useMemo(() => {
-    const params = new URLSearchParams();
-    if (unitId) params.set("unitId", unitId);
-    if (status) params.set("status", status);
-    if (incidentType) params.set("incidentType", incidentType);
-    if (role === "admin") {
-      if (corridorId) params.set("corridorId", corridorId);
-      if (landlordId) params.set("landlordId", landlordId);
-      if (slaBreachOnly) params.set("slaBreachOnly", "true");
-    }
-    const q = params.toString();
-    return q ? `?${q}` : "";
-  }, [corridorId, incidentType, landlordId, role, slaBreachOnly, status, unitId]);
-
-  async function loadComplaints() {
+  async function loadComplaints(activeFilters = filters) {
     setLoading(true);
     setError("");
     try {
-      const data = await apiRequest(`/complaints${queryString}`);
-      setPayload(data);
-    } catch (err) {
-      setError(err.message || "Failed to load complaints");
+      const params = new URLSearchParams();
+      if (activeFilters.unit) params.set("unitId", activeFilters.unit);
+      if (activeFilters.status) params.set("status", activeFilters.status);
+      const response = await getComplaints(params.toString());
+      setPayload(response || null);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to load complaints.");
     } finally {
       setLoading(false);
     }
   }
 
   useEffect(() => {
-    if (!role) return;
+    setRole(getStoredRole());
     loadComplaints();
-  }, [role]);
+  }, []);
 
-  if (!role) {
-    return <p className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Login required.</p>;
+  const complaints = useMemo(() => {
+    const list = Array.isArray(payload?.complaints) ? payload.complaints : [];
+    if (!filters.severity) return list;
+    return list.filter((item) => String(item.severity) === filters.severity);
+  }, [filters.severity, payload]);
+
+  const metrics = useMemo(() => {
+    if (!complaints.length) {
+      return [
+        { label: "Total", value: 0, note: "No complaints found" },
+        { label: "Open", value: 0, note: "No active issues" },
+        { label: "Resolved", value: 0, note: "No resolved issues" },
+        { label: "Breached", value: 0, note: "No SLA breaches" },
+      ];
+    }
+
+    const resolved = complaints.filter((item) => item.resolved).length;
+    const breached = complaints.filter((item) => item.slaStatus === "late" || item.slaStatus === "sla_breached").length;
+    return [
+      { label: "Total", value: complaints.length, note: "Complaint records in scope" },
+      { label: "Open", value: complaints.filter((item) => !item.resolved).length, note: "Influencing trust" },
+      { label: "Resolved", value: resolved, note: "Closed governance events" },
+      { label: "Breached", value: breached, note: "Late or SLA-breached" },
+    ];
+  }, [complaints]);
+
+  async function handleResolve(id) {
+    setError("");
+    try {
+      await resolveComplaint(id);
+      await loadComplaints();
+    } catch (requestError) {
+      setError(requestError.message || "Unable to resolve complaint.");
+    }
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Complaints</h1>
+    <div className="grid gap-6">
+      <Reveal duration={0.5}>
+        <section className="glass-panel-strong blueprint-border p-8 sm:p-10 rounded-[24px] bg-[var(--bg-surface-strong)]">
+          <div className="eyebrow">Complaint Governance</div>
+          <h1 className="page-title mt-5 text-gradient">Complaint signals with visible trust impact.</h1>
+          <p className="subtle-copy mt-4 max-w-3xl">
+            Complaints are not background tickets. They are governance inputs that influence trust score, SLA posture, and unit visibility.
+          </p>
 
-      <section className="grid gap-2 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-6">
-        <input className="rounded border p-2" onChange={(e) => setUnitId(e.target.value)} placeholder="Unit ID" value={unitId} />
-        {(role === "landlord" || role === "admin") && (
-          <select className="rounded border p-2" onChange={(e) => setStatus(e.target.value)} value={status}>
-            <option value="">Status any</option>
-            <option value="open">Open</option>
-            <option value="resolved">Resolved</option>
-            <option value="late">Late</option>
-            <option value="sla_breached">SLA Breached</option>
-          </select>
-        )}
-        {(role === "landlord" || role === "admin") && (
-          <select className="rounded border p-2" onChange={(e) => setIncidentType(e.target.value)} value={incidentType}>
-            <option value="">Incident any</option>
-            <option value="safety">Safety</option>
-            <option value="injury">Injury</option>
-            <option value="fire">Fire</option>
-            <option value="harassment">Harassment</option>
-            <option value="other">Other</option>
-          </select>
-        )}
-        {role === "admin" && <input className="rounded border p-2" onChange={(e) => setCorridorId(e.target.value)} placeholder="Corridor ID" value={corridorId} />}
-        {role === "admin" && <input className="rounded border p-2" onChange={(e) => setLandlordId(e.target.value)} placeholder="Landlord ID" value={landlordId} />}
-        {role === "admin" && (
-          <label className="flex items-center gap-2 rounded border p-2 text-sm text-slate-700">
-            <input checked={slaBreachOnly} onChange={(e) => setSlaBreachOnly(e.target.checked)} type="checkbox" />
-            SLA breaches only
-          </label>
-        )}
-        <button className="rounded bg-slate-900 px-4 py-2 text-white md:col-span-6" onClick={loadComplaints} type="button">
-          Apply Filters
-        </button>
-      </section>
-
-      {loading && <p className="text-sm text-slate-600">Loading complaints...</p>}
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-
-      {!loading && !error && payload?.metrics && (
-        <section className="grid gap-2 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-4">
-          {"openComplaints" in payload.metrics && <div className="text-sm text-slate-700">Open: <span className="font-semibold">{payload.metrics.openComplaints}</span></div>}
-          {"lateComplaints" in payload.metrics && <div className="text-sm text-slate-700">Late: <span className="font-semibold">{payload.metrics.lateComplaints}</span></div>}
-          {"slaCompliance" in payload.metrics && <div className="text-sm text-slate-700">SLA Compliance: <span className="font-semibold">{payload.metrics.slaCompliance ?? "N/A"}%</span></div>}
-          {"avgResolutionHours" in payload.metrics && <div className="text-sm text-slate-700">Avg Resolution: <span className="font-semibold">{payload.metrics.avgResolutionHours ?? "N/A"}h</span></div>}
-          {"complaintsLast30Days" in payload.metrics && <div className="text-sm text-slate-700">30d Density: <span className="font-semibold">{payload.metrics.complaintsLast30Days}</span></div>}
-          {"complaintsLast60Days" in payload.metrics && <div className="text-sm text-slate-700">60d Density: <span className="font-semibold">{payload.metrics.complaintsLast60Days}</span></div>}
-          {Array.isArray(payload.metrics.densityWarnings) && payload.metrics.densityWarnings.length > 0 && (
-            <div className="md:col-span-4 flex flex-wrap gap-2">
-              {payload.metrics.densityWarnings.map((d) => {
-                const highRisk = d.complaintsLast30Days >= 5;
-                return (
-                  <span
-                    key={`density-${d.unitId}`}
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                      highRisk
-                        ? "border-rose-300 bg-rose-50 text-rose-700"
-                        : "border-amber-300 bg-amber-50 text-amber-700"
-                    }`}
-                  >
-                    Unit #{d.unitId}: {d.complaintsLast30Days}/30d {highRisk ? "• Audit Risk" : "• Monitor"}
-                  </span>
-                );
-              })}
+          <div className="mt-8 grid gap-4 md:grid-cols-3 xl:grid-cols-4">
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500 font-semibold">Unit</span>
+              <select className="input-shell text-sm" onChange={(event) => setFilters((current) => ({ ...current, unit: event.target.value }))} value={filters.unit}>
+                <option value="">All units</option>
+                {Array.from(new Set((payload?.complaints || []).map((item) => item.unitId))).map((unitId) => (
+                  <option key={unitId} value={unitId}>
+                    Unit {unitId}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500 font-semibold">Status</span>
+              <select className="input-shell text-sm" onChange={(event) => setFilters((current) => ({ ...current, status: event.target.value }))} value={filters.status}>
+                <option value="">All</option>
+                <option value="open">Open</option>
+                <option value="resolved">Resolved</option>
+                <option value="late">Late</option>
+                <option value="sla_breached">SLA breached</option>
+              </select>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500 font-semibold">Severity</span>
+              <select className="input-shell text-sm" onChange={(event) => setFilters((current) => ({ ...current, severity: event.target.value }))} value={filters.severity}>
+                <option value="">All severities</option>
+                {["1", "2", "3", "4", "5"].map((value) => (
+                  <option key={value} value={value}>
+                    Severity {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <div className="flex items-end">
+              <button className="btn-primary w-full text-xs py-2.5 font-semibold tracking-wider" onClick={() => loadComplaints(filters)} type="button">
+                Apply filters
+              </button>
             </div>
-          )}
-          {Array.isArray(payload.metrics.highDensityUnits) && payload.metrics.highDensityUnits.length > 0 && (
-            <div className="md:col-span-4 flex flex-wrap gap-2">
-              {payload.metrics.highDensityUnits.map((d) => {
-                const highRisk = d.complaintsLast30Days >= 5;
-                return (
-                  <span
-                    key={`admin-density-${d.unitId}`}
-                    className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                      highRisk
-                        ? "border-rose-300 bg-rose-50 text-rose-700"
-                        : "border-amber-300 bg-amber-50 text-amber-700"
-                    }`}
-                  >
-                    Unit #{d.unitId}: {d.complaintsLast30Days}/30d {highRisk ? "• Audit Risk" : "• Monitor"}
-                  </span>
-                );
-              })}
-            </div>
-          )}
-        </section>
-      )}
-
-      {!loading && !error && (
-        <section className="space-y-3">
-          {Array.isArray(payload?.complaints) && payload.complaints.length === 0 && (
-            <p className="rounded border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">No complaints found.</p>
-          )}
-          <div className="grid gap-3 md:grid-cols-2">
-            {(payload?.complaints || []).map((item) => (
-              <ComplaintCard key={item.id} item={item} showStudent={role === "admin"} />
-            ))}
           </div>
         </section>
-      )}
+      </Reveal>
+
+      {error ? <div className="status-banner error">{error}</div> : null}
+
+      <Reveal duration={0.5}>
+        <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+          {metrics.map((metric) => (
+            <article key={metric.label} className="metric-tile rounded-2xl p-5 border border-white/5 bg-white/5">
+              <p className="text-xs text-slate-400 uppercase tracking-wider">{metric.label}</p>
+              <strong className="text-2xl text-white mt-1 block">{metric.value}</strong>
+              <span className="text-[10px] text-slate-500 block mt-1">{metric.note}</span>
+            </article>
+          ))}
+        </section>
+      </Reveal>
+
+      <section className="grid gap-5 xl:grid-cols-[1.2fr,0.8fr]">
+        <article className="glass-panel p-6 rounded-[24px] bg-[var(--bg-surface)] border border-white/5">
+          <div className="flex items-center justify-between gap-3 border-b border-white/10 pb-3">
+            <div>
+              <div className="eyebrow">Complaint stream</div>
+              <h2 className="section-title mt-2">Incident, severity, SLA, trust impact</h2>
+            </div>
+          </div>
+
+          <div className="mt-6 grid gap-6">
+            {loading ? (
+              Array.from({ length: 3 }).map((_, index) => (
+                <div key={index} className="surface-panel h-36 animate-pulse rounded-2xl bg-stone-800" />
+              ))
+            ) : complaints.length ? (
+              <div className="space-y-6 relative border-l border-white/10 pl-6 ml-3">
+                {complaints.map((complaint, idx) => (
+                  <Reveal key={complaint.id} delay={idx * 0.05} duration={0.4}>
+                    <div className="relative">
+                      {/* Timeline dot icon placement */}
+                      <span className="absolute -left-[31px] top-1.5 w-3 h-3 rounded-full bg-sky-400 border-2 border-black" />
+                      
+                      <div className="rounded-[24px] border border-white/5 bg-white/5 hover:bg-white/10 transition-colors p-5 space-y-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div className="flex flex-wrap gap-2">
+                            <span className={`signal-chip ${getStatusTone(complaint.slaStatus)}`}>
+                              {complaint.slaStatus || "Open"}
+                            </span>
+                            <span className="signal-chip signal-info">Severity {complaint.severity}</span>
+                            {complaint.incidentType ? (
+                              <span className="signal-chip signal-warning">{complaint.incidentType}</span>
+                            ) : null}
+                          </div>
+                          {!complaint.resolved ? (
+                            <Countdown ms={complaint.slaCountdownMs} />
+                          ) : (
+                            <span className="signal-chip signal-success">Resolved</span>
+                          )}
+                        </div>
+
+                        <p className="text-sm leading-relaxed text-slate-200">{complaint.message || "No description provided."}</p>
+
+                        <div className="grid gap-3 grid-cols-3 text-xs border-t border-white/5 pt-3">
+                          <div>
+                            <p className="text-[10px] uppercase tracking-wider text-slate-500">Unit</p>
+                            <strong className="mt-0.5 block text-slate-300">Unit {complaint.unitId}</strong>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase tracking-wider text-slate-500">Created</p>
+                            <strong className="mt-0.5 block text-slate-300">{formatDateTime(complaint.createdAt)}</strong>
+                          </div>
+                          <div>
+                            <p className="text-[10px] uppercase tracking-wider text-slate-500">Trust impact</p>
+                            <strong className="mt-0.5 block text-slate-300">{complaint.trustImpactHint ?? "Tracked by engine"}</strong>
+                          </div>
+                        </div>
+
+                        <div className="flex flex-wrap gap-3 pt-2">
+                          <Link className="btn-secondary text-xs px-3 py-1.5" href={`/unit/${complaint.unitId}`}>
+                            Open unit detail
+                          </Link>
+                          {role !== "student" && !complaint.resolved ? (
+                            <button className="btn-primary text-xs px-3 py-1.5 font-semibold" onClick={() => handleResolve(complaint.id)} type="button">
+                              Resolve issue
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </div>
+                  </Reveal>
+                ))}
+              </div>
+            ) : (
+              <div className="empty-state">No complaints found.</div>
+            )}
+          </div>
+        </article>
+
+        <div className="grid gap-5">
+          {role === "student" ? (
+            <FadeIn>
+              <ComplaintForm />
+            </FadeIn>
+          ) : (
+            <article className="glass-panel p-6 rounded-[24px] bg-[var(--bg-surface)] border border-white/5">
+              <div className="eyebrow">Resolution workflow</div>
+              <h2 className="section-title mt-4">Governance response guide</h2>
+              <div className="mt-5 grid gap-3">
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+                  Active complaints continue to influence trust until resolved.
+                </div>
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+                  Late resolution can trigger stronger audit pressure and hide units from students.
+                </div>
+                <div className="rounded-[24px] border border-white/10 bg-white/5 p-4 text-sm leading-6 text-slate-300">
+                  Resolution should be accompanied by evidence and a clear rationale for restored confidence.
+                </div>
+              </div>
+            </article>
+          )}
+        </div>
+      </section>
     </div>
   );
 }

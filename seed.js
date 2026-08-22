@@ -1,6 +1,6 @@
 const bcrypt = require("bcrypt");
 const { PrismaClient } = require("@prisma/client");
-const { calculateTrustScore } = require("./engines/trustEngine");
+const { calculateTrustScore } = require("./services/intelligence/trustEngine");
 const { generateOccupantId, isValidOccupantId } = require("./services/occupantIdService");
 
 const prisma = new PrismaClient();

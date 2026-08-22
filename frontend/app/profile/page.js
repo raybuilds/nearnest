@@ -1,405 +1,223 @@
 "use client";
 
-import { useEffect, useState } from "react";
 import Link from "next/link";
-import { apiRequest } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { getProfile } from "@/lib/api";
+import { formatShortDate, getRoleClass, getTrustBand } from "@/lib/governance";
+import { clearSession, getStoredRole, getStoredUser, requireSessionOrRedirect } from "@/lib/session";
 
-function formatDate(date) {
-  if (!date) return "N/A";
-  return new Date(date).toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function Stat({ label, value }) {
+function SectionCard({ title, children }) {
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3">
-      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-slate-900">{value ?? "N/A"}</p>
-    </div>
-  );
-}
-
-function OccupantIdStat({ label, displayValue, rawValue }) {
-  const primary = displayValue || rawValue || "N/A";
-  const showRaw = Boolean(displayValue && rawValue && displayValue !== rawValue);
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3">
-      <p className="text-xs uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="mt-1 text-lg font-semibold text-slate-900">{primary}</p>
-      {showRaw && <p className="mt-1 text-xs text-slate-500">Raw: {rawValue}</p>}
-    </div>
-  );
-}
-
-function boolLabel(value) {
-  if (value === undefined || value === null) return "N/A";
-  return value ? "Yes" : "No";
-}
-
-function trustBandTone(trustBand) {
-  if (trustBand === "priority") return "text-emerald-700 bg-emerald-50 border-emerald-200";
-  if (trustBand === "hidden") return "text-red-700 bg-red-50 border-red-200";
-  return "text-amber-700 bg-amber-50 border-amber-200";
-}
-
-function DensityBadge({ count }) {
-  let tone = "border-slate-300 bg-slate-50 text-slate-700";
-  if (count >= 5) tone = "border-red-300 bg-red-50 text-red-700";
-  else if (count >= 3) tone = "border-amber-300 bg-amber-50 text-amber-700";
-  return <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${tone}`}>Density: {count}/30d</span>;
-}
-
-function normalizeMediaItems(items) {
-  if (!Array.isArray(items)) return [];
-  const seen = new Set();
-  return items
-    .filter((item) => item && typeof item.publicUrl === "string")
-    .map((item) => ({ ...item, publicUrl: item.publicUrl.trim() }))
-    .filter((item) => /^https?:\/\//i.test(item.publicUrl) && item.publicUrl.length >= 12)
-    .filter((item) => {
-      if (seen.has(item.publicUrl)) return false;
-      seen.add(item.publicUrl);
-      return true;
-    });
-}
-
-function MediaGrid({ title, items, kind }) {
-  const list = normalizeMediaItems(items);
-  return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3">
-      <p className="text-xs uppercase tracking-wide text-slate-500">{title}</p>
-      {list.length === 0 ? (
-        <p className="mt-2 text-sm text-slate-600">No items</p>
-      ) : (
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {list.slice(0, 4).map((item, index) => {
-            const label = `${title.slice(0, -1)} ${index + 1}`;
-            const isPhoto = kind === "photo";
-            return (
-              <a
-                key={`media-${item.id}`}
-                href={item.publicUrl}
-                target="_blank"
-                rel="noreferrer"
-                className="rounded border border-slate-200 p-2 text-xs text-slate-700 hover:bg-slate-50"
-              >
-                {isPhoto && (
-                  <img
-                    src={item.publicUrl}
-                    alt={label}
-                    className="mb-2 h-16 w-full rounded object-cover"
-                    loading="lazy"
-                  />
-                )}
-                <p className="font-semibold">{label}</p>
-                <p className="truncate text-slate-500">{item.publicUrl}</p>
-              </a>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
-function CurrentAccommodationCard({ data }) {
-  if (!data) return null;
-
-  const identity = data.identity || {};
-  const trust = data.trust || {};
-  const properties = data.properties || {};
-  const availability = data.availability || {};
-  const complaintHealth = data.complaintHealth || {};
-  const trend = complaintHealth.trend || {};
-
-  return (
-    <section className="rounded-xl border bg-white p-4 shadow-sm">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-xl font-semibold">Current Accommodation</h2>
-        <div className="flex gap-2">
-          {data.links?.unitPage && (
-            <Link className="rounded border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50" href={data.links.unitPage}>
-              View Unit
-            </Link>
-          )}
-          {data.links?.unitComplaintsPage && (
-            <Link className="rounded border border-slate-300 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50" href={data.links.unitComplaintsPage}>
-              View Complaint Ledger
-            </Link>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-3 grid gap-2 md:grid-cols-2">
-        <Stat label="Unit" value={identity.hostelLabel || identity.unitLabel} />
-        <Stat label="Corridor" value={identity.corridor ? `#${identity.corridor.id} - ${identity.corridor.name}` : "N/A"} />
-        <Stat label="Room Number" value={identity.roomNumber || "N/A"} />
-        <Stat label="Bed Slot" value={identity.bedSlot ? `${identity.bedSlot}` : "N/A"} />
-        <OccupantIdStat label="Occupant ID" displayValue={identity.occupantIdDisplay || null} rawValue={identity.occupantId || null} />
-        <Stat label="Check-in Date" value={formatDate(identity.checkInDate)} />
-      </div>
-
-      <div className="mt-4 rounded-lg border border-slate-200 bg-slate-50 p-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${trustBandTone(trust.trustBand)}`}>
-            Trust: {trust.trustScore ?? "N/A"} ({trust.trustBand || "unknown"})
-          </span>
-          <DensityBadge count={trust.complaintDensity30d || 0} />
-          <span className={`rounded-full border px-2 py-1 text-xs font-semibold ${trust.status === "suspended" ? "border-red-300 bg-red-50 text-red-700" : "border-slate-300 bg-white text-slate-700"}`}>
-            Status: {trust.status || "N/A"}
-          </span>
-          {trust.auditRequired && <span className="rounded-full border border-amber-300 bg-amber-50 px-2 py-1 text-xs font-semibold text-amber-700">Audit Required</span>}
-        </div>
-        <p className={`mt-2 text-sm ${trust.visibilityThresholdBreached ? "text-red-700" : "text-slate-700"}`}>
-          {trust.message || "Unit governance status unavailable."}
-        </p>
-      </div>
-
-      <div className="mt-4 grid gap-2 md:grid-cols-2">
-        <Stat label="Rent" value={properties.rent !== undefined ? `Rs ${properties.rent}` : "N/A"} />
-        <Stat label="Distance" value={properties.distanceKm !== undefined ? `${properties.distanceKm} km` : "N/A"} />
-        <Stat label="Institution Proximity" value={properties.institutionProximityKm !== undefined ? `${properties.institutionProximityKm} km` : "N/A"} />
-        <Stat label="Occupancy Type" value={properties.occupancyType || "N/A"} />
-        <Stat label="AC" value={boolLabel(properties.ac)} />
-        <Stat label="Bed Available" value={boolLabel(properties.bedAvailable)} />
-        <Stat label="Water Access" value={boolLabel(properties.waterAvailable)} />
-        <Stat label="Toilets Available" value={properties.toiletsAvailable ?? "N/A"} />
-        <Stat label="Ventilation" value={boolLabel(properties.ventilationGood)} />
-        <Stat label="Availability" value={`${availability.availableSlots ?? 0} / ${availability.capacity ?? 0} slots`} />
-      </div>
-
-      <div className="mt-4 grid gap-2 md:grid-cols-3">
-        <MediaGrid title="Photos" items={data.media?.photos} kind="photo" />
-        <MediaGrid title="Documents" items={data.media?.documents} kind="document" />
-        <MediaGrid title="360 Walkthroughs" items={data.media?.walkthroughs360} kind="walkthrough360" />
-      </div>
-
-      <div className="mt-4 rounded-lg border border-slate-200 bg-white p-3">
-        <p className="text-sm font-semibold text-slate-900">Unit Health (Last {complaintHealth.windowDays || 30} Days)</p>
-        <div className="mt-2 grid gap-2 md:grid-cols-3">
-          <Stat label="Complaints (30d)" value={complaintHealth.totalComplaints30d ?? 0} />
-          <Stat label="Open (30d)" value={complaintHealth.openComplaints30d ?? 0} />
-          <Stat label="My Open Complaints" value={complaintHealth.myOpenComplaints ?? 0} />
-          <Stat label="Avg Resolution" value={complaintHealth.avgResolutionHours30d !== null && complaintHealth.avgResolutionHours30d !== undefined ? `${complaintHealth.avgResolutionHours30d}h` : "N/A"} />
-          <Stat label="SLA Breaches" value={complaintHealth.slaBreaches30d ?? 0} />
-          <Stat label="Incident Flags" value={complaintHealth.incidentFlags30d ?? 0} />
-        </div>
-        <p className="mt-2 text-xs text-slate-600">
-          Trend: {trend.direction || "flat"} ({trend.previous14d ?? 0} to {trend.current14d ?? 0} complaints in successive 14-day windows)
-        </p>
-      </div>
-    </section>
-  );
-}
-
-function StudentProfile({ data }) {
-  const identity = data?.identity || {};
-  const occupancy = data?.occupancy || {};
-  const complaintSummary = data?.complaintSummary || {};
-  const history = Array.isArray(occupancy.history) ? occupancy.history : [];
-  const currentAccommodation = data?.currentAccommodation || null;
-
-  return (
-    <div className="space-y-4">
-      <section className="rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-xl font-semibold">Identity</h2>
-        <div className="grid gap-2 md:grid-cols-2">
-          <Stat label="Name" value={identity.name} />
-          <Stat label="Student ID" value={identity.studentId} />
-          <Stat label="Institution" value={identity.institution?.name || "N/A"} />
-          <Stat label="Intake" value={identity.intake} />
-          <Stat label="Corridor" value={identity.corridor ? `#${identity.corridor.id} - ${identity.corridor.name}` : "N/A"} />
-          <OccupantIdStat
-            label="Occupant ID"
-            displayValue={identity.occupantIdDisplay || null}
-            rawValue={identity.occupantId || identity.currentOccupantId || null}
-          />
-          <Stat label="VDP Status" value={identity.vdp?.status || "not_joined"} />
-          <Stat label="Status" value={identity.status} />
-          <Stat label="Joined Date" value={formatDate(identity.joinedDate)} />
-        </div>
-      </section>
-
-      <CurrentAccommodationCard data={currentAccommodation} />
-
-      <section className="rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-xl font-semibold">Occupancy</h2>
-        <div className="grid gap-2 md:grid-cols-2">
-          <Stat label="Current Unit" value={occupancy.currentUnit ? `Unit #${occupancy.currentUnit.unitId}` : "None"} />
-          <Stat label="Check-in Date" value={formatDate(occupancy.currentUnit?.checkInDate)} />
-        </div>
-        <div className="mt-4">
-          <p className="mb-2 text-sm font-semibold text-slate-800">Occupancy History</p>
-          {history.length === 0 && <p className="text-sm text-slate-600">No occupancy history yet.</p>}
-          {history.length > 0 && (
-            <div className="space-y-2">
-              {history.slice(0, 10).map((item) => (
-                <div className="rounded-lg border border-slate-200 p-3" key={item.occupancyId}>
-                  <p className="text-sm font-semibold text-slate-900">Unit #{item.unitId}</p>
-                  <p className="text-xs text-slate-600">Start: {formatDate(item.startDate)}</p>
-                  <p className="text-xs text-slate-600">End: {formatDate(item.endDate)}</p>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-        <div className="mt-4">
-          <p className="mb-2 text-sm font-semibold text-slate-800">Occupant IDs</p>
-          {!Array.isArray(occupancy.occupantIds) || occupancy.occupantIds.length === 0 ? (
-            <p className="text-sm text-slate-600">No occupant IDs yet.</p>
-          ) : (
-            <div className="flex flex-wrap gap-2">
-              {occupancy.occupantIds.map((item) => (
-                <span
-                  className={`rounded-full border px-3 py-1 text-xs font-semibold ${
-                    item.active ? "border-green-300 bg-green-50 text-green-700" : "border-slate-300 bg-slate-50 text-slate-700"
-                  }`}
-                  key={`occupant-id-${item.id}`}
-                >
-                  {item.publicIdDisplay || item.publicId} {item.active ? "(Active)" : "(Inactive)"}
-                </span>
-              ))}
-            </div>
-          )}
-        </div>
-      </section>
-
-      <section className="rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-xl font-semibold">Complaint History Summary</h2>
-        <div className="grid gap-2 md:grid-cols-3">
-          <Stat label="Total Complaints Submitted" value={complaintSummary.totalSubmitted ?? 0} />
-          <Stat label="Open Complaints" value={complaintSummary.openComplaints ?? 0} />
-          <Stat label="Avg Resolution Time" value={complaintSummary.avgResolutionHours !== null && complaintSummary.avgResolutionHours !== undefined ? `${complaintSummary.avgResolutionHours}h` : "N/A"} />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function LandlordProfile({ data }) {
-  const identity = data?.identity || {};
-  const portfolio = data?.portfolioSummary || {};
-  const risk = data?.riskSnapshot || {};
-  const corridors = Array.isArray(identity.corridorsActiveIn) ? identity.corridorsActiveIn : [];
-
-  return (
-    <div className="space-y-4">
-      <section className="rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-xl font-semibold">Identity</h2>
-        <div className="grid gap-2 md:grid-cols-2">
-          <Stat label="Name" value={identity.name} />
-          <Stat label="Landlord ID" value={identity.landlordId} />
-          <Stat label="Joined Date" value={formatDate(identity.joinedDate)} />
-          <Stat
-            label="Corridors Active In"
-            value={corridors.length > 0 ? corridors.map((item) => `#${item.id}`).join(", ") : "None"}
-          />
-        </div>
-      </section>
-
-      <section className="rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-xl font-semibold">Portfolio Summary</h2>
-        <div className="grid gap-2 md:grid-cols-3">
-          <Stat label="Total Units" value={portfolio.totalUnits ?? 0} />
-          <Stat label="Approved Units" value={portfolio.approvedUnits ?? 0} />
-          <Stat label="Suspended Units" value={portfolio.suspendedUnits ?? 0} />
-          <Stat label="Avg Trust Across Units" value={portfolio.avgTrustAcrossUnits ?? "N/A"} />
-          <Stat label="SLA Compliance %" value={portfolio.slaCompliance ?? "N/A"} />
-        </div>
-      </section>
-
-      <section className="rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-xl font-semibold">Risk Snapshot</h2>
-        <div className="grid gap-2 md:grid-cols-2">
-          <Stat label="Units at Audit Risk" value={risk.unitsAtAuditRisk ?? 0} />
-          <Stat label="Active Complaints" value={risk.activeComplaints ?? 0} />
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function AdminProfile({ data }) {
-  const identity = data?.identity || {};
-  const scope = data?.governanceScope || {};
-  const corridors = Array.isArray(scope.assignedCorridors) ? scope.assignedCorridors : [];
-
-  return (
-    <div className="space-y-4">
-      <section className="rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-xl font-semibold">Identity</h2>
-        <div className="grid gap-2 md:grid-cols-2">
-          <Stat label="Admin ID" value={identity.adminId} />
-          <Stat label="Name" value={identity.name} />
-          <Stat label="Joined Date" value={formatDate(identity.joinedDate)} />
-          <Stat
-            label="Assigned Corridors"
-            value={corridors.length > 0 ? corridors.map((item) => `#${item.id}`).join(", ") : "None"}
-          />
-        </div>
-      </section>
-
-      <section className="rounded-xl border bg-white p-4 shadow-sm">
-        <h2 className="mb-3 text-xl font-semibold">Governance Scope</h2>
-        <div className="grid gap-2 md:grid-cols-3">
-          <Stat label="Total Units Governed" value={scope.totalUnitsGoverned ?? 0} />
-          <Stat label="Total Audits Triggered" value={scope.totalAuditsTriggered ?? 0} />
-          <Stat label="Active Suspensions" value={scope.activeSuspensions ?? 0} />
-          <Stat label="Complaint Density (30d)" value={scope.complaintDensityLast30Days ?? 0} />
-        </div>
-      </section>
-    </div>
+    <article className="glass-panel p-6">
+      <div className="eyebrow">{title}</div>
+      <div className="mt-5">{children}</div>
+    </article>
   );
 }
 
 export default function ProfilePage() {
-  const [role, setRole] = useState("");
+  const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [payload, setPayload] = useState(null);
+  const [user, setUser] = useState({});
+  const [role, setRole] = useState("");
 
   useEffect(() => {
-    const roleFromStorage = localStorage.getItem("role") || "";
-    setRole(roleFromStorage);
-  }, []);
+    if (!requireSessionOrRedirect()) return;
 
-  useEffect(() => {
-    if (!role) {
-      setLoading(false);
-      return;
+    setUser(getStoredUser());
+    setRole(getStoredRole());
+
+    let active = true;
+
+    async function loadProfile() {
+      try {
+        const payload = await getProfile();
+        if (active) setProfile(payload);
+      } catch (requestError) {
+        const message = requestError.message || "Unable to load profile.";
+        if (!active) return;
+
+        if (message === "User not found") {
+          clearSession();
+          window.location.href = "/login?reason=session-expired";
+          return;
+        }
+
+        setError(message);
+      } finally {
+        if (active) setLoading(false);
+      }
     }
 
-    (async () => {
-      setLoading(true);
-      setError("");
-      try {
-        const data = await apiRequest("/profile");
-        setPayload(data);
-      } catch (err) {
-        setError(err.message || "Failed to load profile");
-      } finally {
-        setLoading(false);
-      }
-    })();
-  }, [role]);
+    loadProfile();
+    return () => {
+      active = false;
+    };
+  }, []);
 
-  if (!role) {
-    return <p className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Please login first.</p>;
+  const initials = useMemo(() => {
+    const source = profile?.identity?.name || user?.name || "NearNest";
+    return source
+      .split(" ")
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((chunk) => chunk[0]?.toUpperCase())
+      .join("");
+  }, [profile, user]);
+
+  const roleValue = profile?.role || role || "student";
+  const currentTrust = getTrustBand(profile?.currentAccommodation?.trustScore || profile?.portfolioSummary?.avgTrustAcrossUnits || 0);
+  const posture = (() => {
+    if (roleValue === "student" || roleValue === "landlord") {
+      return {
+        title: currentTrust.label,
+        body: currentTrust.narrative,
+      };
+    }
+
+    if (roleValue === "admin") {
+      return {
+        title: "Governance Control",
+        body: "Administrative visibility spans corridor risk, audits, suspensions, and complaint density.",
+      };
+    }
+
+    return {
+      title: "Profile Active",
+      body: "Role-based visibility is active for this account.",
+    };
+  })();
+
+  if (loading) {
+    return (
+      <div className="grid gap-5">
+        <div className="surface-panel h-56 animate-pulse" />
+        <div className="surface-panel h-72 animate-pulse" />
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-4">
-      <h1 className="text-3xl font-bold">Profile</h1>
-      {loading && <p className="text-sm text-slate-600">Loading profile...</p>}
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {!loading && !error && role === "student" && <StudentProfile data={payload} />}
-      {!loading && !error && role === "landlord" && <LandlordProfile data={payload} />}
-      {!loading && !error && role === "admin" && <AdminProfile data={payload} />}
+    <div className="grid gap-6">
+      {error ? <div className="status-banner error">{error}</div> : null}
+
+      <section className="glass-panel-strong blueprint-border flex flex-col gap-6 p-8 sm:flex-row sm:items-center sm:justify-between sm:p-10">
+        <div className="flex items-center gap-5">
+          <div className="grid h-20 w-20 place-items-center rounded-[28px] bg-gradient-to-br from-violet-300 via-sky-300 to-emerald-200 text-2xl font-bold text-slate-950">
+            {initials || "NN"}
+          </div>
+          <div>
+            <div className="eyebrow">Profile</div>
+            <h1 className="page-title mt-4 text-gradient">{profile?.identity?.name || user?.name || "NearNest User"}</h1>
+            <p className="subtle-copy mt-3">{profile?.identity?.email || user?.email || "Email unavailable"}</p>
+            <div className="mt-4">
+              <span className={getRoleClass(roleValue)}>{roleValue}</span>
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-3 sm:min-w-[260px]">
+          <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+            <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Governance posture</p>
+            <strong className="mt-2 block text-2xl text-white">{posture.title}</strong>
+            <span className="mt-2 block text-sm leading-6 text-slate-400">{posture.body}</span>
+          </div>
+        </div>
+      </section>
+
+      {profile?.role === "student" ? (
+        <div className="grid gap-5 lg:grid-cols-2">
+          <SectionCard title="Identity">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Corridor</p><strong className="mt-2 block text-white">{profile?.identity?.corridorId || "Not set"}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Institution</p><strong className="mt-2 block text-white">{profile?.identity?.institutionId || "Not set"}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Intake</p><strong className="mt-2 block text-white">{profile?.identity?.intake || "Not set"}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Complaints filed</p><strong className="mt-2 block text-white">{profile?.complaintSummary?.totalSubmitted || 0}</strong></div>
+            </div>
+          </SectionCard>
+
+          <SectionCard title="Current Unit">
+            {profile?.currentAccommodation ? (
+              <>
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <strong className="text-2xl text-white">Unit {profile.currentAccommodation.unitId}</strong>
+                  <span className={`signal-chip ${getTrustBand(profile.currentAccommodation.trustScore).tone}`}>
+                    {getTrustBand(profile.currentAccommodation.trustScore).label}
+                  </span>
+                </div>
+                <div className="mt-4 trust-track">
+                  <div className={`trust-fill ${getTrustBand(profile.currentAccommodation.trustScore).fillClass}`} style={{ width: `${profile.currentAccommodation.trustScore || 0}%` }} />
+                </div>
+                <div className="mt-5 grid gap-3 md:grid-cols-2">
+                  <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Trust score</p><strong className="mt-2 block text-white">{profile.currentAccommodation.trustScore || 0}</strong></div>
+                  <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Active complaints</p><strong className="mt-2 block text-white">{profile.currentAccommodation.activeComplaints || 0}</strong></div>
+                </div>
+                <Link className="btn-secondary mt-5" href={`/unit/${profile.currentAccommodation.unitId}`}>
+                  Open unit governance detail
+                </Link>
+              </>
+            ) : (
+              <div className="empty-state">No current unit is associated with this profile.</div>
+            )}
+          </SectionCard>
+        </div>
+      ) : null}
+
+      {profile?.role === "landlord" ? (
+        <div className="grid gap-5 lg:grid-cols-2">
+          <SectionCard title="Portfolio">
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Total units</p><strong className="mt-2 block text-white">{profile?.portfolioSummary?.totalUnits || 0}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Approved</p><strong className="mt-2 block text-white">{profile?.portfolioSummary?.approvedUnits || 0}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Suspended</p><strong className="mt-2 block text-white">{profile?.portfolioSummary?.suspendedUnits || 0}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">SLA compliance</p><strong className="mt-2 block text-white">{profile?.portfolioSummary?.slaCompliance ?? 0}%</strong></div>
+            </div>
+          </SectionCard>
+          <SectionCard title="Risk Snapshot">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Audit risk</p><strong className="mt-2 block text-white">{profile?.riskSnapshot?.unitsAtAuditRisk || 0}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Active complaints</p><strong className="mt-2 block text-white">{profile?.riskSnapshot?.activeComplaints || 0}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Avg trust</p><strong className="mt-2 block text-white">{profile?.portfolioSummary?.avgTrustAcrossUnits || 0}</strong></div>
+            </div>
+          </SectionCard>
+        </div>
+      ) : null}
+
+      {profile?.role === "admin" ? (
+        <div className="grid gap-5 lg:grid-cols-2">
+          <SectionCard title="Governance Scope">
+            <div className="flex flex-wrap gap-2">
+              {(profile?.governanceScope?.assignedCorridors || []).map((corridor) => (
+                <span key={corridor.id} className="signal-chip signal-info">{corridor.name}</span>
+              ))}
+              {!profile?.governanceScope?.assignedCorridors?.length ? <div className="empty-state w-full">No assigned corridors found.</div> : null}
+            </div>
+          </SectionCard>
+          <SectionCard title="Audit Stats">
+            <div className="grid gap-4 md:grid-cols-3">
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Governed units</p><strong className="mt-2 block text-white">{profile?.governanceScope?.totalUnitsGoverned || 0}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Audits triggered</p><strong className="mt-2 block text-white">{profile?.governanceScope?.totalAuditsTriggered || 0}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">30 day density</p><strong className="mt-2 block text-white">{profile?.governanceScope?.complaintDensityLast30Days || 0}</strong></div>
+            </div>
+          </SectionCard>
+        </div>
+      ) : null}
+
+      <section className="glass-panel p-6">
+        <div className="eyebrow">Activity history</div>
+        <div className="mt-5 grid gap-3">
+          {(profile?.occupancy?.history || []).map((item) => (
+            <div key={item.occupancyId} className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+              <strong className="text-white">Unit {item.unitId}</strong>
+              <p className="mt-2 text-sm text-slate-400">
+                {formatShortDate(item.startDate)} to {item.endDate ? formatShortDate(item.endDate) : "Present"}
+              </p>
+            </div>
+          ))}
+          {!profile?.occupancy?.history?.length ? <div className="empty-state">No additional history is available for this profile.</div> : null}
+        </div>
+      </section>
     </div>
   );
 }

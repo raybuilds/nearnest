@@ -1,966 +1,1298 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useState } from "react";
-import { apiRequest } from "@/lib/api";
-import UnitCard from "@/components/UnitCard";
+import { useRouter } from "next/navigation";
+import { useEffect, useMemo, useState } from "react";
 import ComplaintForm from "@/components/ComplaintForm";
+import UnitCard from "@/components/UnitCard";
+import {
+  createUnit,
+  getAdminAuditQueue,
+  getAdminDemand,
+  getAdminUnits,
+  getCorridorDemand,
+  getCorridorOverview,
+  getCorridors,
+  getDawnInsights,
+  getHiddenReasons,
+  getLandlordUnits,
+  getProfile,
+  getUnits,
+  getAdminPayments,
+  overridePayment,
+  getAdminCompliance,
+  verifyCompliance,
+  getAdminAgreements,
+  terminateAgreement,
+  getAdminAnalytics,
+} from "@/lib/api";
+import { getRiskTone, getStatusTone, getTrustBand } from "@/lib/governance";
+import { getStoredRole } from "@/lib/session";
+import DawnAnalyticsViewer from "@/components/DawnAnalyticsViewer";
+import { FadeIn, Reveal, Expand } from "@/components/ui/Motion";
 
-function StudentDashboard() {
-  const [corridorId, setCorridorId] = useState("");
-  const [corridors, setCorridors] = useState([]);
-  const [loadingCorridors, setLoadingCorridors] = useState(true);
-  const [units, setUnits] = useState([]);
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [hasLoadedUnits, setHasLoadedUnits] = useState(false);
-  const [maxRent, setMaxRent] = useState("");
-  const [maxDistance, setMaxDistance] = useState("");
-  const [acFilter, setAcFilter] = useState("");
-  const [demandMetrics, setDemandMetrics] = useState(null);
-  const [loadingDemand, setLoadingDemand] = useState(false);
-  const [shortlistingUnitId, setShortlistingUnitId] = useState(null);
-  const [hiddenReasons, setHiddenReasons] = useState([]);
-  const [loadingHiddenReasons, setLoadingHiddenReasons] = useState(false);
 
-  useEffect(() => {
-    setCorridorId(localStorage.getItem("corridorId") || "");
-    (async () => {
-      try {
-        const data = await apiRequest("/corridors");
-        setCorridors(Array.isArray(data) ? data : []);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoadingCorridors(false);
-      }
-    })();
-  }, []);
+function InsightCards({ insights }) {
+  if (!insights.length) return null;
 
-  useEffect(() => {
-    if (!corridorId) {
-      setDemandMetrics(null);
-      return;
-    }
+  return (
+    <section className="grid gap-4 lg:grid-cols-3">
+      {insights.slice(0, 3).map((insight, index) => (
+        <article key={`${insight.title || insight.type}-${index}`} className="glass-panel p-5">
+          <div className="flex items-center gap-2">
+            <span className={`signal-chip ${getRiskTone(insight.riskLevel || insight.severity)}`}>
+              {insight.type || "Insight"}
+            </span>
+          </div>
+          <h3 className="mt-4 text-lg font-semibold text-white">{insight.title || "Operational insight"}</h3>
+          <p className="mt-3 text-sm leading-6 text-slate-300">{insight.message || insight.body || insight.summary}</p>
+          {insight.recommendation ? <p className="mt-3 text-sm text-emerald-200">Recommended action: {insight.recommendation}</p> : null}
+        </article>
+      ))}
+    </section>
+  );
+}
 
-    (async () => {
-      setLoadingDemand(true);
-      try {
-        const data = await apiRequest(`/corridor/${Number(corridorId)}/demand`);
-        setDemandMetrics(data);
-      } catch {
-        setDemandMetrics(null);
-      } finally {
-        setLoadingDemand(false);
-      }
-    })();
-  }, [corridorId]);
+function StudentDashboard({
+  corridors,
+  corridorId,
+  setCorridorId,
+  filters,
+  setFilters,
+  visibleUnits,
+  hiddenReasons,
+  corridorOverview,
+  demand,
+  reload,
+  insights,
+  loading,
+  error,
+}) {
+  const averageTrust = corridorOverview?.stats?.averageTrustScore || 0;
+  const riskLevel = corridorOverview?.riskSummary?.riskLevel || "Stable";
+  const visibleCount = corridorOverview?.stats?.visibleUnits || visibleUnits.length || 0;
+  const hiddenCount = corridorOverview?.stats?.hiddenUnits || hiddenReasons?.hiddenCount || 0;
 
-  async function shortlistUnit(unitId) {
-    setShortlistingUnitId(unitId);
-    setError("");
-    try {
-      await apiRequest("/shortlist", {
-        method: "POST",
-        body: JSON.stringify({ unitId }),
-      });
-      const metrics = await apiRequest(`/corridor/${Number(corridorId)}/demand`);
-      setDemandMetrics(metrics);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setShortlistingUnitId(null);
-    }
-  }
-
-  async function loadUnits(e) {
-    e.preventDefault();
-    setHasLoadedUnits(true);
-    setError("");
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (maxRent) params.set("maxRent", maxRent);
-      if (maxDistance) params.set("maxDistance", maxDistance);
-      if (acFilter) params.set("ac", acFilter);
-      const query = params.toString() ? `?${params.toString()}` : "";
-      const data = await apiRequest(`/units/${Number(corridorId)}${query}`);
-      setUnits(Array.isArray(data) ? data : []);
-      setLoadingHiddenReasons(true);
-      try {
-        const hiddenData = await apiRequest(`/units/${Number(corridorId)}/hidden-reasons`);
-        setHiddenReasons(Array.isArray(hiddenData?.hiddenUnits) ? hiddenData.hiddenUnits : []);
-      } catch {
-        setHiddenReasons([]);
-      } finally {
-        setLoadingHiddenReasons(false);
-      }
-    } catch (err) {
-      setUnits([]);
-      setHiddenReasons([]);
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
+  function humanizeHiddenReason(reason) {
+    const normalized = String(reason || "").toLowerCase();
+    if (normalized.includes("audit")) return "Hidden because safety checks failed or are still under review.";
+    if (normalized.includes("trust")) return "Hidden because trust signals dropped below the safe visibility level.";
+    if (normalized.includes("status")) return "Hidden because approval is still pending.";
+    if (normalized.includes("complaint")) return "Hidden because recent complaints raised safety concerns.";
+    return "Hidden until safety and trust checks improve.";
   }
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Student Dashboard</h2>
-      <form onSubmit={loadUnits} className="grid max-w-4xl gap-2 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-5">
-        <select className="rounded border p-2 md:col-span-2" value={corridorId} onChange={(e) => setCorridorId(e.target.value)} required>
-          <option value="">{loadingCorridors ? "Loading corridors..." : "Select corridor"}</option>
-          {corridors.map((corridor) => (
-            <option key={corridor.id} value={corridor.id}>
-              #{corridor.id} - {corridor.name}
-            </option>
-          ))}
-        </select>
-        <input className="rounded border p-2" placeholder="maxRent" value={maxRent} onChange={(e) => setMaxRent(e.target.value)} />
-        <input className="rounded border p-2" placeholder="maxDistance" value={maxDistance} onChange={(e) => setMaxDistance(e.target.value)} />
-        <select className="rounded border p-2" value={acFilter} onChange={(e) => setAcFilter(e.target.value)}>
-          <option value="">AC any</option>
-          <option value="true">AC only</option>
-          <option value="false">Non-AC only</option>
-        </select>
-        <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60 md:col-span-5" type="submit" disabled={loading}>
-          {loading ? "Loading..." : "Load Units"}
-        </button>
-      </form>
-
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {loadingDemand && <p className="text-sm text-slate-600">Loading demand metrics...</p>}
-      {demandMetrics && (
-        <section className="rounded-xl border bg-white p-4 shadow-sm">
-          <h3 className="mb-2 text-lg font-semibold">Verified Demand Pool</h3>
-          <p className="text-sm text-slate-700">Total verified students: {demandMetrics.totalVdpStudents}</p>
-          <p className="text-sm text-slate-700">Shortlists: {demandMetrics.shortlistCount}</p>
-          <p className="text-sm text-slate-700">
-            Occupancy: {demandMetrics.occupancy.totalActiveOccupancies}/{demandMetrics.occupancy.totalCapacity}
+    <div className="grid gap-6">
+      <section className="governance-grid">
+        <div className="glass-panel-strong blueprint-border lg:col-span-8 p-8 sm:p-10">
+          <div className="eyebrow">Student Governance View</div>
+          <h1 className="page-title mt-5 text-gradient">Choose from units that meet safety and trust standards</h1>
+          <p className="subtle-copy mt-4 max-w-3xl">
+            Browse options that are currently verified, safe to review, and still meeting the trust checks used across this area.
           </p>
-        </section>
-      )}
-      {hasLoadedUnits && !loading && !error && units.length === 0 && (
-        <p className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-          No visible units in this corridor. Units may be blocked by baseline/trust gates.
-        </p>
-      )}
-      {hasLoadedUnits && !loading && !error && (
-        <section className="rounded-xl border bg-white p-4 shadow-sm">
-          <h3 className="mb-2 text-lg font-semibold">Why Some Units Are Hidden</h3>
-          {loadingHiddenReasons && <p className="text-sm text-slate-600">Loading hidden-unit reasons...</p>}
-          {!loadingHiddenReasons && hiddenReasons.length === 0 && (
-            <p className="text-sm text-slate-700">No currently hidden units in this corridor.</p>
-          )}
-          {!loadingHiddenReasons && hiddenReasons.length > 0 && (
-            <ul className="list-disc space-y-1 pl-5 text-sm text-slate-700">
-              {hiddenReasons.slice(0, 6).map((entry) => (
-                <li key={entry.unitId}>
-                  Unit #{entry.unitId}: {Array.isArray(entry.reasons) ? entry.reasons.join(", ") : "visibility-gated"}
-                </li>
-              ))}
-            </ul>
-          )}
-        </section>
-      )}
 
-      <section className="grid gap-3 md:grid-cols-2">
-        {units.map((unit) => (
-          <div key={unit.id} className="space-y-2">
-            <Link className="block" href={`/unit/${unit.id}`}>
-              <UnitCard unit={unit} />
-            </Link>
-            <Link
-              className="block w-full rounded border border-slate-300 bg-white px-3 py-2 text-center text-sm text-slate-700 hover:bg-slate-50"
-              href={`/unit/${unit.id}`}
-            >
-              View Unit #{unit.id}
-            </Link>
-            <button
-              className="w-full rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
-              onClick={() => shortlistUnit(unit.id)}
-              disabled={shortlistingUnitId === unit.id}
-              type="button"
-            >
-              {shortlistingUnitId === unit.id ? "Shortlisting..." : "Shortlist"}
-            </button>
+          <div className="mt-8">
+            <div className="mb-4">
+              <p className="text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Refine your options</p>
+            </div>
+            <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Corridor</span>
+              <select className="input-shell" onChange={(event) => setCorridorId(event.target.value)} value={corridorId}>
+                <option value="">Select corridor</option>
+                {corridors.map((corridor) => (
+                  <option key={corridor.id} value={corridor.id}>
+                    {corridor.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Max rent</span>
+              <input className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, maxRent: event.target.value }))} type="number" value={filters.maxRent} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>Max distance</span>
+              <input className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, maxDistance: event.target.value }))} type="number" value={filters.maxDistance} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>AC filter</span>
+              <select className="input-shell" onChange={(event) => setFilters((current) => ({ ...current, ac: event.target.value }))} value={filters.ac}>
+                <option value="">Any</option>
+                <option value="true">AC only</option>
+                <option value="false">No AC</option>
+              </select>
+            </label>
+            </div>
           </div>
-        ))}
+
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button className="btn-primary" onClick={reload} type="button">
+              Apply filters
+            </button>
+            <div className="status-banner info">
+              Only verified, safe units are shown.
+            </div>
+          </div>
+        </div>
+
+        <div className="grid gap-4 lg:col-span-4">
+          <div className="metric-tile">
+            <p>Units visible</p>
+            <strong>{visibleUnits.length}</strong>
+            <span>Current inventory above trust and governance threshold.</span>
+          </div>
+          <div className="metric-tile">
+            <p>Units hidden</p>
+            <strong>{hiddenReasons?.hiddenCount || 0}</strong>
+            <span>Excluded because trust, status, or audit posture blocked visibility.</span>
+          </div>
+          <div className="metric-tile">
+            <p>Avg corridor trust</p>
+            <strong>{averageTrust}</strong>
+            <span>Computed from all units in the selected corridor.</span>
+          </div>
+        </div>
       </section>
+
+      {error ? <div className="status-banner error">{error}</div> : null}
+
+      <section className="grid gap-4 xl:grid-cols-[1.5fr,1fr]">
+        <article className="glass-panel p-6">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow">Trust Visibility Panel</div>
+              <h2 className="section-title mt-4">Available units</h2>
+            </div>
+            <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel} corridor risk</span>
+          </div>
+
+          <div className="mt-6 grid gap-5 md:grid-cols-2">
+            {loading ? (
+              Array.from({ length: 4 }).map((_, index) => <div key={index} className="surface-panel h-64 animate-pulse" />)
+            ) : visibleUnits.length ? (
+              visibleUnits.map((unit) => <UnitCard key={unit.id} onShortlist={reload} showForStudent unit={unit} />)
+            ) : (
+              <div className="empty-state md:col-span-2">No units meet trust threshold in this corridor.</div>
+            )}
+          </div>
+        </article>
+
+        <div className="grid gap-4">
+          <article className="glass-panel p-6">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="eyebrow">Corridor Intelligence</div>
+                <h2 className="section-title mt-4">Area insights</h2>
+              </div>
+              <span className={`signal-chip ${getRiskTone(riskLevel)}`}>{riskLevel}</span>
+            </div>
+
+            <div className="mt-5 grid gap-3">
+              <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Few complaints reported</p>
+                <strong className="mt-2 block text-2xl text-white">{corridorOverview?.riskSummary?.complaintDensity || 0}</strong>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">A lower number usually means fewer reported issues nearby.</span>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Most units are visible</p>
+                <strong className="mt-2 block text-2xl text-white">
+                  {visibleCount}/{hiddenCount}
+                </strong>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">More visible units usually means the area is passing more checks.</span>
+              </div>
+              <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Students looking in this area</p>
+                <strong className="mt-2 block text-2xl text-white">{demand?.totalVdpStudents || 0}</strong>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">Higher interest can mean stronger demand for the safest options.</span>
+              </div>
+            </div>
+          </article>
+
+          <details className="glass-panel p-6" open={Boolean(hiddenReasons?.hiddenCount)}>
+            <summary className="cursor-pointer list-none">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="eyebrow">Hidden Units</div>
+                  <h2 className="section-title mt-4">Why some options are hidden</h2>
+                </div>
+                <span className="signal-chip signal-danger">{hiddenReasons?.hiddenCount || 0} hidden</span>
+              </div>
+            </summary>
+            <div className="mt-5 grid gap-3">
+              {(hiddenReasons?.hiddenUnits || []).map((item) => (
+                <div key={item.unitId} className="rounded-[24px] border border-white/8 bg-black/20 p-4">
+                  <div className="flex items-center justify-between gap-3">
+                    <strong className="text-white">Unit {item.unitId}</strong>
+                    <span className="signal-chip signal-danger">Hidden</span>
+                  </div>
+                  <div className="mt-3 grid gap-2">
+                    {(item.reasons || []).map((reason) => (
+                      <div key={reason} className="text-sm leading-6 text-slate-300">
+                        {humanizeHiddenReason(reason)}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              {!hiddenReasons?.hiddenUnits?.length ? <div className="empty-state">No hidden units in this corridor.</div> : null}
+            </div>
+          </details>
+        </div>
+      </section>
+
+      {insights.length ? <InsightCards insights={insights} /> : null}
 
       <ComplaintForm />
     </div>
   );
 }
 
-function LandlordDashboard() {
-  const [corridors, setCorridors] = useState([]);
-  const [corridorId, setCorridorId] = useState("");
-  const [rent, setRent] = useState("");
-  const [distanceKm, setDistanceKm] = useState("");
-  const [ac, setAc] = useState(false);
-  const [occupancyType, setOccupancyType] = useState("single");
-  const [capacity, setCapacity] = useState("1");
-  const [fireExit, setFireExit] = useState(true);
-  const [wiringSafe, setWiringSafe] = useState(true);
-  const [plumbingSafe, setPlumbingSafe] = useState(true);
-  const [occupancyCompliant, setOccupancyCompliant] = useState(true);
-  const [bedAvailable, setBedAvailable] = useState(true);
-  const [waterAvailable, setWaterAvailable] = useState(true);
-  const [toiletsAvailable, setToiletsAvailable] = useState(true);
-  const [ventilationGood, setVentilationGood] = useState(true);
-  const [selfDeclaration, setSelfDeclaration] = useState("");
-  const [photoFile, setPhotoFile] = useState(null);
-  const [documentFile, setDocumentFile] = useState(null);
-  const [walkthroughFile, setWalkthroughFile] = useState(null);
-  const [checkInUnitId, setCheckInUnitId] = useState("");
-  const [checkInStudentId, setCheckInStudentId] = useState("");
-  const [checkOutOccupancyId, setCheckOutOccupancyId] = useState("");
-  const [checkingIn, setCheckingIn] = useState(false);
-  const [checkingOut, setCheckingOut] = useState(false);
-  const [status, setStatus] = useState("");
-  const [error, setError] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [myUnits, setMyUnits] = useState([]);
-  const [loadingMyUnits, setLoadingMyUnits] = useState(false);
-  const [myUnitsError, setMyUnitsError] = useState("");
-  const [demandMetrics, setDemandMetrics] = useState(null);
-  const [loadingDemand, setLoadingDemand] = useState(false);
-
-  // Audit-related state
-  const [selectedUnitForAudit, setSelectedUnitForAudit] = useState(null);
-  const [auditLogs, setAuditLogs] = useState([]);
-  const [loadingAuditLogs, setLoadingAuditLogs] = useState(false);
-  const [showAuditModal, setShowAuditModal] = useState(false);
-  const [previousUnitStatuses, setPreviousUnitStatuses] = useState({});
-  const [statusNotifications, setStatusNotifications] = useState([]);
-  
-  // Controlled visibility state
-  const [selectedUnitForInterest, setSelectedUnitForInterest] = useState(null);
-  const [interestedStudents, setInterestedStudents] = useState([]);
-  const [loadingInterested, setLoadingInterested] = useState(false);
-  const [showInterestModal, setShowInterestModal] = useState(false);
-
-  useEffect(() => {
-    (async () => {
-      try {
-        const data = await apiRequest("/corridors");
-        setCorridors(Array.isArray(data) ? data : []);
-      } catch (err) {
-        setError(err.message);
-      }
-    })();
-
-    loadMyUnits();
-  }, []);
-
-  // Poll for status changes every 30 seconds
-  useEffect(() => {
-    const interval = setInterval(() => {
-      checkForStatusChanges();
-    }, 30000);
-    return () => clearInterval(interval);
-  }, [myUnits]);
-
-  async function checkForStatusChanges() {
-    try {
-      const data = await apiRequest("/landlord/units");
-      if (!Array.isArray(data)) return;
-      
-      const newNotifications = [];
-      data.forEach((unit) => {
-        const prevStatus = previousUnitStatuses[unit.id];
-        if (prevStatus && prevStatus !== unit.status) {
-          newNotifications.push({
-            unitId: unit.id,
-            oldStatus: prevStatus,
-            newStatus: unit.status,
-            timestamp: new Date(),
-          });
-        }
-      });
-
-      if (newNotifications.length > 0) {
-        setStatusNotifications((prev) => [...newNotifications, ...prev].slice(0, 5));
-      }
-
-      // Update previous statuses
-      const statusMap = {};
-      data.forEach((unit) => {
-        statusMap[unit.id] = unit.status;
-      });
-      setPreviousUnitStatuses(statusMap);
-    } catch (err) {
-      // Silent fail for polling
-    }
-  }
-
-  useEffect(() => {
-    if (corridorId) {
-      loadDemandMetrics(corridorId);
-    } else {
-      setDemandMetrics(null);
-    }
-  }, [corridorId]);
-
-  async function loadMyUnits() {
-    setLoadingMyUnits(true);
-    setMyUnitsError("");
-    try {
-      const data = await apiRequest("/landlord/units");
-      setMyUnits(Array.isArray(data) ? data : []);
-      
-      // Store current statuses for change detection
-      const statusMap = {};
-      data.forEach((unit) => {
-        statusMap[unit.id] = unit.status;
-      });
-      setPreviousUnitStatuses(statusMap);
-    } catch (err) {
-      setMyUnits([]);
-      setMyUnitsError(err.message);
-    } finally {
-      setLoadingMyUnits(false);
-    }
-  }
-
-  async function loadDemandMetrics(selectedCorridorId) {
-    if (!selectedCorridorId) return;
-    setLoadingDemand(true);
-    try {
-      // Use new controlled visibility endpoint for landlords
-      const data = await apiRequest(`/landlord/corridor/${Number(selectedCorridorId)}/demand-summary`);
-      setDemandMetrics(data);
-    } catch {
-      setDemandMetrics(null);
-    } finally {
-      setLoadingDemand(false);
-    }
-  }
-
-  async function loadInterestedStudents(unitId) {
-    setSelectedUnitForInterest(unitId);
-    setLoadingInterested(true);
-    setShowInterestModal(true);
-    try {
-      const data = await apiRequest(`/landlord/unit/${unitId}/interested-students`);
-      setInterestedStudents(data.students || []);
-    } catch {
-      setInterestedStudents([]);
-    } finally {
-      setLoadingInterested(false);
-    }
-  }
-
-  async function createUnit(e) {
-    e.preventDefault();
-    setLoading(true);
-    setError("");
-    setStatus("");
-    try {
-      if (!photoFile || !documentFile || !walkthroughFile) {
-        throw new Error("photo, document, and 360 walkthrough files are required");
-      }
-      if (!selfDeclaration.trim()) {
-        throw new Error("selfDeclaration is required");
-      }
-
-      const result = await apiRequest("/unit", {
-        method: "POST",
-        body: JSON.stringify({
-          corridorId: Number(corridorId),
-          rent: rent ? Number(rent) : 0,
-          distanceKm: distanceKm ? Number(distanceKm) : 0,
-          ac,
-          occupancyType,
-          capacity: capacity ? Number(capacity) : 1,
-        }),
-      });
-
-      await apiRequest(`/unit/${result.id}/structural-checklist`, {
-        method: "PUT",
-        body: JSON.stringify({
-          fireExit,
-          wiringSafe,
-          plumbingSafe,
-          occupancyCompliant,
-        }),
-      });
-
-      await apiRequest(`/unit/${result.id}/operational-checklist`, {
-        method: "PUT",
-        body: JSON.stringify({
-          bedAvailable,
-          waterAvailable,
-          toiletsAvailable,
-          ventilationGood,
-          selfDeclaration: selfDeclaration.trim(),
-        }),
-      });
-
-      const photoForm = new FormData();
-      photoForm.append("type", "photo");
-      photoForm.append("file", photoFile);
-      await apiRequest(`/unit/${result.id}/media`, {
-        method: "POST",
-        body: photoForm,
-      });
-
-      const documentForm = new FormData();
-      documentForm.append("type", "document");
-      documentForm.append("file", documentFile);
-      await apiRequest(`/unit/${result.id}/media`, {
-        method: "POST",
-        body: documentForm,
-      });
-
-      const walkthroughForm = new FormData();
-      walkthroughForm.append("type", "walkthrough360");
-      walkthroughForm.append("file", walkthroughFile);
-      await apiRequest(`/unit/${result.id}/media`, {
-        method: "POST",
-        body: walkthroughForm,
-      });
-
-      await apiRequest(`/unit/${result.id}/submit`, {
-        method: "POST",
-        body: JSON.stringify({}),
-      });
-
-      setStatus(`Created unit #${result.id} and submitted for admin review`);
-      setSelfDeclaration("");
-      setPhotoFile(null);
-      setDocumentFile(null);
-      setWalkthroughFile(null);
-      loadDemandMetrics(Number(corridorId));
-      loadMyUnits();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function checkInOccupant(e) {
-    e.preventDefault();
-    setCheckingIn(true);
-    setError("");
-    setStatus("");
-    try {
-      const result = await apiRequest("/occupancy/check-in", {
-        method: "POST",
-        body: JSON.stringify({
-          unitId: Number(checkInUnitId),
-          studentId: Number(checkInStudentId),
-        }),
-      });
-      setStatus(`Checked in occupancy #${result.id}`);
-      setCheckInUnitId("");
-      setCheckInStudentId("");
-      loadMyUnits();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setCheckingIn(false);
-    }
-  }
-
-  async function checkOutOccupant(e) {
-    e.preventDefault();
-    setCheckingOut(true);
-    setError("");
-    setStatus("");
-    try {
-      const result = await apiRequest(`/occupancy/${Number(checkOutOccupancyId)}/check-out`, {
-        method: "PATCH",
-      });
-      setStatus(`Checked out occupancy #${result.id}`);
-      setCheckOutOccupancyId("");
-      loadMyUnits();
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setCheckingOut(false);
-    }
-  }
-
-  async function viewAuditLogs(unitId) {
-    setSelectedUnitForAudit(unitId);
-    setLoadingAuditLogs(true);
-    setShowAuditModal(true);
-    setError("");
-    try {
-      const result = await apiRequest(`/landlord/unit/${unitId}/audit-logs`);
-      setAuditLogs(Array.isArray(result?.logs) ? result.logs : []);
-    } catch (err) {
-      setError(err.message);
-      setAuditLogs([]);
-    } finally {
-      setLoadingAuditLogs(false);
-    }
-  }
-
-  function formatDate(dateString) {
-    if (!dateString) return "N/A";
-    return new Date(dateString).toLocaleDateString("en-US", {
-      year: "numeric",
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  }
-
-  function dismissNotification(index) {
-    setStatusNotifications((prev) => prev.filter((_, i) => i !== index));
-  }
+function LandlordDashboard({ units, corridors, createForm, setCreateForm, onCreateUnit, creatingUnit, insights, error }) {
+  const averageTrust =
+    units.length === 0 ? 0 : (units.reduce((sum, unit) => sum + Number(unit.trustScore || 0), 0) / units.length).toFixed(1);
+  const complaintDensity = units.reduce((sum, unit) => sum + Number(unit.activeComplaints || 0), 0);
+  const slaRiskUnits = units.filter((unit) => Number(unit.slaLateCount || 0) > 0).length;
 
   return (
-    <div className="space-y-6">
-      <h2 className="text-2xl font-bold">Landlord Dashboard</h2>
+    <div className="grid gap-6">
+      <section className="governance-grid">
+        <div className="glass-panel-strong blueprint-border lg:col-span-8 p-8 sm:p-10">
+          <div className="eyebrow">Landlord Governance View</div>
+          <h1 className="page-title mt-5 text-gradient">Portfolio trust is your operating system.</h1>
+          <p className="subtle-copy mt-4 max-w-3xl">
+            Evidence quality, complaint density, and SLA performance determine how your units appear to students and how
+            quickly governance pressure builds.
+          </p>
 
-      {/* Status Notifications */}
-      {statusNotifications.length > 0 && (
-        <div className="space-y-2">
-          {statusNotifications.map((notif, index) => (
-            <div key={index} className="flex items-center justify-between rounded-lg border border-blue-200 bg-blue-50 px-4 py-3">
-              <div className="text-sm">
-                <span className="font-semibold">Unit #{notif.unitId}</span> status changed from{" "}
-                <span className="font-semibold">{notif.oldStatus}</span> to{" "}
-                <span className="font-semibold">{notif.newStatus}</span>
-              </div>
-              <button
-                className="text-blue-600 hover:text-blue-800"
-                onClick={() => dismissNotification(index)}
-                type="button"
-              >
-                ✕
-              </button>
-            </div>
-          ))}
-        </div>
-      )}
-
-      <form onSubmit={createUnit} className="grid max-w-3xl gap-2 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-2">
-        <select className="rounded border p-2" value={corridorId} onChange={(e) => setCorridorId(e.target.value)} required>
-          <option value="">Select corridor</option>
-          {corridors.map((corridor) => (
-            <option key={corridor.id} value={corridor.id}>
-              #{corridor.id} - {corridor.name}
-            </option>
-          ))}
-        </select>
-        <input className="rounded border p-2" placeholder="rent" value={rent} onChange={(e) => setRent(e.target.value)} />
-        <input className="rounded border p-2" placeholder="distanceKm" value={distanceKm} onChange={(e) => setDistanceKm(e.target.value)} />
-        <input className="rounded border p-2" placeholder="occupancyType" value={occupancyType} onChange={(e) => setOccupancyType(e.target.value)} />
-        <input className="rounded border p-2" placeholder="capacity" value={capacity} onChange={(e) => setCapacity(e.target.value)} />
-        <label className="flex items-center gap-2 rounded border p-2">
-          <input checked={ac} onChange={(e) => setAc(e.target.checked)} type="checkbox" />
-          AC available
-        </label>
-        <label className="flex items-center gap-2 rounded border p-2">
-          <input checked={fireExit} onChange={(e) => setFireExit(e.target.checked)} type="checkbox" />
-          Fire Exit Ready
-        </label>
-        <label className="flex items-center gap-2 rounded border p-2">
-          <input checked={wiringSafe} onChange={(e) => setWiringSafe(e.target.checked)} type="checkbox" />
-          Wiring Safe
-        </label>
-        <label className="flex items-center gap-2 rounded border p-2">
-          <input checked={plumbingSafe} onChange={(e) => setPlumbingSafe(e.target.checked)} type="checkbox" />
-          Plumbing Safe
-        </label>
-        <label className="flex items-center gap-2 rounded border p-2">
-          <input checked={occupancyCompliant} onChange={(e) => setOccupancyCompliant(e.target.checked)} type="checkbox" />
-          Occupancy Compliant
-        </label>
-        <label className="flex items-center gap-2 rounded border p-2">
-          <input checked={bedAvailable} onChange={(e) => setBedAvailable(e.target.checked)} type="checkbox" />
-          Bed Available
-        </label>
-        <label className="flex items-center gap-2 rounded border p-2">
-          <input checked={waterAvailable} onChange={(e) => setWaterAvailable(e.target.checked)} type="checkbox" />
-          Water Available
-        </label>
-        <label className="flex items-center gap-2 rounded border p-2">
-          <input checked={toiletsAvailable} onChange={(e) => setToiletsAvailable(e.target.checked)} type="checkbox" />
-          Toilet Access
-        </label>
-        <label className="flex items-center gap-2 rounded border p-2">
-          <input checked={ventilationGood} onChange={(e) => setVentilationGood(e.target.checked)} type="checkbox" />
-          Ventilation Good
-        </label>
-        <input className="rounded border p-2 md:col-span-2" placeholder="Self-declaration text" value={selfDeclaration} onChange={(e) => setSelfDeclaration(e.target.value)} required />
-        <label className="rounded border p-2 md:col-span-2">
-          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Photo File</span>
-          <input
-            accept="image/*"
-            className="w-full text-sm"
-            onChange={(e) => setPhotoFile(e.target.files?.[0] || null)}
-            type="file"
-            required
-          />
-        </label>
-        <label className="rounded border p-2 md:col-span-2">
-          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">Document File</span>
-          <input
-            accept=".pdf,.doc,.docx,.txt,image/*"
-            className="w-full text-sm"
-            onChange={(e) => setDocumentFile(e.target.files?.[0] || null)}
-            type="file"
-            required
-          />
-        </label>
-        <label className="rounded border p-2 md:col-span-2">
-          <span className="mb-1 block text-xs font-semibold uppercase tracking-wide text-slate-600">360 Walkthrough File</span>
-          <input
-            accept=".html,.zip,.json,video/*,image/*"
-            className="w-full text-sm"
-            onChange={(e) => setWalkthroughFile(e.target.files?.[0] || null)}
-            type="file"
-            required
-          />
-        </label>
-        <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60 md:col-span-2" disabled={loading} type="submit">
-          {loading ? "Creating & Submitting..." : "Create + Submit Unit"}
-        </button>
-      </form>
-
-      <form onSubmit={checkInOccupant} className="grid max-w-3xl gap-2 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-3">
-        <input className="rounded border p-2" placeholder="Unit ID" value={checkInUnitId} onChange={(e) => setCheckInUnitId(e.target.value)} required />
-        <input className="rounded border p-2" placeholder="Student ID" value={checkInStudentId} onChange={(e) => setCheckInStudentId(e.target.value)} required />
-        <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60" disabled={checkingIn} type="submit">
-          {checkingIn ? "Checking In..." : "Check In Occupant"}
-        </button>
-      </form>
-
-      <form onSubmit={checkOutOccupant} className="grid max-w-3xl gap-2 rounded-xl border bg-white p-4 shadow-sm md:grid-cols-3">
-        <input
-          className="rounded border p-2 md:col-span-2"
-          placeholder="Occupancy ID"
-          value={checkOutOccupancyId}
-          onChange={(e) => setCheckOutOccupancyId(e.target.value)}
-          required
-        />
-        <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60" disabled={checkingOut} type="submit">
-          {checkingOut ? "Checking Out..." : "Check Out Occupant"}
-        </button>
-      </form>
-      {status && <p className="rounded bg-green-50 px-3 py-2 text-sm text-green-700">{status}</p>}
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-      {loadingDemand && <p className="text-sm text-slate-600">Loading demand metrics...</p>}
-      {demandMetrics && demandMetrics.totalVdpStudents !== undefined && (
-        <section className="rounded-xl border bg-white p-4 shadow-sm">
-          <h3 className="mb-2 text-lg font-semibold">Demand Pool (Controlled Visibility)</h3>
-          <div className="grid grid-cols-2 gap-4 md:grid-cols-4">
-            <div>
-              <p className="text-2xl font-bold text-slate-900">{demandMetrics.totalVdpStudents}</p>
-              <p className="text-sm text-slate-600">Verified Students</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-blue-600">{demandMetrics.shortlistCount}</p>
-              <p className="text-sm text-slate-600">Shortlisted You</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-green-600">{demandMetrics.currentOccupancy}/{demandMetrics.totalCapacity}</p>
-              <p className="text-sm text-slate-600">Current Occupancy</p>
-            </div>
-            <div>
-              <p className="text-2xl font-bold text-amber-600">{demandMetrics.occupancyGap}</p>
-              <p className="text-sm text-slate-600">Available Slots</p>
-            </div>
+          <div className="mt-8 grid gap-4 md:grid-cols-2 xl:grid-cols-4">
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Corridor</span>
+              <select className="input-shell" onChange={(event) => setCreateForm((current) => ({ ...current, corridorId: event.target.value }))} value={createForm.corridorId}>
+                <option value="">Select corridor</option>
+                {corridors.map((corridor) => (
+                  <option key={corridor.id} value={corridor.id}>
+                    {corridor.name}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Rent</span>
+              <input className="input-shell" onChange={(event) => setCreateForm((current) => ({ ...current, rent: event.target.value }))} type="number" value={createForm.rent} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Distance</span>
+              <input className="input-shell" onChange={(event) => setCreateForm((current) => ({ ...current, distanceKm: event.target.value }))} type="number" value={createForm.distanceKm} />
+            </label>
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Capacity</span>
+              <input className="input-shell" onChange={(event) => setCreateForm((current) => ({ ...current, capacity: event.target.value }))} type="number" value={createForm.capacity} />
+            </label>
           </div>
-          
-          {demandMetrics.distributionByInstitution && demandMetrics.distributionByInstitution.length > 0 && (
-            <div className="mt-4 border-t pt-4">
-              <p className="text-sm font-semibold text-slate-700">By Institution:</p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                {demandMetrics.distributionByInstitution.map((inst) => (
-                  <span key={inst.institutionId} className="rounded-full bg-blue-50 px-2 py-1 text-xs text-blue-700">
-                    {inst.name}: {inst.shortlistCount}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          
-          {demandMetrics.distributionByIntake && demandMetrics.distributionByIntake.length > 0 && (
-            <div className="mt-2 border-t pt-4">
-              <p className="text-sm font-semibold text-slate-700">By Intake:</p>
-              <div className="mt-1 flex flex-wrap gap-2">
-                {demandMetrics.distributionByIntake.map((intake) => (
-                  <span key={intake.intake} className="rounded-full bg-purple-50 px-2 py-1 text-xs text-purple-700">
-                    {intake.intake}: {intake.shortlistCount}
-                  </span>
-                ))}
-              </div>
-            </div>
-          )}
-          
-          <p className="mt-4 text-xs text-slate-500">
-            * Individual student details visible only when they shortlist your unit or become occupants
-          </p>
-        </section>
-      )}
-      {demandMetrics && demandMetrics.totalVdpStudents === undefined && (
-        <section className="rounded-xl border bg-white p-4 shadow-sm">
-          <h3 className="mb-2 text-lg font-semibold">Demand in this Corridor</h3>
-          <p className="text-sm text-slate-700">Verified students: {demandMetrics.totalVdpStudents}</p>
-          <p className="text-sm text-slate-700">Shortlists: {demandMetrics.shortlistCount}</p>
-          <p className="text-sm text-slate-700">
-            Occupancy: {demandMetrics.occupancy?.totalActiveOccupancies}/{demandMetrics.occupancy?.totalCapacity}
-          </p>
-        </section>
-      )}
 
-      <section className="space-y-3">
-        <div className="flex items-center justify-between">
-          <h3 className="text-xl font-semibold">My Units</h3>
-          <button
-            className="rounded border border-slate-300 bg-white px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
-            onClick={loadMyUnits}
-            type="button"
-          >
-            Refresh
-          </button>
+          <div className="mt-6 flex flex-wrap gap-3">
+            <button className="btn-primary" disabled={creatingUnit || !createForm.corridorId} onClick={onCreateUnit} type="button">
+              {creatingUnit ? "Creating draft..." : "Create governed unit"}
+            </button>
+            <div className="status-banner info">Drafts remain invisible until checklists, evidence, and governance review are complete.</div>
+          </div>
         </div>
-        {loadingMyUnits && <p className="text-sm text-slate-600">Loading units...</p>}
-        {myUnitsError && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{myUnitsError}</p>}
-        {!loadingMyUnits && !myUnitsError && myUnits.length === 0 && (
-          <p className="rounded border border-slate-200 bg-slate-50 px-4 py-3 text-sm text-slate-700">No units created yet.</p>
-        )}
-        <div className="grid gap-3 md:grid-cols-2">
-          {myUnits.map((unit) => {
-            // Determine card style based on status
-            const cardStyle = unit.status === "suspended" 
-              ? "border-red-300 bg-red-50" 
-              : unit.status === "approved"
-                ? "border-green-300 bg-green-50"
-                : "border-slate-200 bg-white";
 
-            return (
-              <article key={unit.id} className={`space-y-2 rounded-xl border p-4 shadow-sm ${cardStyle}`}>
-                <Link className="block" href={`/unit/${unit.id}`}>
-                  <UnitCard unit={unit} showDetails={true} />
-                </Link>
-                <Link
-                  className="block w-full rounded border border-slate-300 bg-white px-3 py-2 text-center text-sm text-slate-700 hover:bg-slate-50"
-                  href={`/unit/${unit.id}`}
-                >
-                  Open Unit #{unit.id}
-                </Link>
-                
-                {/* Show audit button if audit required or has open audits */}
-                {unit.auditRequired && (
-                  <button
-                    className="w-full rounded bg-purple-600 px-3 py-2 text-sm text-white hover:bg-purple-700"
-                    onClick={() => viewAuditLogs(unit.id)}
-                    type="button"
-                  >
-                    {unit.openAuditLogCount > 0 ? `View Audit Logs (${unit.openAuditLogCount})` : "View Audit Logs"}
-                  </button>
-                )}
-
-                {/* Show interested students button - now shows count */}
-                <button
-                  className="w-full rounded bg-blue-600 px-3 py-2 text-sm text-white hover:bg-blue-700"
-                  onClick={() => loadInterestedStudents(unit.id)}
-                  type="button"
-                >
-                  {(unit.shortlistedCount > 0 || unit.activeOccupants?.length > 0) 
-                    ? `View Interested (${(unit.shortlistedCount || 0) + (unit.activeOccupants?.length || 0)})`
-                    : "View Interested Students"
-                  }
-                </button>
-
-                {/* Show warning for suspended units */}
-                {unit.status === "suspended" && (
-                  <div className="rounded border border-red-200 bg-red-50 p-3">
-                    <p className="text-sm font-semibold text-red-800">⚠️ Unit Suspended</p>
-                    <p className="text-xs text-red-600">Please review audit logs and contact admin for corrective actions.</p>
-                  </div>
-                )}
-
-                {/* Show success for approved units */}
-                {unit.status === "approved" && unit.visibleToStudents && (
-                  <div className="rounded border border-green-200 bg-green-50 p-3">
-                    <p className="text-sm font-semibold text-green-800">✓ Unit Live</p>
-                    <p className="text-xs text-green-600">Your unit is visible to students in the VDP.</p>
-                  </div>
-                )}
-              </article>
-            );
-          })}
+        <div className="grid gap-4 lg:col-span-4">
+          <div className="metric-tile">
+            <p>Portfolio trust</p>
+            <strong>{averageTrust}</strong>
+            <span>Average trust score across all managed units.</span>
+          </div>
+          <div className="metric-tile">
+            <p>Complaint density</p>
+            <strong>{complaintDensity}</strong>
+            <span>Total active complaint pressure across the portfolio.</span>
+          </div>
+          <div className="metric-tile">
+            <p>SLA at risk</p>
+            <strong>{slaRiskUnits}</strong>
+            <span>Units with late complaint resolution exposure.</span>
+          </div>
         </div>
       </section>
 
-      {/* Audit Logs Modal */}
-      {showAuditModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="max-h-[90vh] w-full max-w-3xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold">Audit Logs - Unit #{selectedUnitForAudit}</h2>
-              <button
-                className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
-                onClick={() => {
-                  setShowAuditModal(false);
-                  setSelectedUnitForAudit(null);
-                  setAuditLogs([]);
-                }}
-              >
-                Close
-              </button>
-            </div>
+      {error ? <div className="status-banner error">{error}</div> : null}
+      <InsightCards insights={insights} />
 
-            {loadingAuditLogs ? (
-              <p className="text-sm text-slate-600">Loading audit logs...</p>
-            ) : auditLogs.length === 0 ? (
-              <p className="text-sm text-slate-600">No audit logs found for this unit.</p>
-            ) : (
-              <div className="space-y-4">
-                {auditLogs.map((log) => (
-                  <div key={log.id} className={`rounded-lg border p-4 ${log.resolved ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
-                    <div className="mb-2 flex items-center justify-between">
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${log.resolved ? "bg-green-600 text-white" : "bg-amber-600 text-white"}`}>
-                        {log.resolved ? "Resolved" : "Open"}
-                      </span>
-                      <span className="text-xs text-slate-500">{formatDate(log.createdAt)}</span>
-                    </div>
-                    
-                    <p className="mb-1 text-sm">
-                      <span className="font-semibold">Trigger:</span> {log.triggerType || "manual"}
-                    </p>
-                    <p className="mb-2 text-sm text-slate-700">{log.reason}</p>
-
-                    {log.correctiveAction && (
-                      <div className="mb-2 rounded border border-blue-200 bg-blue-50 p-2">
-                        <p className="text-sm font-semibold text-blue-800">Corrective Action:</p>
-                        <p className="text-sm text-blue-700">{log.correctiveAction}</p>
-                        {log.correctiveDeadline && (
-                          <p className="text-xs text-blue-600">Deadline: {formatDate(log.correctiveDeadline)}</p>
-                        )}
-                      </div>
-                    )}
-
-                    {log.verificationNotes && (
-                      <div className="mb-2 rounded border border-green-200 bg-green-100 p-2">
-                        <p className="text-sm font-semibold text-green-800">Resolution Notes:</p>
-                        <p className="text-sm text-green-700">{log.verificationNotes}</p>
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-
-            <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-semibold text-slate-700">Need Help?</p>
-              <p className="text-xs text-slate-600">Contact the admin to resolve open audits and restore your unit visibility.</p>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Interested Students Modal - Controlled Visibility */}
-      {showInterestModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50">
-          <div className="max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-xl font-bold">Interested Students - Unit #{selectedUnitForInterest}</h2>
-              <button
-                className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
-                onClick={() => {
-                  setShowInterestModal(false);
-                  setSelectedUnitForInterest(null);
-                  setInterestedStudents([]);
-                }}
-              >
-                Close
-              </button>
-            </div>
-
-            {loadingInterested ? (
-              <p className="text-sm text-slate-600">Loading...</p>
-            ) : interestedStudents.length === 0 ? (
-              <p className="text-sm text-slate-600">No students have shortlisted this unit yet.</p>
-            ) : (
-              <div className="space-y-3">
-                {interestedStudents.map((student) => (
-                  <div key={student.studentId} className={`rounded-lg border p-4 ${student.status === "occupant" ? "border-green-200 bg-green-50" : "border-blue-200 bg-blue-50"}`}>
-                    <div className="flex items-center justify-between">
-                      <div>
-                        <p className="font-semibold text-slate-900">{student.name}</p>
-                        <p className="text-sm text-slate-700">
-                          <span className="font-medium">Student ID:</span> {student.studentId}
-                        </p>
-                        <p className="text-sm text-slate-600">
-                          {student.institutionName} • Intake: {student.intake}
-                        </p>
-                      </div>
-                      <span className={`rounded-full px-2 py-1 text-xs font-semibold ${student.status === "occupant" ? "bg-green-600 text-white" : "bg-blue-600 text-white"}`}>
-                        {student.status === "occupant" ? "Occupant" : "Shortlisted"}
-                      </span>
-                    </div>
-                    {student.email && (
-                      <p className="mt-2 text-sm text-slate-700">
-                        <span className="font-medium">Email:</span> {student.email}
-                      </p>
-                    )}
-                    {student.since && (
-                      <p className="text-xs text-slate-500">
-                        {student.status === "occupant" ? "Checked in" : "Shortlisted"}: {formatDate(student.since)}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-            
-            <div className="mt-4 rounded border border-slate-200 bg-slate-50 p-4">
-              <p className="text-sm font-semibold text-slate-700">Controlled Visibility</p>
-              <p className="text-xs text-slate-600">Student details are only visible to landlords when they shortlist your unit or become occupants. This protects student privacy.</p>
-            </div>
-          </div>
-        </div>
-      )}
+      <section className="grid gap-5 lg:grid-cols-2 xl:grid-cols-3">
+        {units.length ? units.map((unit) => <UnitCard key={unit.id} compact unit={unit} />) : <div className="empty-state lg:col-span-2 xl:col-span-3">No units have been created for this landlord yet.</div>}
+      </section>
     </div>
   );
 }
 
-function AdminDashboard() {
+function AdminDashboard({
+  corridors,
+  selectedCorridor,
+  setSelectedCorridor,
+  units,
+  auditQueue,
+  demand,
+  insights,
+  error,
+  adminPayments = [],
+  reloadPayments,
+  adminCompliance = [],
+  adminAgreements = [],
+  verifyActionId,
+  setVerifyActionId,
+  verifyReason,
+  setVerifyReason,
+  terminateActionId,
+  setTerminateActionId,
+  terminateReason,
+  setTerminateReason,
+  onVerifyCompliance,
+  onTerminateAgreement,
+  adminAnalytics,
+}) {
+  const [overrideId, setOverrideId] = useState(null);
+  const [overrideForm, setOverrideForm] = useState({ status: "", amount: "", receiptRef: "", reason: "" });
+  const [overrideError, setOverrideError] = useState("");
+  const [overrideLoading, setOverrideLoading] = useState(false);
+  const [expandedAuditId, setExpandedAuditId] = useState(null);
+  const [expandedAdminPaymentId, setExpandedAdminPaymentId] = useState(null);
+  const [expandedAdminComplianceId, setExpandedAdminComplianceId] = useState(null);
+  const [expandedAdminAgreementId, setExpandedAdminAgreementId] = useState(null);
+
+  async function handleOverride(paymentId) {
+    if (!overrideForm.reason.trim()) {
+      setOverrideError("A reason is mandatory for administrative overrides.");
+      return;
+    }
+    setOverrideError("");
+    setOverrideLoading(true);
+    try {
+      await overridePayment(paymentId, {
+        status: overrideForm.status || undefined,
+        amount: overrideForm.amount ? Number(overrideForm.amount) : undefined,
+        receiptRef: overrideForm.receiptRef || undefined,
+        reason: overrideForm.reason.trim(),
+      });
+      setOverrideId(null);
+      setOverrideForm({ status: "", amount: "", receiptRef: "", reason: "" });
+      if (reloadPayments) await reloadPayments();
+    } catch (err) {
+      setOverrideError(err.message || "Override failed.");
+    } finally {
+      setOverrideLoading(false);
+    }
+  }
+
+  const trustDistribution = [
+    units.filter((unit) => getTrustBand(unit.trustScore).key === "A").length,
+    units.filter((unit) => getTrustBand(unit.trustScore).key === "B").length,
+    units.filter((unit) => getTrustBand(unit.trustScore).key === "C").length,
+  ];
+  const selectedCorridorMeta = corridors.find((corridor) => String(corridor.id) === String(selectedCorridor));
+
+  function governanceActionLabel(unit) {
+    if (unit.auditRequired) return "Review audit escalation";
+    if (unit.status === "submitted" || unit.status === "admin_review") return "Complete governance review";
+    if (unit.status === "suspended") return "Resolve suspension status";
+    if (unit.status === "rejected") return "Confirm rejection outcome";
+    return `Review ${unit.status || "governance"} status`;
+  }
+
+  function pressureSeverity(unit) {
+    const trustScore = Number(unit?.trustScore || 0);
+    if (unit?.auditRequired || trustScore < 45) return { label: "High", width: Math.max(trustScore, 72) };
+    if (trustScore < 75) return { label: "Medium", width: Math.max(trustScore, 48) };
+    return { label: "Low", width: Math.max(trustScore, 26) };
+  }
+
   return (
-    <div className="space-y-4 rounded-xl border bg-white p-5 shadow-sm">
-      <h2 className="text-2xl font-bold">Admin Dashboard</h2>
-      <p className="text-sm text-slate-700">Use the dedicated admin screen for corridor, unit, and audit controls.</p>
-      <a className="inline-block rounded bg-slate-900 px-4 py-2 text-white" href="/admin">
-        Open Admin Panel
-      </a>
+    <div className="grid gap-8">
+      <Reveal duration={0.5}>
+        <section className="governance-grid">
+          <div className="glass-panel-strong blueprint-border lg:col-span-8 p-7 sm:p-8 bg-[var(--bg-surface-strong)] rounded-[24px]">
+            <div className="eyebrow">Admin Governance View</div>
+            <h1 className="mt-4 max-w-4xl text-4xl font-semibold leading-tight tracking-[-0.04em] sm:text-5xl text-gradient">
+              Act on corridor risk before visibility slips.
+            </h1>
+            <p className="mt-4 max-w-3xl text-[15px] leading-7 text-slate-300">
+              Review trust distribution, clear complaint escalation, and push the next governance action for units drifting
+              toward suspension or hidden status.
+            </p>
+
+            <div className="mt-8 max-w-sm">
+              <label className="grid gap-2">
+                <span className="text-xs uppercase tracking-[0.22em] text-slate-500 font-semibold">Active Corridor</span>
+                <select className="input-shell bg-slate-900 border-white/10 text-white rounded-xl py-2 px-3 text-sm" onChange={(event) => setSelectedCorridor(event.target.value)} value={selectedCorridor}>
+                  <option value="">Select corridor</option>
+                  {corridors.map((corridor) => (
+                    <option key={corridor.id} value={corridor.id}>
+                      {corridor.name}
+                    </option>
+                  ))}
+                </select>
+                <span className="text-xs leading-5 text-slate-400">
+                  {selectedCorridorMeta ? `${units.length} governed units in ${selectedCorridorMeta.name}` : `${units.length} governed units in view`}
+                </span>
+              </label>
+            </div>
+
+            <div className="mt-6 grid gap-4 md:grid-cols-3">
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Corridor heatmap</p>
+                <strong className="mt-2 block text-2xl text-white">{demand?.totalVdpStudents || 0}</strong>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">Verified demand concentration in the selected corridor.</span>
+              </div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Complaint clusters</p>
+                <strong className="mt-2 block text-2xl text-white">{auditQueue.length}</strong>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">Units already escalated into governance review.</span>
+              </div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Trust distribution</p>
+                <strong className="mt-2 block text-2xl text-white">{units.length}</strong>
+                <span className="mt-2 block text-sm leading-6 text-slate-400">Governed units included in the trust split below.</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="grid gap-4 lg:col-span-4">
+            <div className="metric-tile border-white/5 bg-[var(--bg-surface)] rounded-[24px] p-5">
+              <p className="text-xs uppercase text-slate-500 font-semibold">Band A</p>
+              <strong className="text-[2.4rem] text-white block mt-1">{trustDistribution[0]}</strong>
+              <span className="text-xs text-slate-400 mt-1 block"><span className="font-semibold text-emerald-400">Stable.</span> Strong trust standing.</span>
+            </div>
+            <div className="metric-tile border-white/5 bg-[var(--bg-surface)] rounded-[24px] p-5">
+              <p className="text-xs uppercase text-slate-500 font-semibold">Band B</p>
+              <strong className="text-[2.55rem] text-white block mt-1">{trustDistribution[1]}</strong>
+              <span className="text-xs text-slate-400 mt-1 block"><span className="font-semibold text-amber-400">Monitor.</span> Visible, but under active monitoring.</span>
+            </div>
+            <div className="metric-tile border-white/5 bg-[var(--bg-surface)] rounded-[24px] p-5">
+              <p className="text-xs uppercase text-slate-500 font-semibold">Band C</p>
+              <strong className="text-[2.7rem] text-white block mt-1">{trustDistribution[2]}</strong>
+              <span className="text-xs text-slate-400 mt-1 block"><span className="font-semibold text-rose-400">Needs attention.</span> Below threshold or at risk.</span>
+            </div>
+            <div className="rounded-[24px] border border-white/5 bg-white/5 p-5">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500 font-semibold">Risk Alert</p>
+              <p className="mt-3 text-base font-semibold leading-6 text-white">
+                ⚠️ {auditQueue.length > 0 ? `${auditQueue.length} unit${auditQueue.length === 1 ? "" : "s"} need immediate governance review.` : "No urgent corridor escalation right now."}
+              </p>
+              <p className="mt-2 text-sm leading-6 text-slate-400">
+                {auditQueue.length > 0 ? "Action required" : "Stable"}: complaint and audit pressure should be reviewed before visibility degrades.
+              </p>
+            </div>
+          </div>
+        </section>
+      </Reveal>
+
+      {error ? <div className="status-banner error">{error}</div> : null}
+      <InsightCards insights={insights} />
+
+      {adminAnalytics && (
+        <section className="glass-panel p-6 rounded-[24px] bg-[var(--bg-surface)] border border-white/5">
+          <h2 className="text-lg font-bold text-white mb-4">DAWN Portfolio Analytics</h2>
+          <DawnAnalyticsViewer analytics={adminAnalytics} />
+        </section>
+      )}
+
+      <section className="grid gap-5 xl:grid-cols-[1.2fr,0.8fr]">
+        <article className="glass-panel p-6 rounded-[24px] bg-[var(--bg-surface)] border border-white/5">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <div className="eyebrow">Governance Queue</div>
+              <h2 className="section-title mt-2">Units requiring decisions</h2>
+            </div>
+          </div>
+          <div className="mt-6 grid gap-4">
+            {units.length ? (
+              units.map((unit) => (
+                <Link
+                  key={unit.id}
+                  href={`/unit/${unit.id}`}
+                  className="rounded-xl border border-white/5 bg-white/5 p-4 transition-all hover:bg-white/10"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-3 text-sm">
+                    <div>
+                      <strong className="text-white">Unit {unit.id} | {governanceActionLabel(unit)}</strong>
+                      <p className="mt-1 text-xs text-slate-400">
+                        {unit.auditRequired
+                          ? "Action required: audit pressure is blocking a clean governance state."
+                          : unit.status === "submitted" || unit.status === "admin_review"
+                            ? "Monitoring: this unit is waiting for the next approval decision."
+                            : `Stable check: current status is ${unit.status}.`}
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-500">
+                        {unit.auditRequired ? "Action required" : unit.status === "submitted" || unit.status === "admin_review" ? "Monitoring" : "Stable"}
+                      </span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${getStatusTone(unit.status)}`}>{unit.status}</span>
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${getTrustBand(unit.trustScore).tone}`}>{getTrustBand(unit.trustScore).label}</span>
+                    </div>
+                  </div>
+                </Link>
+              ))
+            ) : (
+              <div className="empty-state">No units currently require governance review.</div>
+            )}
+          </div>
+        </article>
+
+        <article className="glass-panel p-6 rounded-[24px] bg-[var(--bg-surface)] border border-white/5">
+          <div className="eyebrow">Audit Queue</div>
+          <h2 className="section-title mt-2">Complaint and audit pressure</h2>
+          <div className="mt-6 grid gap-4">
+            {auditQueue.length ? (
+              auditQueue.map((unit) => (
+                <Link
+                  key={unit.id}
+                  href={`/unit/${unit.id}`}
+                  className="rounded-xl border border-white/5 bg-black/20 p-4 transition-all hover:bg-black/30"
+                >
+                  <div className="flex items-center justify-between gap-3 text-sm">
+                    <strong className="text-white">Unit {unit.id}</strong>
+                    <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300">Audit required</span>
+                  </div>
+                  <div className="mt-3 flex items-center justify-between gap-3 text-xs text-slate-400">
+                    <p className="uppercase tracking-[0.18em]">Complaint + audit pressure</p>
+                    <span className="font-medium text-slate-200">{pressureSeverity(unit).label} severity</span>
+                  </div>
+                  <div className="mt-3 h-2 overflow-hidden rounded-full bg-stone-900">
+                    <div className={`h-full ${getTrustBand(unit.trustScore).fillClass || "bg-rose-500"}`} style={{ width: `${pressureSeverity(unit).width}%` }} />
+                  </div>
+                  <p className="mt-3 text-xs text-slate-500">
+                    Trust {unit.trustScore || 0} • Status {unit.status}
+                  </p>
+                </Link>
+              ))
+            ) : (
+              <div className="empty-state">No risk detected in this corridor.</div>
+            )}
+          </div>
+        </article>
+      </section>
+
+      {/* Admin Payment Management */}
+      <section className="glass-panel p-6 rounded-[24px] bg-[var(--bg-surface)] border border-white/5">
+        <div className="eyebrow">Governance & Ledgers</div>
+        <h2 className="section-title mt-2">Rent Ledger Override Controls</h2>
+        <p className="subtle-copy mt-1">
+          Perform administrative updates to student payments, update amounts, check receipt references, and log changes to the audit trail.
+        </p>
+
+        {overrideError && <div className="status-banner error mt-4">{overrideError}</div>}
+
+        {adminPayments.length === 0 ? (
+          <p className="text-sm text-slate-400 mt-4">No rent records found across all corridors.</p>
+        ) : (
+          <div className="mt-6 space-y-4">
+            {adminPayments.map((payment) => {
+              const isExpanded = expandedAdminPaymentId === payment.id;
+              return (
+                <div key={payment.id} className="rounded-xl border border-white/5 bg-black/10 overflow-hidden text-sm">
+                  <div 
+                    className="grid grid-cols-1 sm:grid-cols-5 items-center gap-2 p-3 cursor-pointer select-none"
+                    onClick={() => setExpandedAdminPaymentId(isExpanded ? null : payment.id)}
+                  >
+                    <div className="font-semibold text-slate-200">
+                      {payment.occupancy?.student?.name || "Unknown"}
+                    </div>
+                    <div className="text-slate-300">Unit #{payment.occupancy?.unit?.id}</div>
+                    <div className="text-slate-300">{payment.month}</div>
+                    <div className="text-slate-200">₹{payment.amount}</div>
+                    <div className="flex justify-between sm:block">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        payment.status === "VERIFIED"
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : payment.status === "PAID"
+                          ? "bg-amber-500/20 text-amber-300"
+                          : "bg-rose-500/20 text-rose-300"
+                      }`}>
+                        {payment.status}
+                      </span>
+                      <span className="text-xs text-sky-400 font-semibold sm:hidden">{isExpanded ? "Hide" : "Override"}</span>
+                    </div>
+                  </div>
+
+                  <Expand isExpanded={isExpanded}>
+                    <div className="p-4 bg-black/30 border-t border-white/5 space-y-3 text-xs text-slate-300">
+                      <div className="flex flex-wrap gap-4 justify-between items-center pb-2 border-b border-white/5">
+                        <span>Receipt Ref: <span className="font-mono text-white">{payment.receiptRef || "—"}</span></span>
+                        <div className="flex gap-2">
+                          <button
+                            className="btn-secondary text-[11px] py-1 px-3"
+                            onClick={() => {
+                              if (overrideId === payment.id) {
+                                setOverrideId(null);
+                              } else {
+                                setOverrideId(payment.id);
+                                setOverrideForm({
+                                  status: payment.status,
+                                  amount: String(payment.amount),
+                                  receiptRef: payment.receiptRef || "",
+                                  reason: "",
+                                });
+                              }
+                            }}
+                          >
+                            {overrideId === payment.id ? "Cancel Override" : "Perform Override"}
+                          </button>
+                          {payment.audits && payment.audits.length > 0 && (
+                            <button
+                              className="text-xs text-slate-400 hover:underline font-semibold"
+                              onClick={() => setExpandedAuditId(expandedAuditId === payment.id ? null : payment.id)}
+                            >
+                              Audits ({payment.audits.length})
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {overrideId === payment.id && (
+                        <div className="mt-3 p-4 border border-white/10 rounded-xl bg-black/40 space-y-3 max-w-md">
+                          <p className="text-xs uppercase font-semibold text-slate-300">Override Parameters</p>
+                          <label className="grid gap-1">
+                            <span className="text-[10px] uppercase text-slate-500">Status</span>
+                            <select
+                              className="input-shell text-xs py-1"
+                              onChange={(e) => setOverrideForm((c) => ({ ...c, status: e.target.value }))}
+                              value={overrideForm.status}
+                            >
+                              <option value="PENDING">PENDING</option>
+                              <option value="PAID">PAID</option>
+                              <option value="VERIFIED">VERIFIED</option>
+                            </select>
+                          </label>
+                          <label className="grid gap-1">
+                            <span className="text-[10px] uppercase text-slate-500">Amount</span>
+                            <input
+                              className="input-shell text-xs py-1"
+                              onChange={(e) => setOverrideForm((c) => ({ ...c, amount: e.target.value }))}
+                              type="number"
+                              value={overrideForm.amount}
+                            />
+                          </label>
+                          <label className="grid gap-1">
+                            <span className="text-[10px] uppercase text-slate-500">Receipt Ref</span>
+                            <input
+                              className="input-shell text-xs py-1"
+                              onChange={(e) => setOverrideForm((c) => ({ ...c, receiptRef: e.target.value }))}
+                              value={overrideForm.receiptRef}
+                            />
+                          </label>
+                          <label className="grid gap-1">
+                            <span className="text-[10px] uppercase text-slate-500">Reason (Mandatory)</span>
+                            <input
+                              className="input-shell text-xs py-1 border-rose-500/50"
+                              onChange={(e) => setOverrideForm((c) => ({ ...c, reason: e.target.value }))}
+                              placeholder="Reason for change..."
+                              value={overrideForm.reason}
+                            />
+                          </label>
+                          <button
+                            className="btn-primary text-xs py-1.5 px-3 w-full"
+                            disabled={overrideLoading}
+                            onClick={() => handleOverride(payment.id)}
+                          >
+                            {overrideLoading ? "Saving Override..." : "Save Override"}
+                          </button>
+                        </div>
+                      )}
+
+                      {expandedAuditId === payment.id && (
+                        <div className="mt-3 p-3 border border-white/5 rounded-xl bg-black/40 space-y-2">
+                          <p className="text-[10px] uppercase font-bold text-slate-500">Change History Audit Trail</p>
+                          {payment.audits.map((audit) => (
+                            <div key={audit.id} className="text-xs border-b border-white/5 pb-2 last:border-b-0 space-y-1">
+                              <div className="flex justify-between text-[10px] text-slate-500">
+                                <span>Actor: ID #{audit.actorId}</span>
+                                <span>{new Date(audit.createdAt).toLocaleString()}</span>
+                              </div>
+                              <p className="text-slate-300 font-semibold">{audit.action} | Reason: "{audit.reason}"</p>
+                              {audit.changes && (
+                                <pre className="text-[9px] bg-black/20 p-1.5 rounded font-mono text-slate-400 overflow-x-auto">
+                                  {JSON.stringify(audit.changes, null, 2)}
+                                </pre>
+                              )}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  </Expand>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Compliance Verification Queue */}
+      <section className="glass-panel p-6 rounded-[24px] bg-[var(--bg-surface)] border border-white/5 space-y-4">
+        <div className="eyebrow">Governance & Compliance</div>
+        <h2 className="section-title mt-2">Compliance Document Verification Queue</h2>
+        <p className="subtle-copy mt-1">
+          Review uploaded safety certificates and identity KYC uploads from landlords to activate or suspend unit discovery status.
+        </p>
+
+        {adminCompliance.length === 0 ? (
+          <p className="text-sm text-slate-400 mt-4">No compliance documents pending review.</p>
+        ) : (
+          <div className="mt-6 space-y-4">
+            {adminCompliance.map((comp) => {
+              const isExpanded = expandedAdminComplianceId === comp.id;
+              return (
+                <div key={comp.id} className="p-4 border border-white/5 rounded-xl bg-white/5 space-y-3 max-w-3xl">
+                  <div 
+                    className="flex justify-between items-center text-sm font-semibold text-slate-200 cursor-pointer"
+                    onClick={() => setExpandedAdminComplianceId(isExpanded ? null : comp.id)}
+                  >
+                    <span>{comp.docType} | Unit #{comp.unitId}</span>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                        comp.status === "APPROVED"
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : comp.status === "REJECTED"
+                          ? "bg-rose-500/20 text-rose-300"
+                          : comp.status === "EXPIRED"
+                          ? "bg-slate-500/20 text-slate-400"
+                          : "bg-amber-500/20 text-amber-300"
+                      }`}>
+                        {comp.status}
+                      </span>
+                      <span className="text-xs text-sky-400">{isExpanded ? "Hide" : "Inspect"}</span>
+                    </div>
+                  </div>
+
+                  <Expand isExpanded={isExpanded}>
+                    <div className="space-y-3 pt-3 border-t border-white/5 text-xs text-slate-300">
+                      <div className="space-y-1">
+                        <div>File Name: <span className="font-semibold text-white">{comp.fileName}</span></div>
+                        {comp.expiryDate && <div>Expiry Date: {new Date(comp.expiryDate).toLocaleDateString()}</div>}
+                        <div>Uploaded: {new Date(comp.createdAt).toLocaleString()}</div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3 items-center justify-between pt-2">
+                        <div>
+                          <a
+                            href={`/api/agreement/document/${comp.id}?compliance=true`}
+                            className="text-xs text-sky-300 hover:underline font-semibold"
+                            target="_blank"
+                            rel="noopener noreferrer"
+                          >
+                            Stream Document File
+                          </a>
+                        </div>
+
+                        <div className="flex gap-2">
+                          {verifyActionId === comp.id ? (
+                            <div className="flex flex-col gap-2 bg-black/40 p-3 rounded-xl border border-white/10 text-xs">
+                              <label className="block text-slate-300">Rejection Reason (Required for rejection)</label>
+                              <input
+                                type="text"
+                                className="input-shell text-xs py-1 px-2"
+                                placeholder="Why is it rejected..."
+                                value={verifyReason}
+                                onChange={(e) => setVerifyReason(e.target.value)}
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button
+                                  type="button"
+                                  className="text-slate-400 hover:underline"
+                                  onClick={() => {
+                                    setVerifyActionId(null);
+                                    setVerifyReason("");
+                                  }}
+                                >
+                                  Cancel
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-rose-300 hover:underline font-bold"
+                                  onClick={() => onVerifyCompliance(comp.id, false)}
+                                >
+                                  Confirm Reject
+                                </button>
+                                <button
+                                  type="button"
+                                  className="text-emerald-300 hover:underline font-bold"
+                                  onClick={() => onVerifyCompliance(comp.id, true)}
+                                >
+                                  Approve
+                                </button>
+                              </div>
+                            </div>
+                          ) : (
+                            <>
+                              {comp.status === "PENDING" && (
+                                <button
+                                  className="text-xs text-sky-300 hover:underline font-semibold"
+                                  onClick={() => {
+                                    setVerifyActionId(comp.id);
+                                    setVerifyReason("");
+                                  }}
+                                >
+                                  Verify Upload
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </Expand>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      {/* Tenancy Agreements Oversight */}
+      <section className="glass-panel p-6 rounded-[24px] bg-[var(--bg-surface)] border border-white/5 space-y-4">
+        <div className="eyebrow">Agreements & Audits</div>
+        <h2 className="section-title mt-2">Global Tenancy Agreements Oversight</h2>
+        <p className="subtle-copy mt-1">
+          Review all current active, pending, or terminated student tenancy agreements across NearNest corridors.
+        </p>
+
+        {adminAgreements.length === 0 ? (
+          <p className="text-sm text-slate-400 mt-4">No tenancy agreements created on the platform.</p>
+        ) : (
+          <div className="mt-6 space-y-4">
+            {adminAgreements.map((agg) => {
+              const isExpanded = expandedAdminAgreementId === agg.id;
+              return (
+                <div key={agg.id} className="p-4 border border-white/5 rounded-xl bg-white/5 space-y-3 max-w-3xl">
+                  <div 
+                    className="flex justify-between items-center text-sm font-semibold text-slate-200 cursor-pointer"
+                    onClick={() => setExpandedAdminAgreementId(isExpanded ? null : agg.id)}
+                  >
+                    <span>Student: {agg.occupancy?.student?.name || "Occupant"} (v{agg.version})</span>
+                    <div className="flex items-center gap-3">
+                      <span className={`px-2 py-0.5 rounded text-xs ${
+                        agg.status === "ACTIVE"
+                          ? "bg-emerald-500/20 text-emerald-300"
+                          : agg.status === "EXPIRED"
+                          ? "bg-slate-500/20 text-slate-400"
+                          : agg.status === "TERMINATED"
+                          ? "bg-rose-500/20 text-rose-300"
+                          : agg.status === "SUPERSEDED"
+                          ? "bg-indigo-500/20 text-indigo-300"
+                          : "bg-amber-500/20 text-amber-300"
+                      }`}>
+                        {agg.status}
+                      </span>
+                      <span className="text-xs text-sky-400">{isExpanded ? "Hide" : "Inspect"}</span>
+                    </div>
+                  </div>
+
+                  <Expand isExpanded={isExpanded}>
+                    <div className="space-y-3 pt-3 border-t border-white/5 text-xs text-slate-300">
+                      <div className="grid grid-cols-2 gap-2 text-slate-400">
+                        <div>Rent Amount: ₹{agg.rentAmount}/mo</div>
+                        <div>Security Deposit: ₹{agg.securityDeposit}</div>
+                        <div>Notice Period: {agg.noticePeriodDays} Days</div>
+                        <div>Unit ID: #{agg.occupancy?.unit?.id || "N/A"}</div>
+                        <div className="col-span-2">
+                          Lease Period: {new Date(agg.startDate).toLocaleDateString()} - {new Date(agg.endDate).toLocaleDateString()}
+                        </div>
+                      </div>
+
+                      <div className="flex flex-wrap gap-3 items-center justify-between pt-2 border-t border-white/5">
+                        <div className="flex gap-4 text-[10px] text-slate-500">
+                          <span>Tenant Signed: {agg.tenantSigned ? "Yes" : "No"}</span>
+                          <span>Landlord Signed: {agg.landlordSigned ? "Yes" : "No"}</span>
+                        </div>
+
+                        <div className="flex gap-2">
+                          {agg.documentPath && (
+                            <a
+                              href={`/api/agreement/document/${agg.id}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="text-xs text-sky-300 hover:underline font-semibold"
+                            >
+                              Download PDF
+                            </a>
+                          )}
+
+                          {agg.status === "ACTIVE" && (
+                            <>
+                              {terminateActionId === agg.id ? (
+                                <div className="flex flex-col gap-2 bg-black/40 p-3 rounded-xl border border-white/10 text-xs">
+                                  <label className="block text-slate-300">Cancellation Reason (Mandatory)</label>
+                                  <input
+                                    type="text"
+                                    className="input-shell text-xs py-1 px-2"
+                                    placeholder="Why is it canceled..."
+                                    value={terminateReason}
+                                    onChange={(e) => setTerminateReason(e.target.value)}
+                                  />
+                                  <div className="flex justify-end gap-2">
+                                    <button
+                                      type="button"
+                                      className="text-slate-400 hover:underline"
+                                      onClick={() => {
+                                        setTerminateActionId(null);
+                                        setTerminateReason("");
+                                      }}
+                                    >
+                                      Cancel
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className="text-rose-300 hover:underline font-bold"
+                                      onClick={() => onTerminateAgreement(agg.id)}
+                                    >
+                                      Confirm Terminate
+                                    </button>
+                                  </div>
+                                </div>
+                              ) : (
+                                <button
+                                  className="text-xs text-rose-300 hover:underline font-semibold"
+                                  onClick={() => {
+                                    setTerminateActionId(agg.id);
+                                    setTerminateReason("");
+                                  }}
+                                >
+                                  Terminate Contract
+                                </button>
+                              )}
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  </Expand>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
 
 export default function DashboardPage() {
+  const router = useRouter();
   const [role, setRole] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  const [corridors, setCorridors] = useState([]);
+  const [insights, setInsights] = useState([]);
+
+  const [corridorId, setCorridorId] = useState("");
+  const [selectedCorridor, setSelectedCorridor] = useState("");
+  const [filters, setFilters] = useState({ maxRent: "", maxDistance: "", ac: "" });
+  const [visibleUnits, setVisibleUnits] = useState([]);
+  const [hiddenReasons, setHiddenReasons] = useState({ hiddenCount: 0, hiddenUnits: [] });
+  const [corridorOverview, setCorridorOverview] = useState(null);
+  const [demand, setDemand] = useState(null);
+  const [landlordUnits, setLandlordUnits] = useState([]);
+  const [adminUnits, setAdminUnitsState] = useState([]);
+  const [auditQueue, setAuditQueue] = useState([]);
+  const [adminPayments, setAdminPayments] = useState([]);
+  const [adminCompliance, setAdminCompliance] = useState([]);
+  const [adminAgreements, setAdminAgreements] = useState([]);
+  const [verifyActionId, setVerifyActionId] = useState(null);
+  const [verifyReason, setVerifyReason] = useState("");
+  const [terminateActionId, setTerminateActionId] = useState(null);
+  const [terminateReason, setTerminateReason] = useState("");
+  const [creatingUnit, setCreatingUnit] = useState(false);
+  const [createForm, setCreateForm] = useState({ corridorId: "", rent: "", distanceKm: "", capacity: "" });
+  const [adminAnalytics, setAdminAnalytics] = useState(null);
+
+  const studentQuery = useMemo(() => {
+    const params = new URLSearchParams();
+    if (filters.maxRent) params.set("maxRent", filters.maxRent);
+    if (filters.maxDistance) params.set("maxDistance", filters.maxDistance);
+    if (filters.ac) params.set("ac", filters.ac);
+    return params.toString();
+  }, [filters]);
 
   useEffect(() => {
-    setRole(localStorage.getItem("role") || "");
-  }, []);
+    const storedRole = getStoredRole();
+    setRole(storedRole);
+    if (storedRole === "parent") {
+      router.push("/parent/dashboard");
+    }
+  }, [router]);
 
-  if (!role) {
+  useEffect(() => {
+    let active = true;
+
+    async function bootstrap() {
+      if (!role) return;
+
+      try {
+        const [corridorPayload, dawnPayload] = await Promise.all([
+          getCorridors().catch(() => []),
+          getDawnInsights().catch(() => ({ insights: [] })),
+        ]);
+
+        if (!active) return;
+
+        const corridorList = Array.isArray(corridorPayload) ? corridorPayload : [];
+        setCorridors(corridorList);
+        setInsights(Array.isArray(dawnPayload?.insights) ? dawnPayload.insights : []);
+
+        if (role === "admin" && !selectedCorridor && corridorList[0]) {
+          setSelectedCorridor(String(corridorList[0].id));
+        }
+      } catch (requestError) {
+        if (active) setError(requestError.message || "Unable to load dashboard context.");
+      }
+    }
+
+    bootstrap();
+    return () => {
+      active = false;
+    };
+  }, [role, selectedCorridor]);
+
+  async function reloadStudentData(nextCorridorId = corridorId) {
+    if (!nextCorridorId) return;
+
+    setLoading(true);
+    setError("");
+    try {
+      const [unitPayload, hiddenPayload, overviewPayload, demandPayload] = await Promise.all([
+        getUnits(nextCorridorId, studentQuery),
+        getHiddenReasons(nextCorridorId),
+        getCorridorOverview(nextCorridorId),
+        getCorridorDemand(nextCorridorId),
+      ]);
+
+      setVisibleUnits(Array.isArray(unitPayload) ? unitPayload : []);
+      setHiddenReasons(hiddenPayload || { hiddenCount: 0, hiddenUnits: [] });
+      setCorridorOverview(overviewPayload || null);
+      setDemand(demandPayload || null);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to load student visibility data.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadStudent() {
+      if (role !== "student") return;
+      setLoading(true);
+      setError("");
+      try {
+        const profile = await getProfile();
+        const nextCorridorId = String(profile?.identity?.corridorId || "");
+        if (!active) return;
+        setCorridorId(nextCorridorId);
+        if (nextCorridorId) {
+          await reloadStudentData(nextCorridorId);
+        } else {
+          setLoading(false);
+        }
+      } catch (requestError) {
+        if (active) {
+          setError(requestError.message || "Unable to load student dashboard.");
+          setLoading(false);
+        }
+      }
+    }
+
+    loadStudent();
+    return () => {
+      active = false;
+    };
+  }, [role, studentQuery]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadLandlord() {
+      if (role !== "landlord") return;
+      setLoading(true);
+      setError("");
+      try {
+        const payload = await getLandlordUnits();
+        if (!active) return;
+        const list = Array.isArray(payload) ? payload : [];
+        setLandlordUnits(list);
+        if (!createForm.corridorId && list[0]?.corridorId) {
+          setCreateForm((current) => ({ ...current, corridorId: String(list[0].corridorId) }));
+        }
+      } catch (requestError) {
+        if (active) setError(requestError.message || "Unable to load landlord dashboard.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadLandlord();
+    return () => {
+      active = false;
+    };
+  }, [role]);
+
+  useEffect(() => {
+    let active = true;
+
+    async function loadAdmin() {
+      if (role !== "admin" || !selectedCorridor) return;
+      setLoading(true);
+      setError("");
+      try {
+        const [unitsPayload, auditPayload, demandPayload, paymentsPayload, compliancePayload, agreementPayload, analyticsPayload] = await Promise.all([
+          getAdminUnits(selectedCorridor),
+          getAdminAuditQueue(selectedCorridor),
+          getAdminDemand(selectedCorridor).catch(() => null),
+          getAdminPayments().catch(() => []),
+          getAdminCompliance().catch(() => []),
+          getAdminAgreements().catch(() => []),
+          getAdminAnalytics().catch(() => null),
+        ]);
+        if (!active) return;
+        setAdminUnitsState(Array.isArray(unitsPayload) ? unitsPayload : []);
+        setAuditQueue(Array.isArray(auditPayload) ? auditPayload : []);
+        setDemand(demandPayload || null);
+        setAdminPayments(Array.isArray(paymentsPayload) ? paymentsPayload : []);
+        setAdminCompliance(Array.isArray(compliancePayload) ? compliancePayload : []);
+        setAdminAgreements(Array.isArray(agreementPayload) ? agreementPayload : []);
+        setAdminAnalytics(analyticsPayload);
+      } catch (requestError) {
+        if (active) setError(requestError.message || "Unable to load admin governance data.");
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    loadAdmin();
+    return () => {
+      active = false;
+    };
+  }, [role, selectedCorridor]);
+
+  async function handleCreateUnit() {
+    setCreatingUnit(true);
+    setError("");
+    try {
+      await createUnit({
+        corridorId: Number(createForm.corridorId),
+        rent: createForm.rent ? Number(createForm.rent) : undefined,
+        distanceKm: createForm.distanceKm ? Number(createForm.distanceKm) : undefined,
+        capacity: createForm.capacity ? Number(createForm.capacity) : undefined,
+      });
+      const payload = await getLandlordUnits();
+      setLandlordUnits(Array.isArray(payload) ? payload : []);
+      setCreateForm((current) => ({ ...current, rent: "", distanceKm: "", capacity: "" }));
+    } catch (requestError) {
+      setError(requestError.message || "Unable to create unit draft.");
+    } finally {
+      setCreatingUnit(false);
+    }
+  }
+
+  async function handleVerifyCompliance(complianceId, approve) {
+    setError("");
+    try {
+      await verifyCompliance(complianceId, { approve, reason: verifyReason });
+      setVerifyActionId(null);
+      setVerifyReason("");
+      const [compRes, unitsPayload] = await Promise.all([
+        getAdminCompliance().catch(() => []),
+        getAdminUnits(selectedCorridor).catch(() => []),
+      ]);
+      setAdminCompliance(compRes);
+      setAdminUnitsState(unitsPayload);
+    } catch (err) {
+      setError(err.message || "Failed to verify compliance document");
+    }
+  }
+
+  async function handleTerminateAgreement(agreementId) {
+    setError("");
+    try {
+      await terminateAgreement(agreementId, { reason: terminateReason });
+      setTerminateActionId(null);
+      setTerminateReason("");
+      const refreshed = await getAdminAgreements().catch(() => []);
+      setAdminAgreements(refreshed);
+    } catch (err) {
+      setError(err.message || "Failed to terminate agreement");
+    }
+  }
+
+  if (role === "student") {
     return (
-      <div className="space-y-4">
-        <h1 className="text-3xl font-bold">Dashboard</h1>
-        <p className="rounded border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">Please login first.</p>
-      </div>
+      <StudentDashboard
+        corridorId={corridorId}
+        corridorOverview={corridorOverview}
+        corridors={corridors}
+        demand={demand}
+        error={error}
+        filters={filters}
+        hiddenReasons={hiddenReasons}
+        insights={insights}
+        loading={loading}
+        reload={() => reloadStudentData()}
+        setCorridorId={(value) => {
+          setCorridorId(value);
+          reloadStudentData(value);
+        }}
+        setFilters={setFilters}
+        visibleUnits={visibleUnits}
+      />
+    );
+  }
+
+  if (role === "landlord") {
+    return (
+      <LandlordDashboard
+        corridors={corridors}
+        createForm={createForm}
+        creatingUnit={creatingUnit}
+        error={error}
+        insights={insights}
+        onCreateUnit={handleCreateUnit}
+        setCreateForm={setCreateForm}
+        units={landlordUnits}
+      />
     );
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Dashboard</h1>
-      {role === "student" && <StudentDashboard />}
-      {role === "landlord" && <LandlordDashboard />}
-      {role === "admin" && <AdminDashboard />}
-    </div>
+    <AdminDashboard
+      auditQueue={auditQueue}
+      corridors={corridors}
+      demand={demand}
+      error={error}
+      insights={insights}
+      selectedCorridor={selectedCorridor}
+      setSelectedCorridor={setSelectedCorridor}
+      units={adminUnits}
+      adminPayments={adminPayments}
+      reloadPayments={async () => {
+        const refreshed = await getAdminPayments().catch(() => []);
+        setAdminPayments(refreshed);
+      }}
+      adminCompliance={adminCompliance}
+      adminAgreements={adminAgreements}
+      verifyActionId={verifyActionId}
+      setVerifyActionId={setVerifyActionId}
+      verifyReason={verifyReason}
+      setVerifyReason={setVerifyReason}
+      terminateActionId={terminateActionId}
+      setTerminateActionId={setTerminateActionId}
+      terminateReason={terminateReason}
+      setTerminateReason={setTerminateReason}
+      onVerifyCompliance={handleVerifyCompliance}
+      onTerminateAgreement={handleTerminateAgreement}
+      adminAnalytics={adminAnalytics}
+    />
   );
 }

@@ -1,8 +1,22 @@
 const express = require("express");
 const prisma = require("../prismaClient");
 const { verifyToken, requireRole } = require("../middlewares/auth");
+const { analyzeCorridorRisk } = require("../services/intelligence/corridorRiskService");
 
 const router = express.Router();
+
+function isLateResolvedComplaint(complaint) {
+  if (!complaint?.resolved || !complaint?.resolvedAt || !complaint?.slaDeadline) return false;
+  return new Date(complaint.resolvedAt) > new Date(complaint.slaDeadline);
+}
+
+function isCreatedWithinDays(dateValue, days) {
+  if (!dateValue) return false;
+  const date = new Date(dateValue);
+  if (Number.isNaN(date.getTime())) return false;
+  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  return date >= cutoff;
+}
 
 async function buildCorridorDemandMetrics(corridorId) {
   const corridor = await prisma.corridor.findUnique({
@@ -134,7 +148,7 @@ router.get("/corridor/:corridorId/overview", async (req, res) => {
       return res.status(400).json({ error: "corridorId must be a number" });
     }
 
-    const [corridor, allUnits, visibleUnits] = await Promise.all([
+    const [corridor, allUnits, visibleUnits, complaints, riskSummary] = await Promise.all([
       prisma.corridor.findUnique({ where: { id: corridorId } }),
       prisma.unit.findMany({ where: { corridorId }, select: { id: true, trustScore: true } }),
       prisma.unit.findMany({
@@ -147,6 +161,23 @@ router.get("/corridor/:corridorId/overview", async (req, res) => {
         },
         orderBy: { trustScore: "desc" },
       }),
+      prisma.complaint.findMany({
+        where: {
+          unit: {
+            corridorId,
+          },
+        },
+        select: {
+          id: true,
+          unitId: true,
+          incidentType: true,
+          resolved: true,
+          createdAt: true,
+          resolvedAt: true,
+          slaDeadline: true,
+        },
+      }),
+      analyzeCorridorRisk(corridorId),
     ]);
 
     if (!corridor) {
@@ -158,6 +189,15 @@ router.get("/corridor/:corridorId/overview", async (req, res) => {
         ? 0
         : Number((allUnits.reduce((sum, unit) => sum + unit.trustScore, 0) / allUnits.length).toFixed(2));
 
+    const complaintsLast30Days = complaints.filter((complaint) => isCreatedWithinDays(complaint.createdAt, 30));
+    const incidentFrequency = complaintsLast30Days.reduce((acc, complaint) => {
+      const key = complaint.incidentType || "other";
+      acc[key] = (acc[key] || 0) + 1;
+      return acc;
+    }, {});
+    const unitsNearSuspension = allUnits.filter((unit) => Number(unit.trustScore) >= 50 && Number(unit.trustScore) <= 55).length;
+    const slaBreaches = complaintsLast30Days.filter((complaint) => isLateResolvedComplaint(complaint)).length;
+
     res.json({
       corridor,
       stats: {
@@ -166,6 +206,22 @@ router.get("/corridor/:corridorId/overview", async (req, res) => {
         hiddenUnits: allUnits.length - visibleUnits.length,
         averageTrustScore,
       },
+      behavioralInsights: {
+        complaintsLast30Days: complaintsLast30Days.length,
+        incidentFrequency,
+        unitsNearSuspension,
+        slaBreaches,
+        riskLevel: riskSummary.riskLevel,
+        complaintDensity: riskSummary.complaintDensity,
+        severeIncidents: riskSummary.severeIncidents,
+        unresolvedComplaints: riskSummary.unresolvedComplaints,
+        vdpDemandSignals: riskSummary.vdpDemandSignals,
+        trustScores: allUnits.map((unit) => ({
+          unitId: unit.id,
+          trustScore: unit.trustScore,
+        })),
+      },
+      riskSummary,
       visibleUnits,
     });
   } catch (error) {

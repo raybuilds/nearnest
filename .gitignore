@@ -15,4 +15,11 @@ coverage
 dist
 build
 .vscode/
+.local/
+scripts/*.local.cmd
+scripts/*.local.sh
+scripts/*.local.ps1
+*.pem
+*.key
 
+.vercel

@@ -1,0 +1,92 @@
+.form {
+  display: grid;
+  gap: 18px;
+}
+
+.header,
+.footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.title {
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 1.4rem;
+  font-weight: 500;
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 14px;
+}
+
+.field {
+  display: grid;
+  gap: 8px;
+}
+
+.field span {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.severityBlock {
+  display: grid;
+  gap: 10px;
+}
+
+.severityBlock > span {
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.severityRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.severityButton,
+.severityButtonActive {
+  border: 1px solid var(--border-base);
+  background: rgba(255, 255, 255, 0.03);
+  border-radius: 999px;
+  padding: 6px;
+}
+
+.severityButtonActive {
+  border-color: rgba(108, 142, 245, 0.28);
+  background: rgba(108, 142, 245, 0.08);
+}
+
+.context {
+  display: grid;
+  gap: 4px;
+}
+
+.context strong {
+  font-size: 13px;
+}
+
+.context span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+@media (max-width: 900px) {
+  .header,
+  .footer {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}
+
+@media (max-width: 640px) {
+  .grid {
+    grid-template-columns: 1fr;
+  }
+}

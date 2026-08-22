@@ -10,4 +10,14 @@ const complaintLimiter = rateLimit({
   },
 });
 
-module.exports = { complaintLimiter };
+const speechLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 12,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    error: "Too many speech requests. Please slow down.",
+  },
+});
+
+module.exports = { complaintLimiter, speechLimiter };

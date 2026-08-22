@@ -3,6 +3,7 @@ const multer = require("multer");
 const prisma = require("../prismaClient");
 const { verifyToken, requireRole } = require("../middlewares/auth");
 const { uploadFile } = require("../services/storageService");
+const governanceEvents = require("../services/governanceEvents");
 
 const router = express.Router();
 const EXPLAIN_WINDOW_DAYS = 30;
@@ -115,6 +116,19 @@ function isAllowedMimeType(type, mimeType) {
     );
   }
   return false;
+}
+
+function emitUnitStatusChanged(unitId, previousStatus, nextStatus, source) {
+  if (!previousStatus || !nextStatus || previousStatus === nextStatus) {
+    return;
+  }
+
+  governanceEvents.emit("UNIT_STATUS_CHANGED", {
+    unitId,
+    previousStatus,
+    nextStatus,
+    source,
+  });
 }
 
 router.post("/unit", verifyToken, requireRole("landlord"), async (req, res) => {
@@ -712,6 +726,7 @@ router.post("/unit/:id/submit", verifyToken, requireRole("landlord"), async (req
         data: { status: "submitted" },
       });
     });
+    emitUnitStatusChanged(unitId, unit.status, updated.status, "landlord_submit");
     return res.json(updated);
   } catch (error) {
     console.error(error);
@@ -886,6 +901,7 @@ router.patch("/admin/unit/:id/review", verifyToken, requireRole("admin"), async 
       where: { id: unitId },
       data,
     });
+    emitUnitStatusChanged(unitId, unit.status, updated.status, "admin_review");
     return res.json(updated);
   } catch (error) {
     console.error(error);
@@ -945,6 +961,7 @@ router.patch("/admin/unit/:id/status", verifyToken, requireRole("admin"), async 
       where: { id: unitId },
       data: { status: normalizedStatus },
     });
+    emitUnitStatusChanged(unitId, unit.status, updated.status, "admin_status");
     return res.json(updated);
   } catch (error) {
     console.error(error);
@@ -1005,13 +1022,14 @@ router.patch("/admin/unit/:id/structural-checklist", verifyToken, requireRole("a
       },
     });
 
-    await prisma.unit.update({
+    const updatedUnit = await prisma.unit.update({
       where: { id: unitId },
       data: {
         structuralApproved: approved,
         ...(unit.status === "approved" && !approved ? { status: "admin_review" } : {}),
       },
     });
+    emitUnitStatusChanged(unitId, unit.status, updatedUnit.status, "admin_structural_checklist");
 
     return res.json(checklist);
   } catch (error) {
@@ -1082,13 +1100,14 @@ router.patch("/admin/unit/:id/operational-checklist", verifyToken, requireRole("
       },
     });
 
-    await prisma.unit.update({
+    const updatedUnit = await prisma.unit.update({
       where: { id: unitId },
       data: {
         operationalBaselineApproved: approved,
         ...(unit.status === "approved" && !approved ? { status: "admin_review" } : {}),
       },
     });
+    emitUnitStatusChanged(unitId, unit.status, updatedUnit.status, "admin_operational_checklist");
 
     return res.json(checklist);
   } catch (error) {
@@ -1120,13 +1139,14 @@ router.post("/admin/unit/:id/audit-log", verifyToken, requireRole("admin"), asyn
       },
     });
 
-    await prisma.unit.update({
+    const updatedUnit = await prisma.unit.update({
       where: { id: unitId },
       data: {
         auditRequired: true,
         status: unit.status === "archived" ? unit.status : "suspended",
       },
     });
+    emitUnitStatusChanged(unitId, unit.status, updatedUnit.status, "admin_manual_audit");
 
     return res.status(201).json(log);
   } catch (error) {
@@ -1158,6 +1178,7 @@ router.post("/admin/unit/:id/self-declaration/penalize", verifyToken, requireRol
 
     const nextTrust = Math.max(Number(unit.trustScore) - parsedPenalty, 0);
 
+    let finalTrustScore = nextTrust;
     await prisma.$transaction(async (tx) => {
       await tx.auditLog.create({
         data: {
@@ -1177,6 +1198,17 @@ router.post("/admin/unit/:id/self-declaration/penalize", verifyToken, requireRol
         },
       });
     });
+
+    if (nextTrust < 50) {
+      governanceEvents.emit("TRUST_SCORE_UPDATED", {
+        unitId,
+        trustScore: finalTrustScore,
+        source: "self_declaration_penalty",
+      });
+    }
+    if (unit.status !== "archived") {
+      emitUnitStatusChanged(unitId, unit.status, "suspended", "self_declaration_penalty");
+    }
 
     return res.json({
       message: "Misrepresentation penalty applied",
@@ -1316,13 +1348,14 @@ router.patch("/admin/audit-log/:id/resolve", verifyToken, requireRole("admin"), 
         unit.operationalBaselineApproved &&
         Number(unit.trustScore) >= 50;
 
-      await prisma.unit.update({
+      const updatedUnit = await prisma.unit.update({
         where: { id: unit.id },
         data: {
           auditRequired: unresolvedCount > 0,
           ...(canReopen ? { status: "approved" } : {}),
         },
       });
+      emitUnitStatusChanged(unit.id, unit.status, updatedUnit.status, "audit_resolution");
     }
 
     return res.json({
@@ -1396,6 +1429,8 @@ router.get("/unit/:id/explain", verifyToken, async (req, res) => {
           select: {
             resolved: true,
             createdAt: true,
+            resolvedAt: true,
+            slaDeadline: true,
           },
         },
       },
@@ -1416,6 +1451,12 @@ router.get("/unit/:id/explain", verifyToken, async (req, res) => {
       const createdAt = new Date(complaint.createdAt);
       return !Number.isNaN(createdAt.getTime()) && createdAt >= cutoff;
     }).length;
+    const slaBreaches30Days = unit.complaints.filter((complaint) => {
+      if (!complaint.createdAt) return false;
+      const createdAt = new Date(complaint.createdAt);
+      if (Number.isNaN(createdAt.getTime()) || createdAt < cutoff) return false;
+      return isLateResolvedComplaint(complaint) || (!complaint.resolved && complaint.slaDeadline && new Date() > new Date(complaint.slaDeadline));
+    }).length;
 
     return res.json({
       status: unit.status,
@@ -1425,6 +1466,7 @@ router.get("/unit/:id/explain", verifyToken, async (req, res) => {
       trustBand: getTrustBand(unit.trustScore),
       activeComplaints,
       complaintsLast30Days,
+      slaBreaches30Days,
       auditRequired: unit.auditRequired,
       visibilityReasons: getVisibilityReasons(unit),
     });

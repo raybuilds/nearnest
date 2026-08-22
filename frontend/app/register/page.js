@@ -1,165 +1,236 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { apiRequest } from "@/lib/api";
+import { useRouter } from "next/navigation";
+import { getCorridors, getInstitutions, joinVDP, register } from "@/lib/api";
+import { setSessionFromPayload } from "@/lib/session";
+
+const roles = ["student", "landlord", "parent"];
 
 export default function RegisterPage() {
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [role, setRole] = useState("student");
-  const [intake, setIntake] = useState("2026A");
-  const [corridorId, setCorridorId] = useState("");
-  const [institutionId, setInstitutionId] = useState("");
+  const router = useRouter();
   const [corridors, setCorridors] = useState([]);
   const [institutions, setInstitutions] = useState([]);
-  const [loadingInstitutions, setLoadingInstitutions] = useState(false);
-  const [loadingCorridors, setLoadingCorridors] = useState(true);
-  const [submitting, setSubmitting] = useState(false);
-  const [status, setStatus] = useState("");
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [form, setForm] = useState({
+    role: "student",
+    name: "",
+    email: "",
+    password: "",
+    phone: "",
+    corridorId: "",
+    institutionId: "",
+    intake: "",
+    studentOccupantId: "",
+  });
 
   useEffect(() => {
-    (async () => {
+    let active = true;
+
+    async function bootstrap() {
       try {
-        const data = await apiRequest("/corridors");
-        setCorridors(Array.isArray(data) ? data : []);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoadingCorridors(false);
+        const payload = await getCorridors();
+        if (!active) return;
+        const list = Array.isArray(payload) ? payload : [];
+        setCorridors(list);
+        setForm((current) => ({ ...current, corridorId: current.corridorId || String(list[0]?.id || "") }));
+      } catch (requestError) {
+        if (active) setError(requestError.message || "Unable to load corridors.");
       }
-    })();
+    }
+
+    bootstrap();
+    return () => {
+      active = false;
+    };
   }, []);
 
   useEffect(() => {
-    if (!corridorId || role !== "student") {
-      setInstitutions([]);
-      setInstitutionId("");
-      return;
+    let active = true;
+
+    async function bootstrapInstitutions() {
+      if (form.role !== "student" || !form.corridorId) {
+        setInstitutions([]);
+        return;
+      }
+
+      try {
+        const payload = await getInstitutions(form.corridorId);
+        if (active) setInstitutions(Array.isArray(payload) ? payload : []);
+      } catch {
+        if (active) setInstitutions([]);
+      }
     }
 
-    (async () => {
-      setLoadingInstitutions(true);
-      try {
-        const data = await apiRequest(`/institutions/${Number(corridorId)}`);
-        setInstitutions(Array.isArray(data) ? data : []);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoadingInstitutions(false);
-      }
-    })();
-  }, [corridorId, role]);
+    bootstrapInstitutions();
+    return () => {
+      active = false;
+    };
+  }, [form.corridorId, form.role]);
 
-  async function onSubmit(e) {
-    e.preventDefault();
-    setStatus("");
+  function update(field, value) {
     setError("");
-    setSubmitting(true);
-    try {
-      const payload = {
-        name,
-        email,
-        password,
-        role,
-      };
-      if (role === "student") {
-        payload.intake = intake;
-        payload.corridorId = Number(corridorId);
-        payload.institutionId = institutionId ? Number(institutionId) : null;
-      }
+    setForm((current) => ({ ...current, [field]: value }));
+  }
 
-      const result = await apiRequest("/auth/register", {
-        method: "POST",
-        body: JSON.stringify(payload),
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setLoading(true);
+    setError("");
+
+    try {
+      const payload = await register({
+        name: form.name,
+        email: form.email,
+        password: form.password,
+        role: form.role,
+        ...(form.role === "student"
+          ? {
+              corridorId: Number(form.corridorId),
+              intake: form.intake,
+              ...(form.institutionId ? { institutionId: Number(form.institutionId) } : {}),
+            }
+          : {}),
+        ...(form.role === "parent"
+          ? {
+              phoneNumber: form.phone,
+              studentOccupantId: form.studentOccupantId,
+            }
+          : {}),
       });
 
-      localStorage.setItem("token", result.token);
-      localStorage.setItem("role", result.user.role);
-      localStorage.setItem("userId", String(result.user.id));
-      if (result.studentId) {
-        localStorage.setItem("studentId", String(result.studentId));
-      }
-      if (result.landlordId) {
-        localStorage.setItem("landlordId", String(result.landlordId));
-      }
-      if (role === "student") {
-        localStorage.setItem("corridorId", String(corridorId));
-        await apiRequest("/vdp", {
-          method: "POST",
-          body: JSON.stringify({
-            corridorId: Number(corridorId),
-            intake,
-          }),
-        });
+      setSessionFromPayload(payload);
+
+      if (form.role === "student") {
+        await joinVDP({ corridorId: Number(form.corridorId), intake: form.intake });
       }
 
-      setStatus("Registration successful. Redirecting...");
-      window.setTimeout(() => {
-        window.location.href = "/dashboard";
-      }, 600);
-    } catch (err) {
-      setError(err.message);
+      router.push("/dashboard");
+    } catch (requestError) {
+      setError(requestError.message || "Unable to create account.");
     } finally {
-      setSubmitting(false);
+      setLoading(false);
     }
   }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-3xl font-bold">Create Account</h1>
-      <form onSubmit={onSubmit} className="grid max-w-xl gap-3 rounded-xl border bg-white p-5 shadow-sm">
-        <input className="rounded border p-2" placeholder="Name" value={name} onChange={(e) => setName(e.target.value)} required />
-        <input className="rounded border p-2" placeholder="Email" value={email} onChange={(e) => setEmail(e.target.value)} required />
-        <input
-          className="rounded border p-2"
-          placeholder="Password"
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          required
-        />
-        <select className="rounded border p-2" value={role} onChange={(e) => setRole(e.target.value)}>
-          <option value="student">Student</option>
-          <option value="landlord">Landlord</option>
-          <option value="admin">Admin</option>
-        </select>
+    <div className="governance-grid items-start">
+      <section className="glass-panel-strong blueprint-border lg:col-span-6 p-8 sm:p-10">
+        <div className="eyebrow">Registration</div>
+        <h1 className="page-title mt-5 text-gradient">Enter the trust-governed housing network.</h1>
+        <p className="subtle-copy mt-4 max-w-2xl">
+          Student onboarding links you to corridor demand and institutional context. Landlord onboarding links you to the evidence,
+          checklist, complaint, and governance workflow for your future units.
+        </p>
 
-        {role === "student" && (
-          <>
-            <input className="rounded border p-2" placeholder="Intake (e.g. 2026A)" value={intake} onChange={(e) => setIntake(e.target.value)} required />
-            <select className="rounded border p-2" value={corridorId} onChange={(e) => setCorridorId(e.target.value)} required>
-              <option value="">{loadingCorridors ? "Loading corridors..." : "Select corridor"}</option>
-              {corridors.map((corridor) => (
-                <option key={corridor.id} value={corridor.id}>
-                  #{corridor.id} - {corridor.name}
-                </option>
-              ))}
-            </select>
-            <select className="rounded border p-2" value={institutionId} onChange={(e) => setInstitutionId(e.target.value)}>
-              <option value="">
-                {corridorId
-                  ? loadingInstitutions
-                    ? "Loading institutions..."
-                    : "Select institution (optional)"
-                  : "Select corridor first"}
-              </option>
-              {institutions.map((institution) => (
-                <option key={institution.id} value={institution.id}>
-                  {institution.name}
-                </option>
-              ))}
-            </select>
-          </>
-        )}
+        <div className="mt-8 grid gap-4">
+          <div className="rounded-[24px] border border-white/10 bg-white/5 p-5">
+            <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Student outcome</p>
+            <strong className="mt-2 block text-lg text-white">Demand-gated discovery with visible trust logic</strong>
+          </div>
+          <div className="rounded-[24px] border border-white/10 bg-white/5 p-5">
+            <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Landlord outcome</p>
+            <strong className="mt-2 block text-lg text-white">Portfolio governance and operational accountability</strong>
+          </div>
+        </div>
+      </section>
 
-        <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60" type="submit" disabled={submitting}>
-          {submitting ? "Creating..." : "Register"}
-        </button>
+      <form className="glass-panel blueprint-border lg:col-span-6 p-8" onSubmit={handleSubmit}>
+        <div className="flex flex-wrap gap-3">
+          {roles.map((role) => (
+            <button
+              key={role}
+              className={form.role === role ? "btn-primary" : "btn-secondary"}
+              onClick={() => update("role", role)}
+              type="button"
+            >
+              {role}
+            </button>
+          ))}
+        </div>
+
+        {error ? <div className="status-banner error mt-5">{error}</div> : null}
+
+        <div className="mt-6 grid gap-4">
+          <label className="grid gap-2">
+            <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Name</span>
+            <input className="input-shell" onChange={(event) => update("name", event.target.value)} value={form.name} />
+          </label>
+          <label className="grid gap-2">
+            <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Email</span>
+            <input className="input-shell" onChange={(event) => update("email", event.target.value)} type="email" value={form.email} />
+          </label>
+          <label className="grid gap-2">
+            <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Password</span>
+            <input className="input-shell" onChange={(event) => update("password", event.target.value)} type="password" value={form.password} />
+          </label>
+
+          {form.role === "student" ? (
+            <>
+              <label className="grid gap-2">
+                <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Corridor</span>
+                <select className="input-shell" onChange={(event) => update("corridorId", event.target.value)} value={form.corridorId}>
+                  <option value="">Select corridor</option>
+                  {corridors.map((corridor) => (
+                    <option key={corridor.id} value={corridor.id}>
+                      {corridor.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-2">
+                <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Institution</span>
+                <select className="input-shell" onChange={(event) => update("institutionId", event.target.value)} value={form.institutionId}>
+                  <option value="">Select institution</option>
+                  {institutions.map((institution) => (
+                    <option key={institution.id} value={institution.id}>
+                      {institution.name}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="grid gap-2">
+                <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Intake</span>
+                <input className="input-shell" onChange={(event) => update("intake", event.target.value)} placeholder="2026" value={form.intake} />
+              </label>
+            </>
+          ) : form.role === "parent" ? (
+            <>
+              <label className="grid gap-2">
+                <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Phone</span>
+                <input className="input-shell" onChange={(event) => update("phone", event.target.value)} value={form.phone} />
+              </label>
+              <label className="grid gap-2">
+                <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Student Occupant ID</span>
+                <input className="input-shell" onChange={(event) => update("studentOccupantId", event.target.value)} placeholder="00-000-000-000-0" value={form.studentOccupantId} />
+              </label>
+            </>
+          ) : form.role === "landlord" ? (
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Phone</span>
+              <input className="input-shell" onChange={(event) => update("phone", event.target.value)} value={form.phone} />
+            </label>
+          ) : null}
+        </div>
+
+        <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <p className="text-sm leading-6 text-slate-400">
+            Registration creates the identity layer for role-based rendering and governance-aware workflows.
+          </p>
+          <button className="btn-primary" disabled={loading} type="submit">
+            {loading ? "Creating..." : "Create account"}
+          </button>
+        </div>
+
+        <p className="mt-6 text-sm text-slate-400">
+          Already registered?{" "}
+          <Link className="text-sky-300" href="/login">
+            Sign in
+          </Link>
+        </p>
       </form>
-      {status && <p className="rounded bg-green-50 px-3 py-2 text-sm text-green-700">{status}</p>}
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
     </div>
   );
 }

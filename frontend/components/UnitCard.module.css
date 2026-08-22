@@ -1,0 +1,135 @@
+.card {
+  display: block;
+  overflow: hidden;
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-base);
+  background: rgba(255, 255, 255, 0.03);
+  transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(108, 142, 245, 0.28);
+  box-shadow: 0 22px 44px rgba(0, 0, 0, 0.28);
+}
+
+.thumbnail {
+  position: relative;
+  min-height: 88px;
+  padding: 14px;
+  background: linear-gradient(135deg, var(--bg-surface), var(--bg-hover));
+  border-bottom: 1px solid var(--border-base);
+}
+
+.houseIcon {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.statusChip {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+}
+
+.typeChip {
+  position: absolute;
+  top: 12px;
+  left: 12px;
+}
+
+.auditChip {
+  position: absolute;
+  left: 12px;
+  bottom: 12px;
+}
+
+.body {
+  padding: 14px;
+  display: grid;
+  gap: 14px;
+}
+
+.headingRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.title {
+  margin: 6px 0 0;
+  font-family: var(--font-display);
+  font-size: 1.08rem;
+  font-weight: 500;
+}
+
+.priceBlock {
+  text-align: right;
+  min-width: fit-content;
+}
+
+.priceBlock strong {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.priceBlock span {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.metaRow,
+.signalRow,
+.amenities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.trustSection {
+  display: grid;
+  gap: 8px;
+}
+
+.trustRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.trustValue {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.metricGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.studentActions {
+  display: grid;
+  gap: 10px;
+}
+
+.studentActions button {
+  width: 100%;
+  min-height: 42px;
+}
+
+@media (max-width: 640px) {
+  .headingRow {
+    flex-direction: column;
+  }
+
+  .priceBlock {
+    text-align: left;
+  }
+}

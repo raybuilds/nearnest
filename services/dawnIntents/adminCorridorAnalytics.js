@@ -38,8 +38,11 @@ module.exports = async function adminCorridorAnalytics({ req, context }) {
           : "stable";
 
     const units = await callApi(`/admin/units/${Number(corridorId)}`).catch(() => []);
+    const overview = await callApi(`/corridor/${Number(corridorId)}/overview`).catch(() => null);
     const unitList = Array.isArray(units) ? units : [];
     const unitsNearSuspension = unitList.filter((item) => Number(item?.trustScore || 0) <= 55 || item?.auditRequired).length;
+    const riskLevel = String(overview?.riskSummary?.riskLevel || overview?.behavioralInsights?.riskLevel || "LOW");
+    const severeIncidents = Number(overview?.riskSummary?.severeIncidents || overview?.behavioralInsights?.severeIncidents || 0);
 
     const warnings = [];
     if (complaintDensity >= ENFORCEMENT_WARNING_THRESHOLD || unitsNearSuspension > 0) {
@@ -48,11 +51,18 @@ module.exports = async function adminCorridorAnalytics({ req, context }) {
     if (complaintDensity >= CORRIDOR_DENSITY_ALERT_THRESHOLD) {
       warnings.push(`Corridor ${corridorId} has high complaint density.`);
     }
+    if (riskLevel === "HIGH") {
+      warnings.push(`Corridor ${corridorId} is currently classified as HIGH risk.`);
+    } else if (riskLevel === "MEDIUM") {
+      warnings.push(`Corridor ${corridorId} is currently classified as MEDIUM risk.`);
+    }
 
     rows.push({
       corridorId,
       corridorName: corridor.name,
       complaintDensity,
+      riskLevel,
+      severeIncidents,
       trustTrend,
       unitsNearSuspension,
       trend14d: {

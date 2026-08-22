@@ -12,6 +12,15 @@ function createDefaultContext() {
     lastUnitId: null,
     lastSearchFilters: null,
     lastComplaintDraft: null,
+    lastViewedUnitId: null,
+    lastKnownTrustScore: null,
+    lastKnownComplaintCount: null,
+    lastKnownRiskLevel: null,
+    currentUnitId: null,
+    currentCorridorId: null,
+    currentTrustScore: null,
+    currentActiveComplaints: null,
+    pendingFollowUp: null,
   };
 }
 

@@ -1,138 +1,250 @@
 "use client";
 
-import { useState } from "react";
-import { useEffect } from "react";
-import { apiRequest } from "@/lib/api";
+import { useEffect, useMemo, useState } from "react";
+import { createComplaint, getProfile, getUnits, queryDawn, resolveComplaint } from "@/lib/api";
+import { getStoredRole } from "@/lib/session";
 
-export default function ComplaintForm() {
-  const [unitId, setUnitId] = useState("");
-  const [occupantId, setOccupantId] = useState("");
-  const [studentId, setStudentId] = useState("");
-  const [severity, setSeverity] = useState("1");
-  const [incidentType, setIncidentType] = useState("");
-  const [complaintText, setComplaintText] = useState("");
-  const [resolveComplaintId, setResolveComplaintId] = useState("");
-  const [statusMessage, setStatusMessage] = useState("");
-  const [error, setError] = useState("");
-  const [submittingComplaint, setSubmittingComplaint] = useState(false);
-  const [resolvingComplaint, setResolvingComplaint] = useState(false);
+const incidentTypes = ["safety", "injury", "fire", "harassment", "water", "common_area", "electrical", "other"];
+
+export default function ComplaintForm({ complaintId, initialUnitId = "" }) {
   const [role, setRole] = useState("");
+  const [units, setUnits] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [drafting, setDrafting] = useState(false);
+  const [error, setError] = useState("");
+  const [success, setSuccess] = useState("");
+  const [form, setForm] = useState({
+    unitId: initialUnitId ? String(initialUnitId) : "",
+    occupantId: "",
+    severity: "3",
+    incidentType: "other",
+    description: "",
+    resolutionNotes: "",
+  });
 
   useEffect(() => {
-    setStudentId(localStorage.getItem("studentId") || "");
-    setRole(localStorage.getItem("role") || "");
+    setRole(getStoredRole());
   }, []);
 
-  async function submitComplaint(e) {
-    e.preventDefault();
-    setStatusMessage("");
+  useEffect(() => {
+    let active = true;
+
+    async function bootstrap() {
+      if (complaintId) return;
+      try {
+        const profile = await getProfile();
+        const corridorId = profile?.identity?.corridorId;
+        if (!corridorId) return;
+        const payload = await getUnits(corridorId);
+        if (!active) return;
+        const list = Array.isArray(payload) ? payload : [];
+        setUnits(list);
+        setForm((current) => ({
+          ...current,
+          unitId: current.unitId || (list[0] ? String(list[0].id) : ""),
+        }));
+      } catch {
+        if (active) setUnits([]);
+      }
+    }
+
+    bootstrap();
+    return () => {
+      active = false;
+    };
+  }, [complaintId]);
+
+  const selectedUnit = useMemo(
+    () => units.find((item) => String(item.id) === String(form.unitId)),
+    [form.unitId, units]
+  );
+
+  function update(field, value) {
     setError("");
-    setSubmittingComplaint(true);
+    setSuccess("");
+    setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  async function handleDraft() {
+    setDrafting(true);
+    setError("");
     try {
-      const result = await apiRequest("/complaint", {
-        method: "POST",
-        body: JSON.stringify({
-          unitId: unitId ? Number(unitId) : undefined,
-          occupantId: occupantId.trim() || undefined,
-          studentId: Number(studentId),
-          severity: Number(severity),
-          incidentType: incidentType || undefined,
-          message: complaintText.trim() || undefined,
-        }),
+      const payload = await queryDawn({
+        message: `Draft a complaint for unit ${form.unitId || "unknown"} about ${form.incidentType}: ${form.description || "issue details pending"}`,
+        intent: "complaint_draft",
       });
-      setStatusMessage(`Complaint submitted. New trustScore: ${result.trustScore}`);
-      setComplaintText("");
-      setUnitId("");
-      setOccupantId("");
-    } catch (err) {
-      setError(err.message);
+      update("description", payload?.assistant || form.description);
+    } catch (requestError) {
+      setError(requestError.message || "Dawn could not draft this complaint right now.");
     } finally {
-      setSubmittingComplaint(false);
+      setDrafting(false);
     }
   }
 
-  async function resolveComplaint(e) {
-    e.preventDefault();
-    setStatusMessage("");
+  async function handleSubmit(event) {
+    event.preventDefault();
+    setLoading(true);
     setError("");
-    setResolvingComplaint(true);
+    setSuccess("");
+
     try {
-      const result = await apiRequest(`/complaint/${Number(resolveComplaintId)}/resolve`, {
-        method: "PATCH",
+      if (complaintId) {
+        const payload = await resolveComplaint(complaintId);
+        setSuccess(`Complaint resolved. Updated trust score: ${payload?.trustScore ?? "unknown"}.`);
+        return;
+      }
+
+      const payload = await createComplaint({
+        unitId: Number(form.unitId),
+        severity: Number(form.severity),
+        incidentType: form.incidentType,
+        message: form.description,
+        ...(form.occupantId ? { occupantId: form.occupantId.trim() } : {}),
       });
-      setStatusMessage(`Complaint resolved. New trustScore: ${result.trustScore}`);
-    } catch (err) {
-      setError(err.message);
+
+      setSuccess(`Complaint submitted. Updated trust score: ${payload?.trustScore ?? "unknown"}.`);
+      setForm((current) => ({
+        ...current,
+        occupantId: "",
+        description: "",
+        severity: "3",
+        incidentType: "other",
+      }));
+    } catch (requestError) {
+      setError(requestError.message || "Unable to submit complaint.");
     } finally {
-      setResolvingComplaint(false);
+      setLoading(false);
     }
   }
 
   return (
-    <section className="space-y-4 rounded-xl border bg-white p-4 shadow-sm">
-      <h2 className="text-xl font-semibold">Complaints</h2>
-
-      <form onSubmit={submitComplaint} className="grid gap-2 md:grid-cols-6">
-        <input
-          className="rounded border p-2"
-          placeholder="unitId"
-          value={unitId}
-          onChange={(e) => setUnitId(e.target.value)}
-        />
-        <input
-          className="rounded border p-2"
-          placeholder="occupantId (12 digits)"
-          value={occupantId}
-          onChange={(e) => setOccupantId(e.target.value)}
-        />
-        <input
-          className="rounded border p-2"
-          placeholder="studentId"
-          value={studentId}
-          readOnly
-        />
-        <input
-          className="rounded border p-2"
-          placeholder="severity (1-5)"
-          value={severity}
-          onChange={(e) => setSeverity(e.target.value)}
-        />
-        <select className="rounded border p-2" value={incidentType} onChange={(e) => setIncidentType(e.target.value)}>
-          <option value="">Incident type (optional)</option>
-          <option value="safety">Safety</option>
-          <option value="injury">Injury</option>
-          <option value="fire">Fire</option>
-          <option value="harassment">Harassment</option>
-          <option value="other">Other</option>
-        </select>
-        <textarea
-          className="rounded border p-2 md:col-span-5"
-          placeholder="Describe the complaint (optional)"
-          value={complaintText}
-          onChange={(e) => setComplaintText(e.target.value)}
-          maxLength={1200}
-        />
-        <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60" type="submit" disabled={submittingComplaint}>
-          {submittingComplaint ? "Submitting..." : "Submit Complaint"}
-        </button>
-      </form>
-
-      {(role === "admin" || role === "landlord") && (
-        <form onSubmit={resolveComplaint} className="grid gap-2 md:grid-cols-3">
-          <input
-            className="rounded border p-2 md:col-span-2"
-            placeholder="complaintId"
-            value={resolveComplaintId}
-            onChange={(e) => setResolveComplaintId(e.target.value)}
-          />
-          <button className="rounded bg-slate-900 px-4 py-2 text-white disabled:opacity-60" type="submit" disabled={resolvingComplaint}>
-            {resolvingComplaint ? "Resolving..." : "Resolve Complaint"}
+    <form className="glass-panel blueprint-border p-6" onSubmit={handleSubmit}>
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="eyebrow">{complaintId ? "Resolution workflow" : "Report issues"}</div>
+          <h3 className="mt-4 text-2xl font-semibold text-white" style={{ fontFamily: "var(--font-display)" }}>
+            {complaintId ? "Resolve issue with governance trace" : "Report an issue"}
+          </h3>
+          <p className="mt-2 text-sm leading-6 text-slate-400">
+            {complaintId
+              ? "Close the issue with a clear record of what was resolved."
+              : "Share what happened so unsafe conditions can be reviewed and fixed faster."}
+          </p>
+        </div>
+        {!complaintId ? (
+          <button className="btn-secondary" onClick={handleDraft} type="button">
+            {drafting ? "Drafting..." : "Draft with Dawn"}
           </button>
-        </form>
+        ) : null}
+      </div>
+
+      {error ? <div className="status-banner error mt-5">{error}</div> : null}
+      {success ? <div className="status-banner success mt-5">{success}</div> : null}
+
+      {!complaintId ? (
+        <>
+          <div className="mt-6 grid gap-4 md:grid-cols-2">
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Unit ID</span>
+              <select className="input-shell" onChange={(event) => update("unitId", event.target.value)} value={form.unitId}>
+                <option value="">Select a unit</option>
+                {units.map((unit) => (
+                  <option key={unit.id} value={unit.id}>
+                    Unit {unit.id}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Occupant ID</span>
+              <input
+                className="input-shell"
+                onChange={(event) => update("occupantId", event.target.value)}
+                placeholder="Optional verified occupant ID"
+                value={form.occupantId}
+              />
+            </label>
+
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Incident type</span>
+              <select className="input-shell" onChange={(event) => update("incidentType", event.target.value)} value={form.incidentType}>
+                {incidentTypes.map((item) => (
+                  <option key={item} value={item}>
+                    {item}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="grid gap-2">
+              <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Severity</span>
+              <select className="input-shell" onChange={(event) => update("severity", event.target.value)} value={form.severity}>
+                {["1", "2", "3", "4", "5"].map((value) => (
+                  <option key={value} value={value}>
+                    Severity {value}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </div>
+
+          <label className="mt-4 grid gap-2">
+            <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Description</span>
+            <textarea
+              className="textarea-shell"
+              onChange={(event) => update("description", event.target.value)}
+              placeholder="Describe the issue clearly and what support is needed."
+              value={form.description}
+            />
+          </label>
+
+          <p className="mt-3 text-sm leading-6 text-slate-400">
+            Reporting issues helps improve safety for everyone in this area.
+          </p>
+
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Expected resolution time</p>
+              <strong className="mt-2 block text-lg text-white">24-48 hrs</strong>
+              <span className="mt-2 block text-sm leading-6 text-slate-400">Expected resolution window if the issue is handled on time.</span>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">May reduce trust score</p>
+              <strong className="mt-2 block text-lg text-white">Visible to governance</strong>
+              <span className="mt-2 block text-sm leading-6 text-slate-400">This may reduce trust score or trigger audit pressure depending on severity and SLA outcome.</span>
+            </div>
+            <div className="rounded-2xl border border-white/8 bg-white/5 p-4">
+              <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Unit details</p>
+              <strong className="mt-2 block text-lg text-white">{selectedUnit ? `Unit ${selectedUnit.id}` : "Select a unit"}</strong>
+              <span className="mt-2 block text-sm leading-6 text-slate-400">
+                {selectedUnit ? `${Number(selectedUnit.distanceKm || 0).toFixed(1)} km away • trust ${selectedUnit.trustScore || 0}` : "Unit context will appear here."}
+              </span>
+            </div>
+          </div>
+        </>
+      ) : (
+        <label className="mt-6 grid gap-2">
+          <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Resolution notes</span>
+          <textarea
+            className="textarea-shell"
+            onChange={(event) => update("resolutionNotes", event.target.value)}
+            placeholder="Add evidence notes or explain why the SLA outcome should improve trust."
+            value={form.resolutionNotes}
+          />
+        </label>
       )}
 
-      {statusMessage && <p className="rounded bg-green-50 px-3 py-2 text-sm text-green-700">{statusMessage}</p>}
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
-    </section>
+      <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-sm leading-6 text-slate-400">
+          {complaintId
+            ? "Resolving closes the complaint and recalculates trust for the affected unit."
+            : `Submitting as ${role || "current user"} records a governance event, not just a support ticket.`}
+        </div>
+        <button className="btn-primary" disabled={loading || (!complaintId && !form.unitId)} type="submit">
+          {loading ? (complaintId ? "Resolving..." : "Submitting...") : complaintId ? "Resolve issue" : "Submit report"}
+        </button>
+      </div>
+    </form>
   );
 }

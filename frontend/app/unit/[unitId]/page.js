@@ -2,810 +2,1393 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
-import { useParams } from "next/navigation";
-import { apiRequest } from "@/lib/api";
+import ComplaintForm from "@/components/ComplaintForm";
+import {
+  explainUnit,
+  getAdminAuditLogs,
+  getAdminUnitDetail,
+  getLandlordOverview,
+  getStudentUnitDetail,
+  patchOperationalCL,
+  patchStructuralCL,
+  penalizeSelfDecl,
+  putOperationalCL,
+  putStructuralCL,
+  reviewUnit,
+  resolveAuditLog,
+  setCorrectivePlan,
+  submitUnit,
+  triggerAudit,
+  uploadMedia,
+  getLandlordGuestStays,
+  getLandlordPayments,
+  verifyPayment,
+  getLandlordCompliance,
+  uploadCompliance,
+  createAgreement,
+  createAgreementVersion,
+  submitAgreement,
+  signLandlordAgreement,
+  getInterestedStudents,
+  getLandlordAgreements,
+  getLandlordUnitAnalytics,
+  BASE,
+} from "@/lib/api";
+import { formatDateTime, getStatusTone, getTrustBand } from "@/lib/governance";
+import { getStoredRole } from "@/lib/session";
+import DawnAnalyticsViewer from "@/components/DawnAnalyticsViewer";
+import { FadeIn, Reveal, Expand } from "@/components/ui/Motion";
 
-function formatDate(dateString) {
-  if (!dateString) return "N/A";
-  return new Date(dateString).toLocaleString("en-US", {
-    year: "numeric",
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+const structuralFields = ["fireExit", "wiringSafe", "plumbingSafe", "occupancyCompliant"];
+const operationalFields = ["bedAvailable", "waterAvailable", "toiletsAvailable", "ventilationGood"];
+const evidenceTypes = ["photo", "document", "walkthrough360"];
 
-function Section({ title, children }) {
+function ToggleGrid({ values, setValues, fields }) {
   return (
-    <section className="space-y-3 rounded-xl border bg-white p-4 shadow-sm">
-      <h2 className="text-xl font-semibold">{title}</h2>
-      {children}
-    </section>
-  );
-}
-
-function InfoBadge({ label, value }) {
-  return (
-    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2">
-      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
-      <p className="text-sm font-semibold text-slate-900">{value}</p>
-    </div>
-  );
-}
-
-function MediaList({ title, media, variant = "link", onPreview }) {
-  return (
-    <div className="rounded-lg border border-slate-200 p-3">
-      <p className="mb-2 text-sm font-semibold text-slate-800">{title}</p>
-      {media?.length ? (
-        variant === "photo" ? (
-          <div className="grid grid-cols-2 gap-2">
-            {media.map((item) => {
-              const src = item.publicUrl || item.url;
-              return (
-                <button
-                  className="group relative block overflow-hidden rounded border border-slate-200 bg-slate-50"
-                  key={`media-${title}-${item.id}`}
-                  onClick={() => onPreview?.({ src, label: item.fileName || title })}
-                  type="button"
-                >
-                  {item.locked && (
-                    <span className="absolute right-1 top-1 z-10 rounded bg-slate-900/85 px-1.5 py-0.5 text-[10px] font-semibold text-white">
-                      Locked
-                    </span>
-                  )}
-                  <img
-                    alt={item.fileName || `Unit ${title}`}
-                    className="h-24 w-full object-cover transition-transform duration-200 group-hover:scale-105"
-                    loading="lazy"
-                    src={src}
-                  />
-                </button>
-              );
-            })}
-          </div>
-        ) : (
-          <ul className="space-y-1 text-sm">
-            {media.map((item) => {
-              const src = item.publicUrl || item.url;
-              return (
-                <li key={`media-${title}-${item.id}`}>
-                  <a className="break-all text-blue-700 underline" href={src} rel="noreferrer" target="_blank">
-                    {src}
-                  </a>
-                </li>
-              );
-            })}
-          </ul>
-        )
-      ) : (
-        <p className="text-sm text-slate-600">No items</p>
-      )}
-    </div>
-  );
-}
-
-function ChecklistRow({ label, value }) {
-  return (
-    <div className="flex items-center justify-between rounded border border-slate-200 bg-slate-50 px-3 py-2">
-      <span className="text-sm text-slate-700">{label}</span>
-      <span className={`text-sm font-semibold ${value ? "text-green-700" : "text-rose-700"}`}>{value ? "Yes" : "No"}</span>
-    </div>
-  );
-}
-
-function StudentUnitView({ data, onPreview }) {
-  const photos = (data.discovery.media || []).filter((item) => String(item.type).toLowerCase() === "photo");
-  const docs = (data.discovery.media || []).filter((item) => String(item.type).toLowerCase() === "document");
-  const walkthroughs = (data.discovery.media || []).filter((item) => {
-    const mediaType = String(item.type).toLowerCase();
-    return mediaType === "walkthrough360" || mediaType === "360";
-  });
-
-  return (
-    <div className="space-y-6">
-      <Section title="Discovery">
-        <div className="grid gap-2 md:grid-cols-3">
-          <InfoBadge label="Rent" value={data.discovery.rent} />
-          <InfoBadge label="Distance (km)" value={data.discovery.distanceKm} />
-          <InfoBadge label="AC" value={data.discovery.ac ? "Yes" : "No"} />
-          <InfoBadge label="Occupancy Type" value={data.discovery.occupancyType || "N/A"} />
-          <InfoBadge label="Institution Proximity (km)" value={data.discovery.institutionProximityKm} />
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <MediaList media={photos} onPreview={onPreview} title="Photos" variant="photo" />
-          <MediaList title="Documents" media={docs} />
-          <MediaList title="360 Walkthroughs" media={walkthroughs} />
-        </div>
-      </Section>
-
-      <Section title="Availability">
-        <div className="grid gap-2 md:grid-cols-3">
-          <InfoBadge label="Occupancy Count" value={data.availability.occupancyCount} />
-          <InfoBadge label="Capacity" value={data.availability.capacity} />
-          <InfoBadge label="Available Slots" value={data.availability.availableSlots} />
-        </div>
-      </Section>
-
-      <Section title="Trust Signals">
-        <div className="grid gap-2 md:grid-cols-4">
-          <InfoBadge label="Trust Score" value={data.trustSignals.trustScore} />
-          <InfoBadge label="Trust Band" value={data.trustSignals.trustBand} />
-          <InfoBadge label="Complaints (Total)" value={data.trustSignals.complaintSummary.totalComplaints} />
-          <InfoBadge label="Complaints (Active)" value={data.trustSignals.complaintSummary.activeComplaints} />
-          <InfoBadge label="Complaints (30 days)" value={data.trustSignals.complaintSummary.complaintsLast30Days} />
-          <InfoBadge label="Last Audit Date" value={formatDate(data.trustSignals.lastAuditDate)} />
-        </div>
-      </Section>
-
-      <Section title="Transparency">
-        <div className="grid gap-2 md:grid-cols-2">
-          <InfoBadge label="Visible To Students" value={data.transparency.visibleToStudents ? "Yes" : "No"} />
-          <InfoBadge
-            label="Visibility Reason"
-            value={data.transparency.visibilityReasons?.length ? data.transparency.visibilityReasons.join(", ") : "Visible by baseline and trust rules"}
+    <div className="grid gap-3 sm:grid-cols-2">
+      {fields.map((field) => (
+        <label key={field} className="flex items-center justify-between rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+          <span>{field}</span>
+          <input
+            checked={Boolean(values?.[field])}
+            onChange={() => setValues((current) => ({ ...current, [field]: !current?.[field] }))}
+            type="checkbox"
           />
-        </div>
-        <div className="space-y-2">
-          <p className="text-sm font-semibold text-slate-800">Your Complaint History</p>
-          {!data.transparency.ownComplaintHistory?.length && <p className="text-sm text-slate-600">No complaints filed by you for this unit.</p>}
-          {data.transparency.ownComplaintHistory?.map((item) => (
-            <article key={item.id} className={`rounded-lg border p-3 ${item.resolved ? "border-green-200 bg-green-50" : "border-rose-200 bg-rose-50"}`}>
-              <p className="text-sm font-semibold text-slate-900">Complaint #{item.id}</p>
-              <p className="text-sm text-slate-700">Severity: {item.severity}/5</p>
-              <p className="text-sm text-slate-700">Status: {item.resolved ? "Resolved" : "Open"}</p>
-              <p className="text-xs text-slate-500">Created: {formatDate(item.createdAt)}</p>
-              <p className="text-xs text-slate-500">Resolved: {formatDate(item.resolvedAt)}</p>
-            </article>
-          ))}
-        </div>
-      </Section>
+        </label>
+      ))}
     </div>
   );
 }
 
-function LandlordUnitView({ overview, interested, complaints, auditLogs, onPreview }) {
-  const occupants = interested.filter((item) => item.status === "occupant");
-  const shortlisted = interested.filter((item) => item.status === "shortlisted");
-  const photos = (overview?.media?.all || []).filter((item) => String(item.type).toLowerCase() === "photo");
-  const docs = (overview?.media?.all || []).filter((item) => String(item.type).toLowerCase() === "document");
-  const walkthroughs = (overview?.media?.all || []).filter((item) => {
-    const mediaType = String(item.type).toLowerCase();
-    return mediaType === "walkthrough360" || mediaType === "360";
-  });
-
-  return (
-    <div className="space-y-6">
-      <Section title="Operational Control">
-        <div className="grid gap-2 md:grid-cols-4">
-          <InfoBadge label="Status" value={overview.status} />
-          <InfoBadge label="Trust Score" value={overview.trustScore} />
-          <InfoBadge label="Occupancy" value={`${overview.occupancyCount}/${overview.capacity}`} />
-          <InfoBadge label="Shortlisted" value={overview.shortlistCount} />
-          <InfoBadge label="Open Audits" value={overview.openAuditLogCount} />
-        </div>
-      </Section>
-
-      <Section title="Listing Details">
-        <div className="grid gap-2 md:grid-cols-3">
-          <InfoBadge label="Corridor" value={overview.corridor ? `#${overview.corridor.id} - ${overview.corridor.name}` : "N/A"} />
-          <InfoBadge label="Rent" value={overview.propertyDetails?.rent ?? "N/A"} />
-          <InfoBadge label="Distance (km)" value={overview.propertyDetails?.distanceKm ?? "N/A"} />
-          <InfoBadge label="Institution Proximity (km)" value={overview.propertyDetails?.institutionProximityKm ?? "N/A"} />
-          <InfoBadge label="Occupancy Type" value={overview.propertyDetails?.occupancyType || "N/A"} />
-          <InfoBadge label="AC" value={overview.propertyDetails?.ac ? "Yes" : "No"} />
-          <InfoBadge label="Bed Available" value={overview.propertyDetails?.bedAvailable ? "Yes" : "No"} />
-          <InfoBadge label="Water Available" value={overview.propertyDetails?.waterAvailable ? "Yes" : "No"} />
-          <InfoBadge label="Toilets Available" value={overview.propertyDetails?.toiletsAvailable ?? "N/A"} />
-          <InfoBadge label="Ventilation Good" value={overview.propertyDetails?.ventilationGood ? "Yes" : "No"} />
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p className="text-sm font-semibold text-slate-800">Self Declaration</p>
-          <p className="text-sm text-slate-700">{overview.declarations?.selfDeclaration || "N/A"}</p>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <MediaList media={photos} onPreview={onPreview} title="Photos" variant="photo" />
-          <MediaList title="Documents" media={docs} />
-          <MediaList title="360 Walkthroughs" media={walkthroughs} />
-        </div>
-      </Section>
-
-      <Section title="Occupants">
-        {!occupants.length && <p className="text-sm text-slate-600">No current occupants.</p>}
-        <div className="grid gap-3 md:grid-cols-2">
-          {occupants.map((student) => (
-            <article key={`occupant-${student.studentId}`} className="rounded-lg border border-green-200 bg-green-50 p-3">
-              <p className="font-semibold text-slate-900">{student.name}</p>
-              <p className="text-sm text-slate-700">Student ID: {student.studentId}</p>
-              <p className="text-sm text-slate-700">Intake: {student.intake}</p>
-              <p className="text-sm text-slate-700">Institution: {student.institutionName || "N/A"}</p>
-              <p className="text-sm text-slate-700">Email: {student.email || "N/A"}</p>
-            </article>
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Shortlisted Students">
-        {!shortlisted.length && <p className="text-sm text-slate-600">No shortlisted students yet.</p>}
-        <div className="grid gap-3 md:grid-cols-2">
-          {shortlisted.map((student) => (
-            <article key={`short-${student.studentId}`} className="rounded-lg border border-blue-200 bg-blue-50 p-3">
-              <p className="font-semibold text-slate-900">{student.name}</p>
-              <p className="text-sm text-slate-700">Student ID: {student.studentId}</p>
-              <p className="text-sm text-slate-700">Intake: {student.intake}</p>
-              <p className="text-sm text-slate-700">Institution: {student.institutionName || "N/A"}</p>
-              <p className="text-sm text-slate-700">Email: {student.email || "N/A"}</p>
-            </article>
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Complaints">
-        {!complaints.length && <p className="text-sm text-slate-600">No complaints for this unit.</p>}
-        {complaints.map((item) => (
-          <article key={item.id} className={`rounded-lg border p-3 ${item.resolved ? "border-green-200 bg-green-50" : "border-rose-200 bg-rose-50"}`}>
-            <p className="text-sm font-semibold text-slate-900">Complaint #{item.id}</p>
-            <p className="text-sm text-slate-700">Severity: {item.severity}/5</p>
-            <p className="text-sm text-slate-700">Incident: {item.incidentType || "N/A"}</p>
-            <p className="text-sm text-slate-700">Student: {item.student?.name || "N/A"}</p>
-          </article>
-        ))}
-      </Section>
-
-      <Section title="Audit Results / Logs">
-        {!auditLogs.length && <p className="text-sm text-slate-600">No audit logs.</p>}
-        {auditLogs.map((log) => (
-          <article key={log.id} className={`rounded-lg border p-3 ${log.resolved ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
-            <p className="text-sm font-semibold text-slate-900">Audit #{log.id}</p>
-            <p className="text-sm text-slate-700">Trigger: {log.triggerType || "manual"}</p>
-            <p className="text-sm text-slate-700">Reason: {log.reason}</p>
-            <p className="text-sm text-slate-700">Corrective Action: {log.correctiveAction || "N/A"}</p>
-            <p className="text-xs text-slate-500">Created: {formatDate(log.createdAt)}</p>
-          </article>
-        ))}
-      </Section>
-    </div>
-  );
-}
-
-function AdminUnitView({
-  data,
-  onSetStructuralApproved,
-  onSetOperationalApproved,
-  onSetStatus,
-  updatingGovernance,
-  actionMessage,
-  structuralDraft,
-  operationalDraft,
-  onStructuralDraftChange,
-  onOperationalDraftChange,
-  onSaveStructuralChecklist,
-  onSaveOperationalChecklist,
-  updatingChecklist,
-  onPreview,
-}) {
-  const photos = (data.evidence.media || []).filter((item) => String(item.type).toLowerCase() === "photo");
-  const docs = (data.evidence.media || []).filter((item) => String(item.type).toLowerCase() === "document");
-  const walkthroughs = (data.evidence.media || []).filter((item) => {
-    const mediaType = String(item.type).toLowerCase();
-    return mediaType === "walkthrough360" || mediaType === "360";
-  });
-  const structuralChecklist = data.evidence.structuralChecklist || {};
-  const operationalChecklist = data.evidence.operationalChecklist || {};
-  const structuralCanApprove =
-    Boolean(structuralChecklist.fireExit) &&
-    Boolean(structuralChecklist.wiringSafe) &&
-    Boolean(structuralChecklist.plumbingSafe) &&
-    Boolean(structuralChecklist.occupancyCompliant);
-  const operationalCanApprove =
-    Boolean(operationalChecklist.bedAvailable) &&
-    Boolean(operationalChecklist.waterAvailable) &&
-    Boolean(operationalChecklist.toiletsAvailable) &&
-    Boolean(operationalChecklist.ventilationGood);
-
-  return (
-    <div className="space-y-6">
-      <Section title="Governance Core">
-        <div className="grid gap-2 md:grid-cols-4">
-          <InfoBadge label="Status" value={data.governanceCore.status} />
-          <InfoBadge label="Structural Approved" value={data.governanceCore.structuralApproved ? "Yes" : "No"} />
-          <InfoBadge label="Operational Approved" value={data.governanceCore.operationalBaselineApproved ? "Yes" : "No"} />
-          <InfoBadge label="Trust Score" value={data.governanceCore.trustScore} />
-          <InfoBadge label="Trust Band" value={data.governanceCore.trustBand} />
-          <InfoBadge label="Audit Required" value={data.governanceCore.auditRequired ? "Yes" : "No"} />
-        </div>
-      </Section>
-
-      <Section title="Full Evidence">
-        <div className="grid gap-2 md:grid-cols-2">
-          <InfoBadge label="Corridor" value={data.evidence.corridor ? `#${data.evidence.corridor.id} - ${data.evidence.corridor.name}` : "N/A"} />
-          <InfoBadge label="Self Declaration" value={data.evidence.selfDeclaration || "N/A"} />
-        </div>
-        <div className="grid gap-2 md:grid-cols-2">
-          <div className="rounded-lg border border-slate-200 p-3">
-            <p className="mb-3 text-sm font-semibold text-slate-800">Structural Checklist</p>
-            <div className="space-y-2">
-              <ChecklistRow label="Fire Exit" value={Boolean(structuralChecklist.fireExit)} />
-              <ChecklistRow label="Wiring Safe" value={Boolean(structuralChecklist.wiringSafe)} />
-              <ChecklistRow label="Plumbing Safe" value={Boolean(structuralChecklist.plumbingSafe)} />
-              <ChecklistRow label="Occupancy Compliant" value={Boolean(structuralChecklist.occupancyCompliant)} />
-              <ChecklistRow label="Checklist Complete" value={structuralCanApprove} />
-              <ChecklistRow label="Approved" value={Boolean(data.governanceCore.structuralApproved)} />
-            </div>
-          </div>
-          <div className="rounded-lg border border-slate-200 p-3">
-            <p className="mb-3 text-sm font-semibold text-slate-800">Operational Checklist</p>
-            <div className="space-y-2">
-              <ChecklistRow label="Bed Available" value={Boolean(operationalChecklist.bedAvailable)} />
-              <ChecklistRow label="Water Available" value={Boolean(operationalChecklist.waterAvailable)} />
-              <ChecklistRow label="Toilets Available" value={Boolean(operationalChecklist.toiletsAvailable)} />
-              <ChecklistRow label="Ventilation Good" value={Boolean(operationalChecklist.ventilationGood)} />
-              <ChecklistRow label="Checklist Complete" value={operationalCanApprove} />
-              <ChecklistRow label="Approved" value={Boolean(data.governanceCore.operationalBaselineApproved)} />
-            </div>
-          </div>
-        </div>
-        <div className="grid gap-3 md:grid-cols-3">
-          <MediaList media={photos} onPreview={onPreview} title="Photos" variant="photo" />
-          <MediaList title="Documents" media={docs} />
-          <MediaList title="360 Walkthroughs" media={walkthroughs} />
-        </div>
-      </Section>
-
-      <Section title="Behavioral History">
-        <div className="grid gap-2 md:grid-cols-4">
-          <InfoBadge label="Total Complaints" value={data.behavioralHistory.slaMetrics.totalComplaints} />
-          <InfoBadge label="Resolved" value={data.behavioralHistory.slaMetrics.resolvedComplaints} />
-          <InfoBadge label="Unresolved" value={data.behavioralHistory.slaMetrics.unresolvedComplaints} />
-          <InfoBadge label="Late Resolved" value={data.behavioralHistory.slaMetrics.lateResolvedCount} />
-          <InfoBadge label="Avg Resolution (hrs)" value={data.behavioralHistory.slaMetrics.avgResolutionHours ?? "N/A"} />
-          <InfoBadge label="Complaints (30d)" value={data.behavioralHistory.recurrenceAnalytics.complaintsLast30Days} />
-          <InfoBadge label="Complaints (60d)" value={data.behavioralHistory.recurrenceAnalytics.complaintsLast60Days} />
-          <InfoBadge label="Incident Flags" value={data.behavioralHistory.incidentFlags.incidentFlaggedCount} />
-        </div>
-        <div className="space-y-2">
-          <p className="text-sm font-semibold text-slate-800">Complaint Timeline</p>
-          {data.behavioralHistory.complaintTimeline.map((item) => (
-            <article key={item.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-              <p className="text-sm font-semibold text-slate-900">Complaint #{item.id}</p>
-              <p className="text-sm text-slate-700">Severity: {item.severity}</p>
-              <p className="text-sm text-slate-700">Incident: {item.incidentType || "N/A"}</p>
-              <p className="text-sm text-slate-700">Student: {item.student?.name || "N/A"}</p>
-              <p className="text-xs text-slate-500">Created: {formatDate(item.createdAt)}</p>
-            </article>
-          ))}
-        </div>
-      </Section>
-
-      <Section title="Audit Layer">
-        <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
-          <p className="mb-2 text-sm font-semibold text-slate-800">Governance Actions (Audit Layer)</p>
-          {actionMessage && <p className="mb-2 text-sm text-slate-700">{actionMessage}</p>}
-          <div className="flex flex-wrap gap-2">
-            <button
-              className="rounded bg-green-600 px-3 py-2 text-sm text-white disabled:opacity-60"
-              disabled={updatingGovernance}
-              onClick={() => onSetStatus("approved")}
-              type="button"
-            >
-              Set Approved
-            </button>
-            <button
-              className="rounded bg-amber-600 px-3 py-2 text-sm text-white disabled:opacity-60"
-              disabled={updatingGovernance}
-              onClick={() => onSetStatus("suspended")}
-              type="button"
-            >
-              Set Suspended
-            </button>
-            <button
-              className="rounded bg-rose-600 px-3 py-2 text-sm text-white disabled:opacity-60"
-              disabled={updatingGovernance}
-              onClick={() => onSetStatus("rejected")}
-              type="button"
-            >
-              Set Rejected
-            </button>
-            <button
-              className="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
-              disabled={updatingGovernance || ( !data.governanceCore.structuralApproved && !structuralCanApprove)}
-              onClick={() => onSetStructuralApproved(!data.governanceCore.structuralApproved)}
-              type="button"
-            >
-              {data.governanceCore.structuralApproved ? "Mark Structural Unapproved" : "Mark Structural Approved"}
-            </button>
-            <button
-              className="rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
-              disabled={updatingGovernance || (!data.governanceCore.operationalBaselineApproved && !operationalCanApprove)}
-              onClick={() => onSetOperationalApproved(!data.governanceCore.operationalBaselineApproved)}
-              type="button"
-            >
-              {data.governanceCore.operationalBaselineApproved ? "Mark Operational Unapproved" : "Mark Operational Approved"}
-            </button>
-          </div>
-          {!structuralCanApprove && !data.governanceCore.structuralApproved && (
-            <p className="mt-2 text-xs text-rose-700">Structural checklist is incomplete. Complete all structural checklist items before approving.</p>
-          )}
-          {!operationalCanApprove && !data.governanceCore.operationalBaselineApproved && (
-            <p className="mt-1 text-xs text-rose-700">Operational checklist is incomplete. Complete all operational checklist items before approving.</p>
-          )}
-          <p className="mt-2 text-xs text-slate-600">
-            Checklist values are read-only here. Only governance decisions are controlled from the audit layer.
-          </p>
-        </div>
-
-        <div className="grid gap-3 md:grid-cols-2">
-          <div className="rounded-lg border border-slate-200 p-3">
-            <p className="mb-2 text-sm font-semibold text-slate-800">Edit Structural Checklist</p>
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={Boolean(structuralDraft.fireExit)}
-                  onChange={(e) => onStructuralDraftChange("fireExit", e.target.checked)}
-                  type="checkbox"
-                />
-                Fire Exit
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={Boolean(structuralDraft.wiringSafe)}
-                  onChange={(e) => onStructuralDraftChange("wiringSafe", e.target.checked)}
-                  type="checkbox"
-                />
-                Wiring Safe
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={Boolean(structuralDraft.plumbingSafe)}
-                  onChange={(e) => onStructuralDraftChange("plumbingSafe", e.target.checked)}
-                  type="checkbox"
-                />
-                Plumbing Safe
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={Boolean(structuralDraft.occupancyCompliant)}
-                  onChange={(e) => onStructuralDraftChange("occupancyCompliant", e.target.checked)}
-                  type="checkbox"
-                />
-                Occupancy Compliant
-              </label>
-            </div>
-            <button
-              className="mt-3 rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
-              disabled={updatingChecklist}
-              onClick={onSaveStructuralChecklist}
-              type="button"
-            >
-              {updatingChecklist ? "Saving..." : "Save Structural Checklist"}
-            </button>
-          </div>
-
-          <div className="rounded-lg border border-slate-200 p-3">
-            <p className="mb-2 text-sm font-semibold text-slate-800">Edit Operational Checklist</p>
-            <div className="space-y-2">
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={Boolean(operationalDraft.bedAvailable)}
-                  onChange={(e) => onOperationalDraftChange("bedAvailable", e.target.checked)}
-                  type="checkbox"
-                />
-                Bed Available
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={Boolean(operationalDraft.waterAvailable)}
-                  onChange={(e) => onOperationalDraftChange("waterAvailable", e.target.checked)}
-                  type="checkbox"
-                />
-                Water Available
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={Boolean(operationalDraft.toiletsAvailable)}
-                  onChange={(e) => onOperationalDraftChange("toiletsAvailable", e.target.checked)}
-                  type="checkbox"
-                />
-                Toilets Available
-              </label>
-              <label className="flex items-center gap-2 text-sm text-slate-700">
-                <input
-                  checked={Boolean(operationalDraft.ventilationGood)}
-                  onChange={(e) => onOperationalDraftChange("ventilationGood", e.target.checked)}
-                  type="checkbox"
-                />
-                Ventilation Good
-              </label>
-              <input
-                className="w-full rounded border p-2 text-sm"
-                onChange={(e) => onOperationalDraftChange("selfDeclaration", e.target.value)}
-                placeholder="Self declaration text"
-                value={operationalDraft.selfDeclaration || ""}
-              />
-            </div>
-            <button
-              className="mt-3 rounded bg-slate-900 px-3 py-2 text-sm text-white disabled:opacity-60"
-              disabled={updatingChecklist}
-              onClick={onSaveOperationalChecklist}
-              type="button"
-            >
-              {updatingChecklist ? "Saving..." : "Save Operational Checklist"}
-            </button>
-          </div>
-        </div>
-
-        <div className="grid gap-2 md:grid-cols-3">
-          <InfoBadge label="All Logs" value={data.auditLayer.allAuditLogs.length} />
-          <InfoBadge label="Corrective Plans" value={data.auditLayer.correctivePlans.length} />
-          <InfoBadge label="Random Audits" value={data.auditLayer.randomAuditHistory.length} />
-        </div>
-        {data.auditLayer.allAuditLogs.map((log) => (
-          <article key={log.id} className={`rounded-lg border p-3 ${log.resolved ? "border-green-200 bg-green-50" : "border-amber-200 bg-amber-50"}`}>
-            <p className="text-sm font-semibold text-slate-900">Audit #{log.id}</p>
-            <p className="text-sm text-slate-700">Trigger: {log.triggerType || "manual"}</p>
-            <p className="text-sm text-slate-700">Reason: {log.reason}</p>
-            <p className="text-sm text-slate-700">Corrective: {log.correctiveAction || "N/A"}</p>
-            <p className="text-xs text-slate-500">Created: {formatDate(log.createdAt)}</p>
-          </article>
-        ))}
-      </Section>
-
-      <Section title="Demand Context">
-        <div className="grid gap-2 md:grid-cols-4">
-          <InfoBadge label="Shortlist Count" value={data.demandContext.shortlistCount} />
-          <InfoBadge label="Unique Shortlists" value={data.demandContext.uniqueShortlistedStudents} />
-          <InfoBadge label="Conversion Rate %" value={data.demandContext.conversionRate} />
-          <InfoBadge label="Occupancy Ratio" value={data.demandContext.occupancyRatio} />
-        </div>
-      </Section>
-    </div>
-  );
-}
-
-export default function UnitRolePage() {
-  const params = useParams();
-  const unitId = Number(params?.unitId);
-
+export default function UnitDetailPage({ params }) {
+  const unitId = params.unitId;
   const [role, setRole] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [adminData, setAdminData] = useState(null);
-  const [studentData, setStudentData] = useState(null);
-  const [landlordOverview, setLandlordOverview] = useState(null);
-  const [landlordInterested, setLandlordInterested] = useState([]);
-  const [landlordComplaints, setLandlordComplaints] = useState([]);
-  const [landlordAuditLogs, setLandlordAuditLogs] = useState([]);
-  const [updatingGovernance, setUpdatingGovernance] = useState(false);
-  const [updatingChecklist, setUpdatingChecklist] = useState(false);
-  const [actionMessage, setActionMessage] = useState("");
-  const [previewItem, setPreviewItem] = useState(null);
-  const [structuralDraft, setStructuralDraft] = useState({
-    fireExit: false,
-    wiringSafe: false,
-    plumbingSafe: false,
-    occupancyCompliant: false,
-  });
-  const [operationalDraft, setOperationalDraft] = useState({
-    bedAvailable: false,
-    waterAvailable: false,
-    toiletsAvailable: false,
-    ventilationGood: false,
-    selfDeclaration: "",
-  });
+  const [banner, setBanner] = useState("");
+  const [explanation, setExplanation] = useState(null);
+  const [studentDetail, setStudentDetail] = useState(null);
+  const [landlordDetail, setLandlordDetail] = useState(null);
+  const [adminDetail, setAdminDetail] = useState(null);
+  const [adminAuditLogs, setAdminAuditLogs] = useState([]);
+  const [structuralForm, setStructuralForm] = useState({});
+  const [operationalForm, setOperationalForm] = useState({});
+  const [selfDeclaration, setSelfDeclaration] = useState("");
+  const [auditReason, setAuditReason] = useState("");
+  const [penaltyForm, setPenaltyForm] = useState({ reason: "", penaltyPoints: 8 });
+  const [auditForms, setAuditForms] = useState({});
+  const [landlordGuests, setLandlordGuests] = useState([]);
+  const [landlordPayments, setLandlordPayments] = useState([]);
+  const [landlordCompliance, setLandlordCompliance] = useState([]);
+  const [interestedStudents, setInterestedStudents] = useState([]);
+  const [landlordAgreements, setLandlordAgreements] = useState([]);
+  const [landlordLoading, setLandlordLoading] = useState(false);
+  const [agreementForm, setAgreementForm] = useState({ occupancyId: "", rentAmount: "", securityDeposit: "", noticePeriodDays: 30, startDate: "", endDate: "" });
+  const [complianceDocForm, setComplianceDocForm] = useState({ docType: "KYC", expiryDate: "" });
+  const [agreementFile, setAgreementFile] = useState(null);
+  const [complianceFile, setComplianceFile] = useState(null);
+  const [activeTab, setActiveTab] = useState("overview");
+  const [landlordAnalytics, setLandlordAnalytics] = useState(null);
+  const [expandedLandlordPaymentId, setExpandedLandlordPaymentId] = useState(null);
+  const [expandedLandlordAgreementId, setExpandedLandlordAgreementId] = useState(null);
+  const [expandedLandlordComplianceId, setExpandedLandlordComplianceId] = useState(null);
 
-  useEffect(() => {
-    const userRole = localStorage.getItem("role") || "";
-    setRole(userRole);
-  }, []);
-
-  useEffect(() => {
-    if (!role) return;
-    if (!Number.isInteger(unitId) || unitId < 1) {
-      setError("Invalid unit id");
+  async function loadPage(currentRole) {
+    setLoading(true);
+    setError("");
+    try {
+      if (currentRole === "student") {
+        const payload = await getStudentUnitDetail(unitId);
+        setStudentDetail(payload);
+        setLandlordDetail(null);
+        setAdminDetail(null);
+      } else if (currentRole === "landlord") {
+        const payload = await getLandlordOverview(unitId);
+        setLandlordDetail(payload);
+        setStructuralForm(payload?.checklists?.structural || {});
+        setOperationalForm(payload?.checklists?.operational || {});
+        setSelfDeclaration(payload?.checklists?.operational?.selfDeclaration || "");
+        setStudentDetail(null);
+        setAdminDetail(null);
+        try {
+          const [guestPayload, paymentPayload, compliancePayload, studentPayload, agreementPayload, analyticsPayload] = await Promise.all([
+            getLandlordGuestStays(unitId).catch(() => []),
+            getLandlordPayments(unitId).catch(() => []),
+            getLandlordCompliance(unitId).catch(() => []),
+            getInterestedStudents(unitId).catch(() => []),
+            getLandlordAgreements(unitId).catch(() => []),
+            getLandlordUnitAnalytics(unitId).catch(() => null),
+          ]);
+          setLandlordGuests(Array.isArray(guestPayload) ? guestPayload : []);
+          setLandlordPayments(Array.isArray(paymentPayload) ? paymentPayload : []);
+          setLandlordCompliance(Array.isArray(compliancePayload) ? compliancePayload : []);
+          setInterestedStudents(Array.isArray(studentPayload?.students) ? studentPayload.students : []);
+          setLandlordAgreements(Array.isArray(agreementPayload) ? agreementPayload : []);
+          setLandlordAnalytics(analyticsPayload);
+        } catch (err) {
+          console.error(err);
+        }
+      } else {
+        const [payload, auditLogs] = await Promise.all([
+          getAdminUnitDetail(unitId),
+          getAdminAuditLogs(unitId).catch(() => []),
+        ]);
+        setAdminDetail(payload);
+        setAdminAuditLogs(Array.isArray(auditLogs) ? auditLogs : []);
+        setStructuralForm(payload?.evidence?.structuralChecklist || {});
+        setOperationalForm(payload?.evidence?.operationalChecklist || {});
+        setSelfDeclaration(payload?.evidence?.selfDeclaration || "");
+        setStudentDetail(null);
+        setLandlordDetail(null);
+      }
+    } catch (requestError) {
+      setError(requestError.message || "Unable to load unit detail.");
+    } finally {
       setLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    const currentRole = getStoredRole();
+    setRole(currentRole);
+    if (currentRole) {
+      loadPage(currentRole);
+    } else {
+      setLoading(false);
+    }
+  }, [unitId]);
+
+  const trustScore =
+    studentDetail?.trustSignals?.trustScore ||
+    landlordDetail?.trustScore ||
+    adminDetail?.governanceCore?.trustScore ||
+    0;
+  const trust = getTrustBand(trustScore);
+  const status =
+    adminDetail?.governanceCore?.status ||
+    landlordDetail?.status ||
+    (studentDetail?.transparency?.visibleToStudents ? "visible" : "hidden");
+
+  const visibilityNotes = useMemo(() => {
+    if (studentDetail?.transparency?.visibilityReasons) return studentDetail.transparency.visibilityReasons;
+    if (adminDetail?.behavioralHistory) {
+      return [
+        `${adminDetail.behavioralHistory.slaMetrics?.lateResolvedCount || 0} late resolution events shape governance.`,
+        `${adminDetail.behavioralHistory.recurrenceAnalytics?.complaintsLast30Days || 0} complaints landed in the last 30 days.`,
+      ];
+    }
+    if (landlordDetail?.visibleToStudents === false) {
+      return ["Hidden because governance or trust conditions are not yet cleared."];
+    }
+    return ["Visibility reasoning will update as governance signals change."];
+  }, [adminDetail, landlordDetail, studentDetail]);
+
+  async function handleExplain() {
+    setError("");
+    try {
+      const payload = await explainUnit(unitId);
+      setExplanation(payload);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to explain trust score.");
+    }
+  }
+
+  async function saveChecklist(kind) {
+    setError("");
+    setBanner("");
+    try {
+      if (role === "landlord") {
+        if (kind === "structural") {
+          await putStructuralCL(unitId, structuralForm);
+        } else {
+          await putOperationalCL(unitId, { ...operationalForm, selfDeclaration });
+        }
+      } else {
+        if (kind === "structural") {
+          await patchStructuralCL(unitId, structuralForm);
+        } else {
+          await patchOperationalCL(unitId, { ...operationalForm, selfDeclaration });
+        }
+      }
+      setBanner(`${kind} checklist saved.`);
+      await loadPage(role);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to save checklist.");
+    }
+  }
+
+  async function handleUpload(event, type) {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setError("");
+    setBanner("");
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      formData.append("type", type);
+      await uploadMedia(unitId, formData);
+      setBanner(`${type} uploaded.`);
+      await loadPage(role);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to upload evidence.");
+    }
+  }
+
+  async function handleCreateAgreement(e) {
+    e.preventDefault();
+    setLandlordLoading(true);
+    setError("");
+    setBanner("");
+    try {
+      const formData = new FormData();
+      formData.append("occupancyId", agreementForm.occupancyId);
+      formData.append("rentAmount", agreementForm.rentAmount);
+      formData.append("securityDeposit", agreementForm.securityDeposit);
+      formData.append("noticePeriodDays", agreementForm.noticePeriodDays);
+      formData.append("startDate", agreementForm.startDate);
+      formData.append("endDate", agreementForm.endDate);
+      if (agreementFile) {
+        formData.append("document", agreementFile);
+      }
+
+      await fetch(`${BASE}/agreement`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: formData,
+      }).then(async (r) => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.error || "Failed to create agreement");
+        }
+        return r.json();
+      });
+
+      setBanner("Agreement draft created.");
+      setAgreementForm({ occupancyId: "", rentAmount: "", securityDeposit: "", noticePeriodDays: 30, startDate: "", endDate: "" });
+      setAgreementFile(null);
+      await loadPage("landlord");
+    } catch (err) {
+      setError(err.message || "Failed to create agreement");
+    } finally {
+      setLandlordLoading(false);
+    }
+  }
+
+  async function handleCreateAgreementVersion(parentId, e) {
+    e.preventDefault();
+    setLandlordLoading(true);
+    setError("");
+    setBanner("");
+    try {
+      const formData = new FormData();
+      formData.append("rentAmount", agreementForm.rentAmount);
+      formData.append("securityDeposit", agreementForm.securityDeposit);
+      formData.append("noticePeriodDays", agreementForm.noticePeriodDays);
+      formData.append("startDate", agreementForm.startDate);
+      formData.append("endDate", agreementForm.endDate);
+      if (agreementFile) {
+        formData.append("document", agreementFile);
+      }
+
+      await fetch(`${BASE}/agreement/${parentId}/version`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${localStorage.getItem("token")}`,
+        },
+        body: formData,
+      }).then(async (r) => {
+        if (!r.ok) {
+          const body = await r.json().catch(() => ({}));
+          throw new Error(body.error || "Failed to amend agreement version");
+        }
+        return r.json();
+      });
+
+      setBanner("New agreement version created.");
+      setAgreementForm({ occupancyId: "", rentAmount: "", securityDeposit: "", noticePeriodDays: 30, startDate: "", endDate: "" });
+      setAgreementFile(null);
+      await loadPage("landlord");
+    } catch (err) {
+      setError(err.message || "Failed to amend agreement version");
+    } finally {
+      setLandlordLoading(false);
+    }
+  }
+
+  async function handleSubmitAgreement(id) {
+    setLandlordLoading(true);
+    setError("");
+    setBanner("");
+    try {
+      await submitAgreement(id);
+      setBanner("Agreement terms submitted to tenant.");
+      await loadPage("landlord");
+    } catch (err) {
+      setError(err.message || "Failed to submit agreement");
+    } finally {
+      setLandlordLoading(false);
+    }
+  }
+
+  async function handleSignLandlord(id) {
+    setLandlordLoading(true);
+    setError("");
+    setBanner("");
+    try {
+      await signLandlordAgreement(id);
+      setBanner("Agreement signed and active.");
+      await loadPage("landlord");
+    } catch (err) {
+      setError(err.message || "Failed to sign agreement");
+    } finally {
+      setLandlordLoading(false);
+    }
+  }
+
+  async function handleComplianceUpload(e) {
+    e.preventDefault();
+    if (!complianceFile) {
+      setError("Please select a file to upload.");
       return;
     }
-
-    (async () => {
-      setLoading(true);
-      setError("");
-      try {
-        if (role === "admin") {
-          const result = await apiRequest(`/admin/unit/${unitId}/details`);
-          setAdminData(result);
-        } else if (role === "student") {
-          const result = await apiRequest(`/student/unit/${unitId}/details`);
-          setStudentData(result);
-        } else if (role === "landlord") {
-          const [overviewResult, interestedResult, complaintsResult, auditResult] = await Promise.all([
-            apiRequest(`/landlord/unit/${unitId}/overview`),
-            apiRequest(`/landlord/unit/${unitId}/interested-students`),
-            apiRequest(`/landlord/unit/${unitId}/complaints`),
-            apiRequest(`/landlord/unit/${unitId}/audit-logs`),
-          ]);
-
-          setLandlordOverview(overviewResult);
-          setLandlordInterested(Array.isArray(interestedResult?.students) ? interestedResult.students : []);
-          setLandlordComplaints(Array.isArray(complaintsResult?.complaints) ? complaintsResult.complaints : []);
-          setLandlordAuditLogs(Array.isArray(auditResult?.logs) ? auditResult.logs : []);
-        } else {
-          setError("Unsupported role");
-        }
-      } catch (err) {
-        setError(err.message || "Failed to load unit page");
-      } finally {
-        setLoading(false);
+    setLandlordLoading(true);
+    setError("");
+    setBanner("");
+    try {
+      const formData = new FormData();
+      formData.append("document", complianceFile);
+      formData.append("docType", complianceDocForm.docType);
+      if (complianceDocForm.expiryDate) {
+        formData.append("expiryDate", complianceDocForm.expiryDate);
       }
-    })();
-  }, [role, unitId]);
-
-  useEffect(() => {
-    if (role !== "admin" || !adminData) return;
-    setStructuralDraft({
-      fireExit: Boolean(adminData.evidence?.structuralChecklist?.fireExit),
-      wiringSafe: Boolean(adminData.evidence?.structuralChecklist?.wiringSafe),
-      plumbingSafe: Boolean(adminData.evidence?.structuralChecklist?.plumbingSafe),
-      occupancyCompliant: Boolean(adminData.evidence?.structuralChecklist?.occupancyCompliant),
-    });
-    setOperationalDraft({
-      bedAvailable: Boolean(adminData.evidence?.operationalChecklist?.bedAvailable),
-      waterAvailable: Boolean(adminData.evidence?.operationalChecklist?.waterAvailable),
-      toiletsAvailable: Boolean(adminData.evidence?.operationalChecklist?.toiletsAvailable),
-      ventilationGood: Boolean(adminData.evidence?.operationalChecklist?.ventilationGood),
-      selfDeclaration: adminData.evidence?.selfDeclaration || "",
-    });
-  }, [adminData, role]);
-
-  async function refreshAdminData() {
-    const result = await apiRequest(`/admin/unit/${unitId}/details`);
-    setAdminData(result);
-  }
-
-  async function updateAdminGovernance(payload) {
-    setUpdatingGovernance(true);
-    setError("");
-    setActionMessage("");
-    try {
-      await apiRequest(`/admin/unit/${unitId}/review`, {
-        method: "PATCH",
-        body: JSON.stringify(payload),
-      });
-      await refreshAdminData();
-      setActionMessage("Governance action applied.");
+      await uploadCompliance(unitId, formData);
+      setBanner("Compliance document uploaded successfully.");
+      setComplianceDocForm({ docType: "KYC", expiryDate: "" });
+      setComplianceFile(null);
+      await loadPage("landlord");
     } catch (err) {
-      setError(err.message || "Failed to update governance");
+      setError(err.message || "Failed to upload compliance document");
     } finally {
-      setUpdatingGovernance(false);
+      setLandlordLoading(false);
     }
   }
 
-  function updateStructuralDraft(field, value) {
-    setStructuralDraft((prev) => ({ ...prev, [field]: value }));
-  }
-
-  function updateOperationalDraft(field, value) {
-    setOperationalDraft((prev) => ({ ...prev, [field]: value }));
-  }
-
-  async function saveStructuralChecklist() {
-    setUpdatingChecklist(true);
+  async function handleSubmitUnit() {
     setError("");
-    setActionMessage("");
+    setBanner("");
     try {
-      await apiRequest(`/admin/unit/${unitId}/structural-checklist`, {
-        method: "PATCH",
-        body: JSON.stringify(structuralDraft),
-      });
-      await refreshAdminData();
-      setActionMessage("Structural checklist updated.");
-    } catch (err) {
-      setError(err.message || "Failed to update structural checklist");
-    } finally {
-      setUpdatingChecklist(false);
+      await submitUnit(unitId);
+      setBanner("Unit submitted for governance review.");
+      await loadPage(role);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to submit unit.");
     }
   }
 
-  async function saveOperationalChecklist() {
-    setUpdatingChecklist(true);
+  async function handleAdminStatus(nextStatus) {
     setError("");
-    setActionMessage("");
+    setBanner("");
     try {
-      await apiRequest(`/admin/unit/${unitId}/operational-checklist`, {
-        method: "PATCH",
-        body: JSON.stringify(operationalDraft),
-      });
-      await refreshAdminData();
-      setActionMessage("Operational checklist updated.");
-    } catch (err) {
-      setError(err.message || "Failed to update operational checklist");
-    } finally {
-      setUpdatingChecklist(false);
+      const body =
+        nextStatus === "approved"
+          ? { status: "approved", structuralApproved: true, operationalBaselineApproved: true }
+          : { status: nextStatus };
+      await reviewUnit(unitId, body);
+      setBanner(`Unit moved to ${nextStatus}.`);
+      await loadPage(role);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to update governance status.");
     }
   }
 
-  const backHref = useMemo(() => {
-    if (role === "admin") return "/admin";
-    return "/dashboard";
-  }, [role]);
+  async function handleTriggerAudit() {
+    setError("");
+    setBanner("");
+    try {
+      await triggerAudit(unitId, { reason: auditReason });
+      setAuditReason("");
+      setBanner("Audit triggered successfully.");
+      await loadPage(role);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to trigger audit.");
+    }
+  }
+
+  async function handlePenalty() {
+    setError("");
+    setBanner("");
+    try {
+      await penalizeSelfDecl(unitId, {
+        reason: penaltyForm.reason,
+        penaltyPoints: Number(penaltyForm.penaltyPoints || 8),
+      });
+      setPenaltyForm({ reason: "", penaltyPoints: 8 });
+      setBanner("Self-declaration penalty applied.");
+      await loadPage(role);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to apply penalty.");
+    }
+  }
+
+  function updateAuditForm(auditLogId, field, value) {
+    setAuditForms((current) => ({
+      ...current,
+      [auditLogId]: {
+        ...(current[auditLogId] || {}),
+        [field]: value,
+      },
+    }));
+  }
+
+  async function handleSetCorrectivePlan(auditLogId) {
+    const form = auditForms[auditLogId] || {};
+    setError("");
+    setBanner("");
+    try {
+      await setCorrectivePlan(auditLogId, {
+        correctiveAction: form.correctiveAction,
+        correctiveDeadline: form.correctiveDeadline || undefined,
+      });
+      setBanner(`Corrective plan saved for audit ${auditLogId}.`);
+      await loadPage(role);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to save corrective plan.");
+    }
+  }
+
+  async function handleResolveAudit(auditLogId) {
+    const form = auditForms[auditLogId] || {};
+    setError("");
+    setBanner("");
+    try {
+      await resolveAuditLog(auditLogId, {
+        verificationNotes: form.verificationNotes || "",
+        reopenUnit: Boolean(form.reopenUnit),
+      });
+      setBanner(`Audit ${auditLogId} resolved.`);
+      await loadPage(role);
+    } catch (requestError) {
+      setError(requestError.message || "Unable to resolve audit.");
+    }
+  }
+
+  const evidenceList =
+    studentDetail?.discovery?.media ||
+    landlordDetail?.media?.all ||
+    adminDetail?.evidence?.media ||
+    [];
+
+  if (loading) {
+    return (
+      <FadeIn className="grid gap-5">
+        <div className="surface-panel h-56 animate-pulse rounded-2xl bg-stone-800" />
+        <div className="surface-panel h-96 animate-pulse rounded-2xl bg-stone-800" />
+      </FadeIn>
+    );
+  }
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold">Unit #{Number.isNaN(unitId) ? "?" : unitId}</h1>
-        <div className="flex gap-2">
-          <Link className="rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" href={`/unit/${unitId}/complaints`}>
-            Complaint Ledger
-          </Link>
-          <Link className="rounded border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50" href={backHref}>
-            Back
-          </Link>
-        </div>
-      </div>
+    <div className="grid gap-6">
+      <Link className="btn-secondary w-fit text-xs tracking-wider uppercase font-semibold" href="/dashboard">
+        Back to dashboard
+      </Link>
 
-      {loading && <p className="text-sm text-slate-600">Loading unit page...</p>}
-      {error && <p className="rounded bg-red-50 px-3 py-2 text-sm text-red-700">{error}</p>}
+      {error ? <div className="status-banner error">{error}</div> : null}
+      {banner ? <div className="status-banner success">{banner}</div> : null}
 
-      {!loading && !error && role === "admin" && adminData && (
-        <AdminUnitView
-          actionMessage={actionMessage}
-          data={adminData}
-          onPreview={(item) => setPreviewItem(item)}
-          onOperationalDraftChange={updateOperationalDraft}
-          onSetOperationalApproved={(value) => updateAdminGovernance({ operationalBaselineApproved: value })}
-          onSetStructuralApproved={(value) => updateAdminGovernance({ structuralApproved: value })}
-          onSetStatus={(status) => updateAdminGovernance({ status })}
-          onStructuralDraftChange={updateStructuralDraft}
-          onSaveOperationalChecklist={saveOperationalChecklist}
-          onSaveStructuralChecklist={saveStructuralChecklist}
-          operationalDraft={operationalDraft}
-          structuralDraft={structuralDraft}
-          updatingChecklist={updatingChecklist}
-          updatingGovernance={updatingGovernance}
-        />
-      )}
-      {!loading && !error && role === "student" && studentData && <StudentUnitView data={studentData} onPreview={(item) => setPreviewItem(item)} />}
-      {!loading && !error && role === "landlord" && landlordOverview && (
-        <LandlordUnitView
-          auditLogs={landlordAuditLogs}
-          complaints={landlordComplaints}
-          interested={landlordInterested}
-          onPreview={(item) => setPreviewItem(item)}
-          overview={landlordOverview}
-        />
-      )}
+      <Reveal duration={0.6}>
+        <section className="glass-panel-strong blueprint-border p-8 sm:p-10 rounded-2xl bg-[var(--bg-surface-strong)]">
+          <div className="flex flex-col gap-6 lg:flex-row lg:items-start lg:justify-between">
+            <div>
+              <div className="eyebrow">Unit Detail</div>
+              <h1 className="page-title mt-5 text-gradient">Unit {unitId}</h1>
+              <p className="subtle-copy mt-4 max-w-3xl">
+                Governance core, trust breakdown, evidence, and history live together here so visibility never feels like a black box.
+              </p>
+              <div className="mt-5 flex flex-wrap gap-2">
+                <span className={`signal-chip ${getStatusTone(status)}`}>{status}</span>
+                <span className={`signal-chip ${trust.tone}`}>{trust.label}</span>
+                {(adminDetail?.governanceCore?.auditRequired || landlordDetail?.auditRequired) ? (
+                  <span className="signal-chip signal-danger">Audit required</span>
+                ) : null}
+              </div>
+            </div>
 
-      {previewItem && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
-          onClick={() => setPreviewItem(null)}
-          role="presentation"
-        >
-          <div
-            className="max-h-[90vh] w-full max-w-4xl overflow-hidden rounded-xl bg-white shadow-2xl"
-            onClick={(e) => e.stopPropagation()}
-            role="presentation"
-          >
-            <div className="flex items-center justify-between border-b px-4 py-3">
-              <p className="truncate text-sm font-semibold text-slate-800">{previewItem.label}</p>
-              <button
-                className="rounded border border-slate-300 px-3 py-1 text-sm text-slate-700 hover:bg-slate-50"
-                onClick={() => setPreviewItem(null)}
-                type="button"
-              >
-                Close
+            <div className="grid gap-3 sm:min-w-[280px]">
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Trust score</p>
+                <strong className="mt-2 block text-3xl text-white">{trustScore}</strong>
+                <div className="mt-4 trust-track">
+                  <div className={`trust-fill ${trust.fillClass}`} style={{ width: `${trustScore}%` }} />
+                </div>
+              </div>
+              <button className="btn-secondary text-xs tracking-wider uppercase font-semibold" onClick={handleExplain} type="button">
+                Explain trust score
               </button>
             </div>
-            <div className="bg-slate-100 p-3">
-              <img
-                alt={previewItem.label}
-                className="max-h-[75vh] w-full rounded object-contain"
-                src={previewItem.src}
-              />
-            </div>
           </div>
+        </section>
+      </Reveal>
+
+      {role === "landlord" && (
+        <div className="flex flex-wrap gap-2 border-b border-white/10 pb-4 mb-4">
+          {[
+            { id: "overview", label: "Overview & Evidence" },
+            { id: "checklists", label: "Readiness Checklists" },
+            { id: "stays", label: "Occupants & Stays" },
+            { id: "payments", label: "Payments Ledger" },
+            { id: "agreements", label: "Rental Agreements" },
+            { id: "compliance", label: "Governance Compliance" },
+          ].map((tab) => (
+            <button
+              key={tab.id}
+              onClick={() => setActiveTab(tab.id)}
+              className={`px-4 py-2 rounded-xl text-xs font-semibold tracking-wider transition ${
+                activeTab === tab.id
+                  ? "bg-sky-500 text-white shadow-lg"
+                  : "bg-white/5 text-slate-400 hover:bg-white/10"
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
         </div>
+      )}
+
+      {(role !== "landlord" || activeTab === "overview") && (
+        <section className="grid gap-5 xl:grid-cols-[1.1fr,0.9fr]">
+          <article className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+            <div className="eyebrow">Governance Core</div>
+            <div className="mt-5 grid gap-4 md:grid-cols-2">
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Trust Band</p><strong className="mt-2 block text-white">{trust.label}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Risk level</p><strong className="mt-2 block text-white">{trust.key === "A" ? "Stable" : trust.key === "B" ? "Warning" : "Critical"}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Audit required</p><strong className="mt-2 block text-white">{(adminDetail?.governanceCore?.auditRequired || landlordDetail?.auditRequired) ? "Yes" : "No"}</strong></div>
+              <div className="rounded-[24px] border border-white/10 bg-white/5 p-4"><p className="text-xs text-slate-500">Visible to students</p><strong className="mt-2 block text-white">{(studentDetail?.transparency?.visibleToStudents === false || landlordDetail?.visibleToStudents === false) ? "No" : "Yes"}</strong></div>
+            </div>
+          </article>
+
+          <article className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+            <div className="eyebrow">Trust Breakdown</div>
+            <div className="mt-5 grid gap-3">
+              {visibilityNotes.map((note) => (
+                <div key={note} className="rounded-[24px] border border-white/10 bg-black/20 p-4 text-sm leading-6 text-slate-300">
+                  {note}
+                </div>
+              ))}
+              <AnimatePresence>
+                {explanation?.visibilityReasons?.map((note) => (
+                  <motion.div 
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    key={note} 
+                    className="rounded-[24px] border border-sky-300/20 bg-sky-300/10 p-4 text-sm leading-6 text-slate-200"
+                  >
+                    {note}
+                  </motion.div>
+                ))}
+              </AnimatePresence>
+            </div>
+          </article>
+        </section>
+      )}
+
+      {/* Checklists & Evidence */}
+      {role !== "landlord" ? (
+        <FadeIn className="grid gap-5 lg:grid-cols-2">
+          <article className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+            <div className="eyebrow">Checklists</div>
+            <h2 className="section-title mt-4">Structural and operational readiness</h2>
+            <div className="mt-5 text-sm leading-6 text-slate-400">
+              Checklist status is reflected indirectly through trust and visibility for student users.
+            </div>
+          </article>
+
+          <article className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+            <div className="eyebrow">Evidence & Media</div>
+            <h2 className="section-title mt-4">Photos, docs, and 360 proof</h2>
+            <div className="mt-5 grid gap-3">
+              {evidenceList.length ? (
+                <div className="grid gap-3 sm:grid-cols-2">
+                  {evidenceList.map((item, idx) => (
+                    <div key={item.id} className="relative overflow-hidden rounded-xl border border-white/5 group aspect-video">
+                      <div className="absolute inset-0 bg-gradient-to-t from-black/60 to-transparent z-10 opacity-60" />
+                      {item.publicUrl ? (
+                        <img 
+                          src={item.publicUrl} 
+                          alt={`Evidence ${idx + 1}`} 
+                          className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105" 
+                        />
+                      ) : (
+                        <div className="w-full h-full bg-stone-800 flex items-center justify-center text-xs text-stone-400">
+                          Attached proof document
+                        </div>
+                      )}
+                      <span className="absolute bottom-2.5 left-2.5 z-20 signal-chip signal-info text-[10px] uppercase">
+                        {item.type}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="empty-state">No evidence uploaded yet.</div>
+              )}
+            </div>
+          </article>
+        </FadeIn>
+      ) : (
+        <>
+          {activeTab === "checklists" && (
+            <section className="grid gap-5">
+              <article className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+                <div className="eyebrow">Checklists</div>
+                <h2 className="section-title mt-4">Structural and operational readiness</h2>
+                <div className="mt-6 grid gap-6">
+                  <div>
+                    <h3 className="mb-4 text-lg font-semibold text-white">Structural</h3>
+                    <ToggleGrid fields={structuralFields} setValues={setStructuralForm} values={structuralForm} />
+                    <button className="btn-secondary mt-4 text-xs font-semibold tracking-wider" onClick={() => saveChecklist("structural")} type="button">
+                      Save structural checklist
+                    </button>
+                  </div>
+                  <div>
+                    <h3 className="mb-4 text-lg font-semibold text-white">Operational</h3>
+                    <ToggleGrid fields={operationalFields} setValues={setOperationalForm} values={operationalForm} />
+                    <label className="mt-4 grid gap-2">
+                      <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Self declaration</span>
+                      <textarea className="textarea-shell" onChange={(event) => setSelfDeclaration(event.target.value)} value={selfDeclaration} />
+                    </label>
+                    <button className="btn-secondary mt-4 text-xs font-semibold tracking-wider" onClick={() => saveChecklist("operational")} type="button">
+                      Save operational checklist
+                    </button>
+                  </div>
+                </div>
+              </article>
+            </section>
+          )}
+
+          {activeTab === "overview" && (
+            <section className="grid gap-5">
+              <article className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+                <div className="eyebrow">Evidence</div>
+                <h2 className="section-title mt-4">Photos, docs, and 360 proof</h2>
+                <div className="mt-5 grid gap-3">
+                  {evidenceList.length ? (
+                    evidenceList.map((item) => (
+                      <div key={item.id} className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <span className="signal-chip signal-info">{item.type}</span>
+                          {item.createdAt ? <span className="text-xs text-slate-500">{formatDateTime(item.createdAt)}</span> : null}
+                        </div>
+                        <p className="mt-3 text-sm leading-6 text-slate-300">{item.publicUrl || "Evidence file attached to backend storage."}</p>
+                      </div>
+                    ))
+                  ) : (
+                    <div className="empty-state">No evidence uploaded yet.</div>
+                  )}
+                </div>
+                <div className="mt-6 grid gap-3">
+                  {evidenceTypes.map((type) => (
+                    <label key={type} className="rounded-[24px] border border-white/10 bg-black/20 px-4 py-3 text-sm text-slate-300">
+                      <span className="mb-2 block">{type}</span>
+                      <input onChange={(event) => handleUpload(event, type)} type="file" />
+                    </label>
+                  ))}
+                  <button className="btn-primary mt-2" onClick={handleSubmitUnit} type="button">
+                    Submit for review
+                  </button>
+                </div>
+              </article>
+
+              {landlordAnalytics && (
+                <article className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+                  <div className="eyebrow">Operational Insights</div>
+                  <h2 className="section-title mt-4 mb-4">DAWN Diagnostic Feed</h2>
+                  <DawnAnalyticsViewer analytics={landlordAnalytics} />
+                </article>
+              )}
+            </section>
+          )}
+        </>
+      )}
+
+      {(role !== "landlord" || activeTab === "overview") && (
+        <section className="grid gap-5 lg:grid-cols-2">
+          <article className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+            <div className="eyebrow">History</div>
+            <div className="mt-5 grid gap-3">
+              {adminDetail?.behavioralHistory?.complaintTimeline?.length ? (
+                adminDetail.behavioralHistory.complaintTimeline.slice(0, 6).map((item) => (
+                  <div key={item.id} className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="signal-chip signal-warning">Severity {item.severity}</span>
+                      <span className={`signal-chip ${item.resolved ? "signal-success" : "signal-danger"}`}>{item.resolved ? "Resolved" : "Open"}</span>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-slate-400">Created {formatDateTime(item.createdAt)}</p>
+                  </div>
+                ))
+              ) : studentDetail?.transparency?.ownComplaintHistory?.length ? (
+                studentDetail.transparency.ownComplaintHistory.map((item) => (
+                  <div key={item.id} className="rounded-[24px] border border-white/10 bg-white/5 p-4">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="signal-chip signal-warning">Severity {item.severity}</span>
+                      <span className={`signal-chip ${item.resolved ? "signal-success" : "signal-danger"}`}>{item.resolved ? "Resolved" : "Open"}</span>
+                    </div>
+                    <p className="mt-3 text-sm leading-6 text-slate-400">Created {formatDateTime(item.createdAt)}</p>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-state">No complaint timeline available for this unit.</div>
+              )}
+            </div>
+          </article>
+
+          <article className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+            <div className="eyebrow">Actions</div>
+            {role === "student" ? (
+              <div className="mt-5 grid gap-4">
+                <Link className="btn-secondary text-xs tracking-wider uppercase font-semibold text-center py-3" href={`/unit/${unitId}/complaints`}>
+                  Open complaint history
+                </Link>
+                <ComplaintForm initialUnitId={unitId} />
+              </div>
+            ) : role === "admin" ? (
+              <div className="mt-5 grid gap-6">
+                <div>
+                  <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Governance status</p>
+                  <div className="flex flex-wrap gap-3">
+                    <button className="btn-primary text-xs font-semibold tracking-wider" onClick={() => handleAdminStatus("approved")} type="button">Approve</button>
+                    <button className="btn-secondary text-xs font-semibold tracking-wider" onClick={() => handleAdminStatus("suspended")} type="button">Suspend</button>
+                    <button className="btn-secondary text-xs font-semibold tracking-wider" onClick={() => handleAdminStatus("rejected")} type="button">Reject</button>
+                  </div>
+                </div>
+                <div className="soft-divider pt-5">
+                  <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Manual audit trigger</p>
+                  <textarea
+                    className="textarea-shell"
+                    onChange={(event) => setAuditReason(event.target.value)}
+                    placeholder="Explain why this unit should enter audit review..."
+                    value={auditReason}
+                  />
+                  <button className="btn-secondary mt-3 text-xs font-semibold tracking-wider" onClick={handleTriggerAudit} type="button">
+                    Trigger audit
+                  </button>
+                </div>
+                <div className="soft-divider pt-5">
+                  <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Self-declaration penalty</p>
+                  <textarea
+                    className="textarea-shell"
+                    onChange={(event) => setPenaltyForm((current) => ({ ...current, reason: event.target.value }))}
+                    placeholder="Reason for misrepresentation penalty..."
+                    value={penaltyForm.reason}
+                  />
+                  <input
+                    className="input-shell mt-3"
+                    min="1"
+                    onChange={(event) => setPenaltyForm((current) => ({ ...current, penaltyPoints: event.target.value }))}
+                    type="number"
+                    value={penaltyForm.penaltyPoints}
+                  />
+                  <button className="btn-secondary mt-3 text-xs font-semibold tracking-wider" onClick={handlePenalty} type="button">
+                    Apply penalty
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <div className="mt-5 text-sm leading-6 text-slate-400">
+                Landlords can update evidence and checklists above. Complaint resolution remains on the complaints page.
+              </div>
+            )}
+          </article>
+        </section>
+      )}
+
+      {role === "admin" ? (
+        <section className="glass-panel p-6 rounded-2xl bg-[var(--bg-surface-strong)]">
+          <div className="eyebrow">Audit Logs</div>
+          <h2 className="section-title mt-4">Audit timeline and corrective actions</h2>
+          <div className="mt-6 grid gap-4">
+            {adminAuditLogs.length ? (
+              adminAuditLogs.map((log) => (
+                <article key={log.id} className="rounded-[24px] border border-white/10 bg-white/5 p-5">
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <div className="flex flex-wrap gap-2">
+                      <span className="signal-chip signal-danger">{log.triggerType}</span>
+                      <span className={`signal-chip ${log.resolved ? "signal-success" : "signal-warning"}`}>
+                        {log.resolved ? "Resolved" : "Pending Action"}
+                      </span>
+                    </div>
+                    {log.createdAt ? <span className="text-xs text-slate-500">{formatDateTime(log.createdAt)}</span> : null}
+                  </div>
+                  {!log.resolved ? (
+                    <div className="mt-5 grid gap-4 xl:grid-cols-2">
+                      <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                        <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Corrective plan</p>
+                        <textarea
+                          className="textarea-shell"
+                          onChange={(event) => updateAuditForm(log.id, "correctiveAction", event.target.value)}
+                          placeholder="Define the corrective plan..."
+                          value={auditForms[log.id]?.correctiveAction || ""}
+                        />
+                        <input
+                          className="input-shell mt-3"
+                          onChange={(event) => updateAuditForm(log.id, "correctiveDeadline", event.target.value)}
+                          type="date"
+                          value={auditForms[log.id]?.correctiveDeadline || ""}
+                        />
+                        <button className="btn-secondary mt-3 text-xs font-semibold tracking-wider" onClick={() => handleSetCorrectivePlan(log.id)} type="button">
+                          Save corrective plan
+                        </button>
+                      </div>
+                      <div className="rounded-[24px] border border-white/10 bg-black/20 p-4">
+                        <p className="mb-3 text-xs uppercase tracking-[0.22em] text-slate-500">Resolve audit</p>
+                        <textarea
+                          className="textarea-shell"
+                          onChange={(event) => updateAuditForm(log.id, "verificationNotes", event.target.value)}
+                          placeholder="Verification notes before resolving..."
+                          value={auditForms[log.id]?.verificationNotes || ""}
+                        />
+                        <label className="mt-3 flex items-center justify-between rounded-[24px] border border-white/10 bg-white/5 px-4 py-3 text-sm text-slate-300">
+                          <span>Reopen unit to approved status</span>
+                          <input
+                            checked={Boolean(auditForms[log.id]?.reopenUnit)}
+                            onChange={(event) => updateAuditForm(log.id, "reopenUnit", event.target.checked)}
+                            type="checkbox"
+                          />
+                        </label>
+                        <button className="btn-primary mt-3 text-xs font-semibold tracking-wider" onClick={() => handleResolveAudit(log.id)} type="button">
+                          Resolve audit log
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="mt-4 rounded-[24px] border border-emerald-300/15 bg-emerald-300/5 p-4 text-sm leading-6 text-slate-300">
+                      {log.verificationNotes || "This audit log has already been resolved."}
+                    </div>
+                  )}
+                </article>
+              ))
+            ) : (
+              <div className="empty-state">No audit logs are currently associated with this unit.</div>
+            )}
+          </div>
+        </section>
+      ) : null}
+
+      {role === "landlord" && (
+        <>
+          {activeTab === "stays" && (
+            <Reveal duration={0.5}>
+              <section className="grid gap-6 mt-8">
+                <article className="glass-panel p-6 rounded-[24px] space-y-4 bg-[var(--bg-surface-strong)] border border-white/5">
+                  <div className="eyebrow">Guest Stay Logs</div>
+                  <h2 className="section-title mt-2">Active and historical guest stays</h2>
+                  {landlordGuests.length === 0 ? (
+                    <p className="text-sm text-slate-400 mt-4">No guest logs found for this unit.</p>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      {landlordGuests.map((guest) => (
+                        <div key={guest.id} className="flex justify-between items-center p-3 border border-white/5 rounded-xl bg-white/5 hover:bg-white/10 transition-colors">
+                          <div>
+                            <p className="text-sm font-semibold text-slate-200">{guest.guestName}</p>
+                            <p className="text-xs text-slate-400 mt-0.5">
+                              In: {new Date(guest.startDate).toLocaleString()}
+                              {guest.endDate && ` | Out: ${new Date(guest.endDate).toLocaleString()}`}
+                            </p>
+                          </div>
+                          <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold uppercase tracking-wider ${guest.active ? "bg-emerald-500/20 text-emerald-300" : "bg-slate-500/20 text-slate-300"}`}>
+                            {guest.active ? "Active" : "Completed"}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </article>
+              </section>
+            </Reveal>
+          )}
+
+          {activeTab === "payments" && (
+            <Reveal duration={0.5}>
+              <section className="grid gap-6 mt-8">
+                <article className="glass-panel p-6 rounded-[24px] space-y-4 bg-[var(--bg-surface-strong)] border border-white/5">
+                  <div className="eyebrow">Rent Verification</div>
+                  <h2 className="section-title mt-2">Rent Statements and verification control</h2>
+                  {landlordPayments.length === 0 ? (
+                    <p className="text-sm text-slate-400 mt-4">No rent records found for this unit.</p>
+                  ) : (
+                    <div className="mt-4 space-y-3">
+                      {landlordPayments.map((payment) => {
+                        const isExpanded = expandedLandlordPaymentId === payment.id;
+                        return (
+                          <div key={payment.id} className="border border-white/5 rounded-xl bg-white/5 overflow-hidden transition-all hover:bg-white/10">
+                            <div 
+                              className="flex flex-wrap justify-between items-center p-4 cursor-pointer select-none"
+                              onClick={() => setExpandedLandlordPaymentId(isExpanded ? null : payment.id)}
+                            >
+                              <div>
+                                <div className="flex items-center gap-3">
+                                  <span className="text-sm font-bold text-white">{payment.month}</span>
+                                  <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider ${
+                                    payment.status === "VERIFIED"
+                                      ? "bg-emerald-500/20 text-emerald-300"
+                                      : payment.status === "PAID"
+                                      ? "bg-amber-500/20 text-amber-300"
+                                      : "bg-rose-500/20 text-rose-300"
+                                  }`}>
+                                    {payment.status}
+                                  </span>
+                                </div>
+                                <p className="text-xs text-slate-400 mt-1">Student: {payment.occupancy?.student?.name || "Occupant"}</p>
+                              </div>
+                              <div className="text-right flex items-center gap-4">
+                                <div>
+                                  <span className="text-xs text-slate-500 block">Amount</span>
+                                  <span className="text-sm font-bold text-slate-200">₹{payment.amount}</span>
+                                </div>
+                                <span className="text-xs text-sky-400 font-semibold">{isExpanded ? "Hide" : "Expand"}</span>
+                              </div>
+                            </div>
+
+                            <Expand isExpanded={isExpanded}>
+                              <div className="p-4 bg-black/20 border-t border-white/5 text-xs text-slate-300 space-y-3">
+                                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                                  <div>
+                                    <p className="text-[10px] uppercase text-slate-500 tracking-wider font-semibold">Payment Receipt Reference</p>
+                                    <p className="mt-1 text-sm font-mono text-white bg-black/40 px-2 py-1 rounded w-fit border border-white/5">
+                                      {payment.receiptRef || "—"}
+                                    </p>
+                                  </div>
+                                  <div>
+                                    <p className="text-[10px] uppercase text-slate-500 tracking-wider font-semibold">Action Center</p>
+                                    {payment.status === "PAID" ? (
+                                      <button
+                                        className="btn-primary text-xs py-1.5 px-4 mt-1.5 font-bold tracking-wider"
+                                        disabled={landlordLoading}
+                                        onClick={async (e) => {
+                                          e.stopPropagation();
+                                          setLandlordLoading(true);
+                                          try {
+                                            await verifyPayment(payment.id);
+                                            const refreshed = await getLandlordPayments(unitId).catch(() => []);
+                                            setLandlordPayments(Array.isArray(refreshed) ? refreshed : []);
+                                          } catch (err) {
+                                            alert(err.message || "Verification failed");
+                                          } finally {
+                                            setLandlordLoading(false);
+                                          }
+                                        }}
+                                      >
+                                        Verify & Settle Statement
+                                      </button>
+                                    ) : (
+                                      <p className="mt-2 text-slate-400">
+                                        {payment.status === "VERIFIED" ? "Statement verified and finalized." : "Awaiting student payment submission."}
+                                      </p>
+                                    )}
+                                  </div>
+                                </div>
+                              </div>
+                            </Expand>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </article>
+              </section>
+            </Reveal>
+          )}
+
+          {activeTab === "agreements" && (
+            <Reveal duration={0.5}>
+              <section className="grid gap-6 mt-8">
+                <article className="glass-panel p-6 rounded-[24px] space-y-4 bg-[var(--bg-surface-strong)] border border-white/5">
+                  <div className="eyebrow">Rental Agreements</div>
+                  <h2 className="section-title mt-2">Tenancy Agreements & Versioning</h2>
+                  <div className="space-y-4">
+                    {landlordAgreements.length === 0 ? (
+                      <p className="text-sm text-slate-400">No agreements generated yet.</p>
+                    ) : (
+                      landlordAgreements.map((agg) => {
+                        const isExpanded = expandedLandlordAgreementId === agg.id;
+                        return (
+                          <div key={agg.id} className="p-4 border border-white/5 rounded-xl bg-white/5 space-y-3 overflow-hidden">
+                            <div className="flex justify-between items-center text-sm font-semibold text-slate-200">
+                              <span>v{agg.version} | Student: {agg.occupancy?.student?.name || "Occupant"}</span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold tracking-wider ${
+                                agg.status === "ACTIVE"
+                                  ? "bg-emerald-500/20 text-emerald-300"
+                                  : agg.status === "SUPERSEDED"
+                                  ? "bg-indigo-500/20 text-indigo-300"
+                                  : "bg-amber-500/20 text-amber-300"
+                              }`}>
+                                {agg.status}
+                              </span>
+                            </div>
+                            <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs text-slate-400">
+                              <div>Rent: ₹{agg.rentAmount}/mo</div>
+                              <div>Deposit: ₹{agg.securityDeposit}</div>
+                              <div>Notice: {agg.noticePeriodDays} Days</div>
+                              <div>Period: {new Date(agg.startDate).toLocaleDateString()} - {new Date(agg.endDate).toLocaleDateString()}</div>
+                            </div>
+                            <div className="flex flex-wrap gap-2 justify-between items-center pt-2 border-t border-white/5">
+                              <div className="flex gap-3 text-[10px] text-slate-500">
+                                <span>Tenant: {agg.tenantSigned ? "Signed" : "Unsigned"}</span>
+                                <span>Landlord: {agg.landlordSigned ? "Signed" : "Unsigned"}</span>
+                              </div>
+                              <div className="flex gap-3 items-center">
+                                <button 
+                                  className="text-xs text-sky-400 font-semibold hover:underline"
+                                  onClick={() => setExpandedLandlordAgreementId(isExpanded ? null : agg.id)}
+                                >
+                                  {isExpanded ? "Hide Actions" : "Show Actions"}
+                                </button>
+                                {agg.documentPath && (
+                                  <a
+                                    href={`/api/agreement/document/${agg.id}`}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
+                                    className="text-xs text-sky-300 hover:underline font-semibold"
+                                  >
+                                    View PDF
+                                  </a>
+                                )}
+                              </div>
+                            </div>
+
+                            <Expand isExpanded={isExpanded}>
+                              <div className="p-3 mt-2 rounded-lg bg-black/20 border border-white/5 space-y-3 text-xs text-slate-300">
+                                <div className="flex flex-wrap gap-3">
+                                  {agg.status === "DRAFT" && (
+                                    <button
+                                      className="btn-primary text-xs py-1.5 px-3 font-semibold"
+                                      disabled={landlordLoading}
+                                      onClick={() => handleSubmitAgreement(agg.id)}
+                                    >
+                                      Submit Terms to Tenant
+                                    </button>
+                                  )}
+                                  {agg.status === "PENDING_LANDLORD" && (
+                                    <button
+                                      className="btn-primary text-xs py-1.5 px-3 font-semibold bg-emerald-600 border-emerald-500"
+                                      disabled={landlordLoading}
+                                      onClick={() => handleSignLandlord(agg.id)}
+                                    >
+                                      Sign & Activate Agreement
+                                    </button>
+                                  )}
+                                  {(agg.status === "ACTIVE" || agg.status === "SUPERSEDED") && (
+                                    <button
+                                      className="btn-secondary text-xs py-1.5 px-3 font-semibold"
+                                      onClick={() => {
+                                        setAgreementForm({
+                                          occupancyId: agg.occupancyId,
+                                          rentAmount: agg.rentAmount,
+                                          securityDeposit: agg.securityDeposit,
+                                          noticePeriodDays: agg.noticePeriodDays,
+                                          startDate: agg.startDate.split("T")[0],
+                                          endDate: agg.endDate.split("T")[0],
+                                        });
+                                      }}
+                                    >
+                                      Use as Amendment Template
+                                    </button>
+                                  )}
+                                </div>
+
+                                {(agg.status === "ACTIVE" || agg.status === "SUPERSEDED") && agreementForm.occupancyId === agg.occupancyId && (
+                                  <div className="mt-4 p-4 border border-indigo-500/20 bg-indigo-500/5 rounded-xl space-y-3">
+                                    <p className="text-xs font-bold text-indigo-300">Amend/Correct Terms (Creates Version {agg.version + 1})</p>
+                                    <form onSubmit={(e) => handleCreateAgreementVersion(agg.id, e)} className="space-y-2 text-xs">
+                                      <div>
+                                        <label className="block text-slate-400 mb-1">Rent Amount (₹)</label>
+                                        <input
+                                          type="number"
+                                          required
+                                          className="input-shell text-xs py-1 px-2"
+                                          value={agreementForm.rentAmount}
+                                          onChange={(e) => setAgreementForm({ ...agreementForm, rentAmount: e.target.value })}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-slate-400 mb-1">Security Deposit (₹)</label>
+                                        <input
+                                          type="number"
+                                          required
+                                          className="input-shell text-xs py-1 px-2"
+                                          value={agreementForm.securityDeposit}
+                                          onChange={(e) => setAgreementForm({ ...agreementForm, securityDeposit: e.target.value })}
+                                        />
+                                      </div>
+                                      <div>
+                                        <label className="block text-slate-400 mb-1">Notice Period (Days)</label>
+                                        <input
+                                          type="number"
+                                          required
+                                          className="input-shell text-xs py-1 px-2"
+                                          value={agreementForm.noticePeriodDays}
+                                          onChange={(e) => setAgreementForm({ ...agreementForm, noticePeriodDays: e.target.value })}
+                                        />
+                                      </div>
+                                      <div className="grid grid-cols-2 gap-2">
+                                        <div>
+                                          <label className="block text-slate-400 mb-1">Start Date</label>
+                                          <input
+                                            type="date"
+                                            required
+                                            className="input-shell text-xs py-1 px-2"
+                                            value={agreementForm.startDate}
+                                            onChange={(e) => setAgreementForm({ ...agreementForm, startDate: e.target.value })}
+                                          />
+                                        </div>
+                                        <div>
+                                          <label className="block text-slate-400 mb-1">End Date</label>
+                                          <input
+                                            type="date"
+                                            required
+                                            className="input-shell text-xs py-1 px-2"
+                                            value={agreementForm.endDate}
+                                            onChange={(e) => setAgreementForm({ ...agreementForm, endDate: e.target.value })}
+                                          />
+                                        </div>
+                                      </div>
+                                      <div>
+                                        <label className="block text-slate-400 mb-1">Contract PDF Representation</label>
+                                        <input
+                                          type="file"
+                                          accept="application/pdf"
+                                          className="text-xs text-slate-400"
+                                          onChange={(e) => setAgreementFile(e.target.files?.[0] || null)}
+                                        />
+                                      </div>
+                                      <div className="flex justify-end gap-2 pt-2">
+                                        <button
+                                          type="button"
+                                          className="text-slate-400 hover:underline"
+                                          onClick={() => setAgreementForm({ occupancyId: "", rentAmount: "", securityDeposit: "", noticePeriodDays: 30, startDate: "", endDate: "" })}
+                                        >
+                                          Cancel
+                                        </button>
+                                        <button type="submit" className="btn-primary text-xs py-1 px-3" disabled={landlordLoading}>
+                                          Create Version {agg.version + 1}
+                                        </button>
+                                      </div>
+                                    </form>
+                                  </div>
+                                )}
+                              </div>
+                            </Expand>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+                  <div className="border-t border-white/10 pt-4 space-y-3">
+                    <h3 className="text-sm font-semibold text-slate-200">Create Tenancy Agreement Draft</h3>
+                    <form onSubmit={handleCreateAgreement} className="space-y-3 text-xs">
+                      <div>
+                        <label className="block text-slate-400 mb-1">Active Occupant</label>
+                        <select
+                          required
+                          className="input-shell text-xs py-1.5 px-2 bg-slate-900 text-white"
+                          value={agreementForm.occupancyId}
+                          onChange={(e) => setAgreementForm({ ...agreementForm, occupancyId: e.target.value })}
+                        >
+                          <option value="">Select Student Stay Context...</option>
+                          {interestedStudents
+                            .filter(s => s.status === "occupant")
+                            .map((occupant) => {
+                              const matchedOccupancy = landlordPayments.find(p => p.occupancy?.studentId === occupant.studentId)?.occupancyId;
+                              return (
+                                <option key={occupant.studentId} value={matchedOccupancy || ""}>
+                                  {occupant.name} ({occupant.email}) - Stay Context ID: {matchedOccupancy || "N/A"}
+                                </option>
+                              );
+                            })}
+                        </select>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-slate-400 mb-1">Rent Amount (₹)</label>
+                          <input
+                            type="number"
+                            required
+                            placeholder="e.g. 8000"
+                            className="input-shell text-xs py-1.5 px-2"
+                            value={agreementForm.rentAmount}
+                            onChange={(e) => setAgreementForm({ ...agreementForm, rentAmount: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 mb-1">Security Deposit (₹)</label>
+                          <input
+                            type="number"
+                            required
+                            placeholder="e.g. 16000"
+                            className="input-shell text-xs py-1.5 px-2"
+                            value={agreementForm.securityDeposit}
+                            onChange={(e) => setAgreementForm({ ...agreementForm, securityDeposit: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">Notice Period (Days)</label>
+                        <input
+                          type="number"
+                          required
+                          className="input-shell text-xs py-1.5 px-2"
+                          value={agreementForm.noticePeriodDays}
+                          onChange={(e) => setAgreementForm({ ...agreementForm, noticePeriodDays: e.target.value })}
+                        />
+                      </div>
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-slate-400 mb-1">Start Date</label>
+                          <input
+                            type="date"
+                            required
+                            className="input-shell text-xs py-1.5 px-2"
+                            value={agreementForm.startDate}
+                            onChange={(e) => setAgreementForm({ ...agreementForm, startDate: e.target.value })}
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-slate-400 mb-1">End Date</label>
+                          <input
+                            type="date"
+                            required
+                            className="input-shell text-xs py-1.5 px-2"
+                            value={agreementForm.endDate}
+                            onChange={(e) => setAgreementForm({ ...agreementForm, endDate: e.target.value })}
+                          />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">PDF Lease Snapshot Document (Optional)</label>
+                        <input
+                          type="file"
+                          accept="application/pdf"
+                          className="text-xs text-slate-400"
+                          onChange={(e) => setAgreementFile(e.target.files?.[0] || null)}
+                        />
+                      </div>
+                      <button type="submit" className="btn-primary w-full text-xs py-2.5 font-bold tracking-wider" disabled={landlordLoading}>
+                        Create Draft Agreement
+                      </button>
+                    </form>
+                  </div>
+                </article>
+              </section>
+            </Reveal>
+          )}
+
+          {activeTab === "compliance" && (
+            <Reveal duration={0.5}>
+              <section className="grid gap-6 mt-8">
+                <article className="glass-panel p-6 rounded-[24px] space-y-4 bg-[var(--bg-surface-strong)] border border-white/5">
+                  <div className="eyebrow">Governance & Compliance</div>
+                  <h2 className="section-title mt-2">Upload compliance files (KYC, safety)</h2>
+                  
+                  <div className="grid gap-4 sm:grid-cols-2">
+                    {landlordCompliance.length === 0 ? (
+                      <p className="text-sm text-slate-400 col-span-2">No compliance files uploaded yet.</p>
+                    ) : (
+                      landlordCompliance.map((comp) => {
+                        const isExpanded = expandedLandlordComplianceId === comp.id;
+                        return (
+                          <div key={comp.id} className="p-4 border border-white/5 rounded-xl bg-white/5 space-y-2 hover:bg-white/10 transition-colors">
+                            <div className="flex justify-between items-center text-sm font-semibold text-slate-200">
+                              <span>{comp.docType}</span>
+                              <span className={`px-2.5 py-0.5 rounded text-[10px] font-bold tracking-wider ${
+                                comp.status === "APPROVED"
+                                  ? "bg-emerald-500/20 text-emerald-300"
+                                  : comp.status === "REJECTED"
+                                  ? "bg-rose-500/20 text-rose-300"
+                                  : comp.status === "EXPIRED"
+                                  ? "bg-slate-500/20 text-slate-400"
+                                  : "bg-amber-500/20 text-amber-300"
+                              }`}>
+                                {comp.status}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center text-xs text-slate-400">
+                              <span>File: {comp.fileName}</span>
+                              {comp.expiryDate && <span>Expires: {new Date(comp.expiryDate).toLocaleDateString()}</span>}
+                            </div>
+                            <div className="flex justify-end pt-1">
+                              <button 
+                                className="text-xs text-sky-400 font-semibold hover:underline"
+                                onClick={() => setExpandedLandlordComplianceId(isExpanded ? null : comp.id)}
+                              >
+                                {isExpanded ? "Hide Logs" : "Show Logs"}
+                              </button>
+                            </div>
+
+                            <Expand isExpanded={isExpanded}>
+                              <div className="p-3 bg-black/25 rounded border border-white/5 text-[11px] text-slate-400 space-y-1 mt-2">
+                                <p>Verification log audits:</p>
+                                {comp.status === "REJECTED" && (
+                                  <p className="text-rose-400">Rejection Reason: {comp.audits?.[0]?.reason || "Not specified"}</p>
+                                )}
+                                {comp.status === "APPROVED" && <p className="text-emerald-400">Document passed structural validation checks.</p>}
+                              </div>
+                            </Expand>
+                          </div>
+                        );
+                      })
+                    )}
+                  </div>
+
+                  <div className="border-t border-white/10 pt-4 space-y-3">
+                    <h3 className="text-sm font-semibold text-slate-200">Submit Compliance Document</h3>
+                    <form onSubmit={handleComplianceUpload} className="space-y-3 text-xs">
+                      <div>
+                        <label className="block text-slate-400 mb-1">Document Category</label>
+                        <select
+                          required
+                          className="input-shell text-xs py-1.5 px-2 bg-slate-900 text-white"
+                          value={complianceDocForm.docType}
+                          onChange={(e) => setComplianceDocForm({ ...complianceDocForm, docType: e.target.value })}
+                        >
+                          <option value="KYC">Owner Identity KYC</option>
+                          <option value="FIRE_SAFETY">Fire Safety Certificate</option>
+                          <option value="LICENSE">Municipal Rental License</option>
+                          <option value="STRUCTURAL_SAFETY">Structural Engineer Certificate</option>
+                        </select>
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">Document Expiry Date</label>
+                        <input
+                          type="date"
+                          className="input-shell text-xs py-1.5 px-2"
+                          value={complianceDocForm.expiryDate}
+                          onChange={(e) => setComplianceDocForm({ ...complianceDocForm, expiryDate: e.target.value })}
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-slate-400 mb-1">File Upload (PDF/Image)</label>
+                        <input
+                          type="file"
+                          required
+                          onChange={(e) => setComplianceFile(e.target.files?.[0] || null)}
+                        />
+                      </div>
+                      <button type="submit" className="btn-primary w-full text-xs py-2.5 font-bold tracking-wider" disabled={landlordLoading}>
+                        Submit Compliance Document
+                      </button>
+                    </form>
+                  </div>
+                </article>
+              </section>
+            </Reveal>
+          )}
+        </>
       )}
     </div>
   );
 }
+
+

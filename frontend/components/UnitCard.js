@@ -1,119 +1,210 @@
-export default function UnitCard({ unit, showDetails = false, showForStudent = false }) {
-  const UNIT_STATUS_META = {
-    draft: { label: "Draft", color: "bg-slate-100 text-slate-700" },
-    submitted: { label: "Submitted", color: "bg-blue-100 text-blue-700" },
-    admin_review: { label: "Admin Review", color: "bg-purple-100 text-purple-700" },
-    approved: { label: "Approved", color: "bg-green-100 text-green-700" },
-    suspended: { label: "Suspended", color: "bg-amber-100 text-amber-700" },
-    rejected: { label: "Rejected", color: "bg-red-100 text-red-700" },
-    archived: { label: "Archived", color: "bg-gray-100 text-gray-700" },
-  };
+"use client";
 
-  const bandColor =
-    unit.trustBand === "priority"
-      ? "bg-green-50 border-green-500"
-      : unit.trustBand === "standard"
-        ? "bg-amber-50 border-amber-500"
-        : "bg-red-50 border-red-500";
+import Link from "next/link";
+import { useMemo, useState } from "react";
+import { inferVisibilityReasons, getRiskTone, getTrustBand } from "@/lib/governance";
+import { shortlistUnit } from "@/lib/api";
 
-  const badgeColor =
-    unit.trustBand === "priority"
-      ? "bg-green-600 text-white"
-      : unit.trustBand === "standard"
-        ? "bg-amber-500 text-white"
-        : "bg-red-600 text-white";
+export default function UnitCard({ unit, onShortlist, showForStudent = false, compact = false }) {
+  const [submitting, setSubmitting] = useState(false);
+  const [feedback, setFeedback] = useState("");
+  const [error, setError] = useState("");
 
-  const statusMeta = UNIT_STATUS_META[unit.status] || {
-    label: "Invalid Status",
-    color: "bg-rose-100 text-rose-700",
-  };
+  const trust = getTrustBand(unit?.trustScore);
+  const visibilityReasons = useMemo(() => inferVisibilityReasons(unit), [unit]);
+  const unitId = unit?.unitId || unit?.id;
+  const complaintCount = Number(unit?.activeComplaints || unit?.complaintSummary?.activeComplaints || unit?.openIssues || 0);
+  const capacity = Number(unit?.capacity || unit?.availability?.capacity || 0);
+  const availableSlots = Number(unit?.availableSlots || unit?.availability?.availableSlots || 0);
+  const rent = Number(unit?.rent || 0);
+  const riskLevel =
+    unit?.riskLevel ||
+    (unit?.auditRequired ? "Critical" : complaintCount >= 3 ? "Warning" : Number(unit?.trustScore || 0) >= 75 ? "Stable" : "Warning");
+  const trustScore = Number(unit?.trustScore || 0);
+  const trustContext =
+    trustScore >= 90
+      ? "Top 10% in corridor"
+      : trustScore >= 80
+        ? "Higher than most nearby units"
+        : trustScore >= 70
+          ? "Steady compared with nearby units"
+          : "Below stronger nearby units";
+  const visibilitySummary = unit?.auditRequired
+    ? "Governance review required. Access may stay limited until audits clear."
+    : trustScore >= 80 && complaintCount <= 1
+      ? "Governance checks clear. Trust remains high."
+      : complaintCount >= 3
+        ? "Complaint pressure is elevated. Visibility may tighten."
+        : visibilityReasons[0] || "Governance signals are stable right now.";
+  const compactSignals = [
+    unit?.status === "approved" ? "Approved" : unit?.status || null,
+    trustScore >= 80 ? "High trust" : trustScore >= 65 ? "Stable trust" : "Watch trust",
+    riskLevel?.toLowerCase() === "stable" ? "Low risk" : `${riskLevel} risk`,
+    unit?.ac ? "AC" : null,
+  ].filter(Boolean);
+  const ctaLabel = unit?.visibleToStudents === false ? "Request Access" : "Express Interest";
+  const whyChooseThis =
+    trustScore >= 80 && complaintCount <= 1
+      ? "High trust + low complaints"
+      : trustScore >= 70
+        ? "Strong safety signals + steady trust"
+        : complaintCount <= 1
+          ? "Low complaints + fair trust"
+          : "Worth reviewing if this location fits your needs";
+  const studentBadge =
+    trustScore >= 88
+      ? "Recommended"
+      : Number(unit?.shortlistCount || unit?.interestCount || 0) >= 3
+        ? "High demand"
+        : "";
 
-  const trustScoreColor =
-    unit.trustScore >= 80
-      ? "text-green-600"
-      : unit.trustScore >= 50
-        ? "text-amber-600"
-        : "text-red-600";
+  if (!unit || (showForStudent && unit.visibleToStudents === false)) {
+    return null;
+  }
+
+  async function handleShortlist(event) {
+    event.preventDefault();
+    event.stopPropagation();
+    setSubmitting(true);
+    setFeedback("");
+    setError("");
+
+    try {
+      await shortlistUnit({ unitId: Number(unitId) });
+      setFeedback("Unit shortlisted. Demand interest recorded.");
+      onShortlist?.();
+    } catch (requestError) {
+      setError(requestError.message || "Unable to shortlist this unit.");
+    } finally {
+      setSubmitting(false);
+    }
+  }
 
   return (
-    <article className={`rounded-xl border-l-4 border border-slate-200 p-4 shadow-sm ${bandColor}`}>
-      <div className="mb-3 flex items-center justify-between">
-        <h3 className="text-lg font-semibold">Unit #{unit.id}</h3>
-        <span className={`rounded-full px-2 py-1 text-xs font-semibold uppercase ${badgeColor}`}>
-          {unit.trustBand || "unknown"}
-        </span>
+    <Link href={`/unit/${unitId}`} prefetch={false} className="glass-panel blueprint-border group flex h-full flex-col overflow-hidden p-5 transition hover:-translate-y-1">
+      <div className="flex items-start justify-between gap-4">
+        <div className="min-w-0 flex-1">
+          <div className="mb-3 flex flex-wrap items-center gap-2">
+            <div className="eyebrow">Unit {unitId}</div>
+            {showForStudent && studentBadge ? <span className="signal-chip signal-info">{studentBadge}</span> : null}
+          </div>
+          <h3 className="text-xl font-semibold leading-tight sm:text-[1.4rem]" style={{ color: "var(--text-main)" }}>
+            {unit?.name || `Governed Unit ${unitId}`}
+          </h3>
+          <p className="mt-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+            {unit?.occupancyType || "Student housing"} / {Number(unit?.distanceKm || 0).toFixed(1)} km from demand corridor
+          </p>
+          {showForStudent ? (
+            <p className="mt-3 text-sm font-medium leading-6" style={{ color: "var(--text-main)" }}>
+              Why choose this: <span style={{ color: "var(--text-muted)" }}>{whyChooseThis}</span>
+            </p>
+          ) : null}
+        </div>
+        <div className="min-w-[8.5rem] text-right">
+          <p className="text-xs uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
+            Trust score
+          </p>
+          <strong className="mt-1 block text-4xl font-semibold leading-none sm:text-[2.75rem]" style={{ color: "var(--text-main)" }}>
+            {trustScore}
+          </strong>
+          <p className="mt-2 text-xs leading-5" style={{ color: "var(--text-muted)" }}>
+            {trustContext}
+          </p>
+          <div className="mt-3 inline-flex items-center gap-2">
+            <span className={`signal-chip ${trust.tone}`}>{trust.label}</span>
+          </div>
+        </div>
       </div>
 
-      <p className="text-sm text-slate-700">
-        Trust Score: <span className={`font-semibold ${trustScoreColor}`}>{unit.trustScore}</span>
-      </p>
+      <div className="mt-6 trust-track h-2.5">
+        <div className={`trust-fill ${trust.fillClass}`} style={{ width: `${Math.min(trustScore, 100)}%` }} />
+      </div>
 
-      {showForStudent && (
-        <>
-          {unit.rent !== undefined && (
-            <p className="text-sm text-slate-700">Rent: <span className="font-semibold">${unit.rent}/month</span></p>
-          )}
-          {unit.distanceKm !== undefined && (
-            <p className="text-sm text-slate-700">Distance: <span className="font-semibold">{unit.distanceKm} km</span></p>
-          )}
-          {unit.capacity !== undefined && (
-            <p className="text-sm text-slate-700">Slots: <span className="font-semibold">{(unit.capacity - (unit.occupancyCount || 0))}/{unit.capacity}</span></p>
-          )}
-          <div className="mt-2 flex flex-wrap gap-1">
-            {unit.ac && <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">AC</span>}
-            {unit.bedAvailable && <span className="rounded bg-green-100 px-2 py-0.5 text-xs font-medium text-green-700">Bed</span>}
-            {unit.waterAvailable && <span className="rounded bg-cyan-100 px-2 py-0.5 text-xs font-medium text-cyan-700">Water</span>}
-            {unit.ventilationGood && <span className="rounded bg-orange-100 px-2 py-0.5 text-xs font-medium text-orange-700">Vent</span>}
+      <div className="mt-5 flex flex-wrap items-center gap-x-2 gap-y-1.5 text-sm" style={{ color: "var(--text-muted)" }}>
+        {compactSignals.map((signal, index) => (
+          <span key={signal} className="inline-flex items-center">
+            {index > 0 ? <span className="mr-2" style={{ color: "var(--text-soft)" }}>|</span> : null}
+            <span>{signal}</span>
+          </span>
+        ))}
+      </div>
+
+      <div className={`mt-6 grid gap-3 ${compact ? "sm:grid-cols-1" : "sm:grid-cols-2"}`}>
+        <div className="overflow-hidden rounded-[22px] p-3.5" style={{ border: "1px solid var(--border-strong)", background: "color-mix(in srgb, var(--bg-soft) 94%, transparent)" }}>
+          <div className="flex flex-wrap items-start justify-between gap-2">
+            <p className="min-w-0 flex-1 text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
+              Operational
+            </p>
+            <span className={`signal-chip shrink-0 ${getRiskTone(riskLevel)}`}>{riskLevel === "Stable" ? "Low risk" : `${riskLevel} risk`}</span>
           </div>
-        </>
-      )}
+          <div className="mt-3.5 grid grid-cols-3 gap-2">
+            {[
+              { label: "Complaints", value: complaintCount },
+              { label: "Capacity", value: capacity },
+              { label: "Available", value: availableSlots },
+            ].map((item) => (
+              <div key={item.label} className="rounded-[18px] px-3 py-2" style={{ border: "1px solid var(--border)", background: "color-mix(in srgb, var(--bg-soft-strong) 94%, transparent)" }}>
+                <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>
+                  {item.label}
+                </p>
+                <strong className="mt-1 block text-base sm:text-[1.05rem]" style={{ color: "var(--text-main)" }}>
+                  {item.value}
+                </strong>
+              </div>
+            ))}
+          </div>
+        </div>
 
-      {unit.status && (
-        <p className="text-sm text-slate-700">
-          Status: <span className={`inline-block rounded-full px-2 py-0.5 text-xs font-semibold ${statusMeta.color}`}>{statusMeta.label}</span>
+        <div className="rounded-[22px] p-3.5" style={{ border: "1px solid var(--border-strong)", background: "color-mix(in srgb, var(--bg-soft) 94%, transparent)" }}>
+          <div className="flex items-center justify-between gap-3">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.24em]" style={{ color: "var(--text-soft)" }}>
+              Financial
+            </p>
+            <span className="text-xs font-semibold uppercase tracking-[0.18em]" style={{ color: "var(--text-soft)" }}>
+              {trustScore >= 80 ? "Strong value" : "Review budget"}
+            </span>
+          </div>
+          <div className="mt-3 rounded-[18px] px-3 py-3" style={{ border: "1px solid var(--border)", background: "color-mix(in srgb, var(--bg-soft-strong) 94%, transparent)" }}>
+            <p className="text-[11px] uppercase tracking-[0.22em]" style={{ color: "var(--text-soft)" }}>
+              Rent
+            </p>
+            <strong className="mt-1.5 block text-[2.15rem] font-semibold leading-none sm:text-[2.35rem]" style={{ color: "var(--text-main)" }}>
+              Rs {rent}
+            </strong>
+            <p className="mt-2 text-xs leading-5" style={{ color: "var(--text-muted)" }}>
+              {trustScore >= 80 ? "Strong trust posture" : "Review trust signals first"}
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="mt-5 flex items-start gap-2 text-sm leading-6" style={{ color: "var(--text-muted)" }}>
+        <span className="mt-1 inline-flex h-5 w-5 items-center justify-center rounded-full text-xs" style={{ background: "var(--bg-soft-strong)", color: "var(--text-main)" }}>
+          {unit?.auditRequired || complaintCount >= 3 ? "!" : "i"}
+        </span>
+        <p className="min-w-0">
+          <span className="font-medium" style={{ color: "var(--text-main)" }}>
+            {unit?.auditRequired || complaintCount >= 3 ? "Attention:" : "Visible now:"}
+          </span>{" "}
+          {visibilitySummary}
         </p>
-      )}
+      </div>
 
-      {unit.auditRequired && (
-        <p className="mt-1 text-sm">
-          <span className="rounded-full bg-red-100 px-2 py-0.5 text-xs font-semibold text-red-700">Audit Required</span>
-        </p>
-      )}
+      {showForStudent ? (
+        <div className="mt-5 flex flex-wrap items-start gap-3">
+          <div className="min-w-0 flex-1">
+            <button className="btn-primary w-full px-6 py-3.5 sm:w-auto" disabled={submitting} onClick={handleShortlist} type="button">
+              {submitting ? "Recording..." : ctaLabel}
+            </button>
+            <p className="mt-2 text-xs leading-5" style={{ color: "var(--text-muted)" }}>
+              No booking yet. This helps unlock access.
+            </p>
+          </div>
+        </div>
+      ) : null}
 
-      {showDetails && unit.visibleToStudents !== undefined && (
-        <p className="text-sm text-slate-700">
-          Visible: <span className={`font-semibold ${unit.visibleToStudents ? "text-green-600" : "text-red-600"}`}>{unit.visibleToStudents ? "Yes" : "No"}</span>
-        </p>
-      )}
-
-      {showDetails && unit.capacity !== undefined && (
-        <p className="text-sm text-slate-700">
-          Occupancy: <span className="font-semibold">{unit.occupancyCount || 0}/{unit.capacity}</span>
-        </p>
-      )}
-
-      {showDetails && (
-        <>
-          <p className="text-sm text-slate-700">
-            Structural: <span className={`font-semibold ${unit.structuralApproved ? "text-green-600" : "text-red-600"}`}>{unit.structuralApproved ? "Approved" : "Pending"}</span>
-          </p>
-          <p className="text-sm text-slate-700">
-            Operational: <span className={`font-semibold ${unit.operationalBaselineApproved ? "text-green-600" : "text-red-600"}`}>{unit.operationalBaselineApproved ? "Approved" : "Pending"}</span>
-          </p>
-        </>
-      )}
-
-      {showDetails && unit.activeComplaints !== undefined && (
-        <p className="text-sm text-slate-700">
-          Complaints: <span className={`font-semibold ${unit.activeComplaints > 0 ? "text-red-600" : "text-green-600"}`}>{unit.activeComplaints}</span>
-        </p>
-      )}
-
-      {showDetails && unit.openAuditLogCount > 0 && (
-        <p className="text-sm">
-          <span className="rounded-full bg-amber-100 px-2 py-0.5 text-xs font-semibold text-amber-700">{unit.openAuditLogCount} Audit{unit.openAuditLogCount > 1 ? "s" : ""}</span>
-        </p>
-      )}
-    </article>
+      {feedback ? <div className="status-banner success mt-4">{feedback}</div> : null}
+      {error ? <div className="status-banner error mt-4">{error}</div> : null}
+    </Link>
   );
 }

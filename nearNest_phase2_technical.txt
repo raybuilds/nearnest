@@ -1,0 +1,433 @@
+# NearNest Phase 2 Technical Documentation
+
+## 1. INTELLIGENCE LAYER (DETAILED)
+
+### Trust Engine
+**Purpose:** Core trust scoring calculation engine that determines unit visibility and risk levels
+**Inputs:** Unit object with complaints array, complaint severity, resolution status, SLA deadlines
+**Outputs:** Trust score (0-100), trust band classification (healthy/watch/risk), penalty breakdown
+**Location:** `services/intelligence/trustEngine.js`
+**Connections:** Called by unit controllers during complaint resolution, used by discovery layer for visibility gates
+
+**Key Logic:**
+- Base score: 75 points
+- Severity penalty: -2 per severity level
+- Unresolved penalty: -5 per open complaint
+- SLA breach penalty: -3 per late resolution
+- Recurrence penalty: -5 per complaint beyond 3 in 30-day window
+- Minimum score: 0 (no negative scores)
+
+### Recommendation Engine
+**Purpose:** Unit ranking and recommendation scoring for student discovery
+**Inputs:** Unit list, distance filters, price filters, trust scores, occupancy data
+**Outputs:** Ranked unit list with recommendation reasons and ranking scores
+**Location:** `services/intelligence/dawnRanking.js`
+**Connections:** Used by frontend unit search, DAWN assistant for unit suggestions
+
+**Scoring Formula:**
+- Trust score: 50% weight
+- Availability: 20% weight  
+- Distance: 20% weight
+- Price: 10% weight
+- Normalized to 0-100 scale
+
+### Corridor Insight Service
+**Purpose:** Behavioral analysis and risk assessment for geographic corridors
+**Inputs:** Corridor ID, complaint data, trust scores, incident frequency
+**Outputs:** Risk level, complaint density, incident frequency breakdown, trend analysis
+**Location:** `services/intelligence/dawnCorridorInsightService.js`
+**Connections:** Used by admin dashboard, DAWN assistant for corridor analytics
+
+**Key Metrics:**
+- Complaint density (complaints per unit)
+- Incident frequency by type (water, fire, electrical, etc.)
+- Trend analysis (14-day current vs previous)
+- Units near suspension threshold
+
+### Remediation Advisor
+**Purpose:** Operational guidance for landlords based on unit performance
+**Inputs:** Landlord ID, unit performance data, complaint history
+**Outputs:** Priority list of units needing attention, specific remediation recommendations
+**Location:** `services/intelligence/dawnRemediationService.js`
+**Connections:** Used by landlord dashboard, DAWN assistant for operational advice
+
+**Prioritization Logic:**
+- Risk score = complaints*2 + SLA breaches*3 + unresolved*4 + trust deficit
+- Top 3 units by risk score returned
+- Specific recommendations based on complaint patterns
+
+### Trust Explanation Service
+**Purpose:** Breaks down trust score changes for transparency and user understanding
+**Inputs:** Unit ID, complaint data, SLA breach history
+**Outputs:** Trust score explanation with specific drivers and penalty breakdown
+**Location:** `services/intelligence/trustExplanationService.js`
+**Connections:** Used by student unit detail view, DAWN assistant for trust explanations
+
+**Explanation Categories:**
+- Recurring complaints in last 30 days
+- SLA breaches in last 30 days
+- Unresolved complaints
+- Highest severity level
+
+### Risk Forecast Service
+**Purpose:** Predictive risk modeling for individual units based on historical patterns
+**Inputs:** Unit ID, complaint history, occupancy data, audit logs
+**Outputs:** Risk level (STABLE/EARLY_WARNING/CRITICAL), risk score, trend indicators
+**Location:** `services/intelligence/dawnRiskForecastService.js`
+**Connections:** Used by operations advisor, DAWN assistant for risk predictions
+
+**Forecasting Logic:**
+- Complaint trend (current 15d vs previous 15d)
+- Severity trend analysis
+- SLA breach patterns
+- Occupancy pressure metrics
+- Trust score trajectory
+
+### Operations Advisor
+**Purpose:** Role-specific operational insights and alerts for all user types
+**Inputs:** User role, user ID, complaint data, unit performance
+**Outputs:** Operational alerts, risk indicators, role-specific recommendations
+**Location:** `services/intelligence/dawnOperationsAdvisor.js`
+**Connections:** Used by DAWN assistant, proactive insight system
+
+**Role-Specific Logic:**
+- **Students:** Unit health monitoring, complaint trend alerts
+- **Landlords:** Portfolio risk assessment, recurring issue patterns
+- **Admins:** Corridor-wide behavioral analysis, safety incident clustering
+
+## 2. DATA & DATABASE
+
+### Prisma Schema Overview
+The database uses PostgreSQL with Prisma ORM for type-safe database access. The schema is organized around housing governance with geographic scoping.
+
+### Main Models
+
+#### User
+- **Purpose:** Authentication and role management
+- **Key Fields:** id, name, email, password, role
+- **Relationships:** One-to-one with Student/Landlord, many-to-many with units via media uploads
+- **Constraints:** Email unique, role enum validation
+
+#### Unit
+- **Purpose:** Housing unit management and trust tracking
+- **Key Fields:** status, trustScore, rent, distanceKm, capacity, structuralApproved, operationalBaselineApproved
+- **Relationships:** Belongs to Landlord and Corridor, has many Complaints, Occupancies, Occupants, Media, AuditLogs
+- **Status States:** draft → submitted → admin_review → approved → suspended/rejected/archived
+
+#### Complaint
+- **Purpose:** Incident tracking and trust score impact
+- **Key Fields:** severity, message, resolved, createdAt, resolvedAt, slaDeadline, incidentType
+- **Relationships:** Belongs to Unit and Student, optional Occupant reference
+- **SLA Logic:** deadline = creation + (severity * 24 hours)
+
+#### Corridor
+- **Purpose:** Geographic scoping and administrative boundaries
+- **Key Fields:** id, name, cityCode
+- **Relationships:** Has many Students, Units, Institutions
+- **Usage:** All operations are corridor-scoped for privacy and manageability
+
+#### Occupancy
+- **Purpose:** Student-unit assignment tracking
+- **Key Fields:** unitId, studentId, startDate, endDate
+- **Relationships:** Belongs to Unit and Student
+- **Constraints:** No concurrent check-ins enforced
+
+#### Occupant
+- **Purpose:** Privacy-preserving identity for complaint ownership
+- **Key Fields:** publicId (location-encoded), cityCode, corridorCode, hostelCode, roomNumber, occupantIndex
+- **Relationships:** Belongs to Student and Unit, has many Complaints
+- **Privacy:** Public ID prevents enumeration attacks while enabling accountability
+
+#### AuditLog
+- **Purpose:** Governance action tracking and compliance
+- **Key Fields:** unitId, triggerType, reason, correctiveAction, correctiveDeadline, verificationNotes
+- **Relationships:** Belongs to Unit
+- **Triggers:** Low trust scores, capacity violations, SLA patterns, complaint density
+
+### Relationships
+- **Unit → Landlord:** One-to-many (landlord owns multiple units)
+- **Unit → Corridor:** Many-to-one (units belong to geographic corridors)
+- **Unit → Complaint:** One-to-many (units accumulate complaints)
+- **Student → Occupancy:** One-to-many (students can have multiple tenancies)
+- **Student → Occupant:** One-to-many (students can occupy multiple units over time)
+- **Complaint → Occupant:** Many-to-one (complaints reference specific occupants)
+
+### Data Flow
+1. **Student Discovery:** Units filtered by trust score ≥50 and baseline approvals
+2. **Occupancy Creation:** Check-in creates Occupancy record and Occupant ID
+3. **Complaint Filing:** Complaints bound to Occupant, auto-associated with Unit
+4. **Trust Recalculation:** Engine recalculates trust score based on complaint resolution
+5. **Visibility Update:** Trust changes may affect unit discoverability
+6. **Audit Triggers:** Low scores or violations trigger governance workflows
+
+## 3. API LAYER
+
+### Key Routes
+
+#### /auth
+**Purpose:** Authentication and user management
+**Methods:**
+- POST /login - User authentication
+- POST /register - User registration
+**Role Access:** Public
+**Flow:** JWT token generation, role-based response filtering
+
+#### /unit
+**Purpose:** Unit management and discovery
+**Methods:**
+- GET /units/:corridorId - List discoverable units
+- POST /unit - Create new unit (landlord)
+- POST /unit/:id/submit - Submit for approval
+- GET /unit/:id/explain - Trust score explanation
+**Role Access:** Students (read), Landlords (create/manage), Admins (review)
+**Flow:** Unit creation → baseline submission → admin review → approval → student discovery
+
+#### /complaint
+**Purpose:** Incident reporting and resolution tracking
+**Methods:**
+- POST /complaint - File new complaint
+- PATCH /complaint/:id/resolve - Mark as resolved
+- GET /complaints - List complaints (role-filtered)
+- GET /unit/:id/complaints - Unit-specific complaints
+**Role Access:** Students (file), Landlords (resolve), Admins (view all)
+**Flow:** Complaint creation → SLA tracking → resolution → trust recalculation
+
+#### /occupancy
+**Purpose:** Student-unit assignment management
+**Methods:**
+- POST /occupancy/check-in - Student check-in
+- PATCH /occupancy/:id/check-out - Student check-out
+**Role Access:** Students (self), Landlords (manage)
+**Flow:** Check-in creates Occupancy + Occupant → complaint binding → check-out cleanup
+
+#### /corridor
+**Purpose:** Geographic boundary management
+**Methods:**
+- GET /corridors - List available corridors
+- GET /corridor/:id/overview - Behavioral insights
+- POST /corridor - Create corridor (admin)
+**Role Access:** Students (read), Admins (manage)
+**Flow:** Corridor selection → unit discovery → complaint aggregation
+
+#### /dawn
+**Purpose:** AI assistant interface
+**Methods:**
+- POST /dawn/query - Natural language queries
+- GET /dawn/insights - Proactive operational insights
+**Role Access:** All roles (context-aware)
+**Flow:** Intent parsing → role-scoped API calls → formatted response
+
+#### /profile
+**Purpose:** User information and current status
+**Methods:**
+- GET /profile - Current user profile with occupancy
+**Role Access:** Authenticated users
+**Flow:** Authentication → role-based profile assembly
+
+### Role-Based Access Control
+- **Students:** Read units, file complaints, manage own occupancy
+- **Landlords:** Manage owned units, resolve complaints, view performance metrics
+- **Admins:** Review units, trigger audits, manage corridors, view all data
+
+## 4. DAWN ASSISTANT (DETAILED)
+
+### Intent Parsing Logic
+DAWN uses rule-based intent classification without ML dependencies:
+
+**Student Intents:**
+- `student_search`: Room/unit discovery queries
+- `student_complaint`: Complaint drafting assistance
+- `student_complaint_summary`: Unit complaint history
+- `student_unit_health`: Housing health assessment
+- `predict_unit_risk`: Risk prediction queries
+
+**Landlord Intents:**
+- `landlord_recurring_issues`: Pattern analysis
+- `landlord_risk_summary`: Portfolio risk assessment
+- `landlord_remediation_advisor`: Operational guidance
+
+**Admin Intents:**
+- `admin_corridor_analytics`: Geographic behavioral insights
+- `corridor_behavioral_insight`: Corridor-specific analysis
+
+### API Call Orchestration
+DAWN executes existing backend endpoints without policy overrides:
+
+**Query Flow:**
+1. Intent classification based on keywords and role
+2. Context assembly (user role, unit ID, corridor ID)
+3. API endpoint selection and parameter mapping
+4. Response aggregation and formatting
+5. Memory update for conversational context
+
+**Transaction Safety:**
+- Complaint creation requires explicit user confirmation
+- All mutations go through existing API endpoints
+- No direct database writes or policy bypasses
+
+### Response Structure
+DAWN responses include:
+- **intent:** Identified intent type
+- **message:** User-facing response text
+- **assistant:** Dawn's conversational response
+- **data:** Structured data for frontend rendering
+- **alerts:** Proactive operational warnings
+
+### Current Limitations
+- No ML-based intent recognition (rule-based only)
+- Limited to predefined intent categories
+- No persistent conversation memory across sessions
+- No integration with external data sources
+- Response formatting is template-based
+
+## 5. STORAGE SYSTEM
+
+### Upload Handling
+**Location:** `services/storageService.js`
+**Storage Root:** Configurable via UPLOAD_ROOT environment variable (defaults to ./uploads)
+
+**File Processing:**
+- Filename sanitization (alphanumeric + safe characters)
+- Unique naming with timestamp prefix
+- Directory structure based on storage keys
+- MIME type and size tracking
+
+**Storage Key Format:**
+- Path-based: `folder/unique-timestamp-filename.ext`
+- Normalized to prevent directory traversal
+- Public URL generation (currently null - local storage only)
+
+### Media Types
+- **photo:** Unit images and walkthroughs
+- **document:** PDFs and supporting documents
+- **walkthrough360:** 360-degree virtual tours
+
+### Current Limitations
+- **Local Storage Only:** No cloud storage integration (S3, GCS, etc.)
+- **No Public URLs:** Files not accessible via HTTP
+- **No CDN:** No content delivery network
+- **No File Size Limits:** Potential for large file uploads
+- **No Virus Scanning:** Security vulnerabilities
+- **No Thumbnail Generation:** No image processing
+
+### Media Lifecycle
+1. Upload → storage service → database record
+2. Unit submission → media validation
+3. Admin review → media verification
+4. Unit approval → media accessibility
+5. Unit deletion → media cleanup
+
+## 6. AUTHENTICATION & SECURITY
+
+### JWT Implementation
+**Location:** `middlewares/auth.js`
+**Secret:** JWT_SECRET environment variable required
+**Algorithm:** Default HS256
+
+**Token Structure:**
+```javascript
+{
+  id: user.id,
+  role: user.role,
+  iat: issuedAt,
+  exp: expiration
+}
+```
+
+### Middleware Chain
+1. **verifyToken:** JWT validation and user context
+2. **requireRole:** Role-based access control
+3. **CORS:** Cross-origin resource sharing
+
+### Security Measures
+- **Role Validation:** All endpoints check user role
+- **Resource Ownership:** Landlords can only access owned units
+- **Geographic Scoping:** All operations corridor-scoped
+- **Input Validation:** Prisma schema validation
+- **Password Hashing:** Bcrypt (implied by auth system)
+
+### Current Security Gaps
+- **No Rate Limiting:** Potential for API abuse
+- **No Input Sanitization:** XSS/SQL injection risks
+- **No Audit Logging:** No security event tracking
+- **Weak JWT Secret:** Development default in example
+- **No HTTPS Enforcement:** HTTP allowed in development
+
+## 7. ENVIRONMENT & DEPLOYMENT
+
+### Required Environment Variables
+- **DATABASE_URL:** PostgreSQL connection string
+- **JWT_SECRET:** JWT signing secret (must be strong in production)
+- **PORT:** Backend server port (default 5000)
+- **FRONTEND_ORIGIN:** CORS allowed origin
+- **API_BASE_URL:** Frontend API base URL
+- **UPLOAD_ROOT:** File storage directory
+
+### Backend Configuration
+- **Node.js:** Runtime environment
+- **Express:** Web framework
+- **Prisma:** ORM with PostgreSQL
+- **JWT:** Authentication
+- **CORS:** Cross-origin support
+
+### Frontend API Linkage
+**Location:** `frontend/lib/api.js`
+**Proxy Pattern:** All API calls go through `/api/proxy` endpoint
+**Authentication:** Bearer token from localStorage
+**Error Handling:** Network error detection and user redirection
+
+### CORS Handling
+- **Allowed Origins:** Configurable via ALLOWED_ORIGINS
+- **Credentials:** Include cookies in requests
+- **Methods:** All standard HTTP methods supported
+
+### Deployment Configuration
+**Render.com:** Free tier web service
+**Build Command:** npm install
+**Start Command:** npm start
+**Environment Variables:** Sync disabled for secrets
+
+## 8. CURRENT LIMITATIONS
+
+### Missing Production Features
+- **No Cloud Storage:** Local file storage only
+- **No CDN:** Static asset delivery limitations
+- **No Monitoring:** No application performance monitoring
+- **No Logging:** Limited error tracking and debugging
+- **No Backup Strategy:** Database backup not configured
+- **No Load Balancing:** Single instance deployment
+
+### Weak Points
+- **Authentication:** No session management, JWT-only
+- **Authorization:** Basic role checking, no fine-grained permissions
+- **Input Validation:** Limited beyond Prisma schema
+- **Error Handling:** Generic error responses
+- **Security:** No rate limiting, input sanitization, or audit logs
+- **Scalability:** No database connection pooling optimization
+
+### Scalability Concerns
+- **Database:** No connection pooling configuration
+- **Memory:** No memory management for large file uploads
+- **Concurrency:** No load testing or performance optimization
+- **Caching:** No Redis or other caching layer
+- **Database Indexes:** No custom indexes for performance
+- **Query Optimization:** No N+1 query prevention
+
+### Technical Debt
+- **Hardcoded Values:** Some configuration in code rather than environment
+- **Error Handling:** Inconsistent error patterns across endpoints
+- **Testing:** No automated test suite
+- **Documentation:** Limited API documentation
+- **Code Organization:** Some business logic mixed with route handlers
+
+### Future Improvements Needed
+1. **Cloud Storage Integration:** S3/GCS for production file storage
+2. **CDN Implementation:** Static asset delivery optimization
+3. **Monitoring Stack:** Application and infrastructure monitoring
+4. **Security Hardening:** Rate limiting, input sanitization, audit logging
+5. **Performance Optimization:** Database indexing, query optimization, caching
+6. **Testing Framework:** Unit tests, integration tests, E2E tests
+7. **CI/CD Pipeline:** Automated deployment and testing
+8. **Documentation:** Comprehensive API documentation and developer guides
+
+This technical documentation provides a comprehensive view of the NearNest system architecture, highlighting both its current capabilities and areas requiring attention for production deployment.

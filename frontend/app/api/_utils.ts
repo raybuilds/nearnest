@@ -1,0 +1,89 @@
+const BACKEND_BASE = (process.env.API_BASE_URL || process.env.NEXT_PUBLIC_API_URL || "")
+  .trim()
+  .replace(/\/+$/, "");
+
+type BackendOptions = {
+  method?: string;
+  body?: unknown;
+  headers?: Record<string, string>;
+  formData?: FormData;
+};
+
+export function getForwardHeaders(request: Request, extraHeaders: Record<string, string> = {}) {
+  const authorization = request.headers.get("authorization");
+  const role = request.headers.get("x-nearnest-role");
+
+  return {
+    ...(authorization ? { Authorization: authorization } : {}),
+    ...(role ? { "x-nearnest-role": role } : {}),
+    ...extraHeaders,
+  };
+}
+
+export async function fetchBackend(path: string, options: BackendOptions = {}) {
+  if (!BACKEND_BASE) {
+    return new Response(
+      JSON.stringify({
+        error: "NEXT_PUBLIC_API_URL is not configured for the frontend deployment.",
+      }),
+      {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  let response: Response;
+
+  try {
+    response = await fetch(`${BACKEND_BASE}${path}`, {
+      method: options.method ?? "GET",
+      headers: {
+        ...(options.body ? { "Content-Type": "application/json" } : {}),
+        ...(options.headers ?? {}),
+      },
+      body: options.formData ?? (options.body ? JSON.stringify(options.body) : undefined),
+      cache: "no-store",
+    });
+  } catch {
+    return new Response(
+      JSON.stringify({
+        error: `Unable to reach backend service at ${BACKEND_BASE}.`,
+      }),
+      {
+        status: 502,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  const contentType = response.headers.get("content-type") || "";
+  const isJson = contentType.includes("application/json");
+  const data = isJson ? await response.json() : null;
+
+  if (!response.ok) {
+    return new Response(
+      JSON.stringify({
+        error: data?.error ?? data?.message ?? "Unable to retrieve data",
+      }),
+      {
+        status: response.status,
+        headers: { "Content-Type": "application/json" },
+      }
+    );
+  }
+
+  if (isJson) {
+    return Response.json(data);
+  }
+
+  const audioBuffer = await response.arrayBuffer();
+  return new Response(audioBuffer, {
+    status: response.status,
+    headers: {
+      "Content-Type": contentType || "application/octet-stream",
+      ...(response.headers.get("Cache-Control") ? { "Cache-Control": response.headers.get("Cache-Control") as string } : {}),
+      ...(response.headers.get("X-Dawn-Voice-Profile") ? { "X-Dawn-Voice-Profile": response.headers.get("X-Dawn-Voice-Profile") as string } : {}),
+    },
+  });
+}

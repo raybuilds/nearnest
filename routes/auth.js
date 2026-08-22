@@ -8,18 +8,22 @@ const router = express.Router();
 
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, role, intake, corridorId, institutionId } = req.body;
+    const { name, email, password, role, intake, corridorId, institutionId, phoneNumber, studentOccupantId } = req.body;
 
     if (!name || !email || !password || !role) {
       return res.status(400).json({ error: "name, email, password and role are required" });
     }
 
-    if (!["student", "landlord"].includes(role)) {
-      return res.status(400).json({ error: "role must be student or landlord" });
+    if (!["student", "landlord", "parent"].includes(role)) {
+      return res.status(400).json({ error: "role must be student, landlord, or parent" });
     }
 
     if (role === "student" && (!intake || !corridorId)) {
       return res.status(400).json({ error: "student registration requires intake and corridorId" });
+    }
+
+    if (role === "parent" && (!phoneNumber || !studentOccupantId)) {
+      return res.status(400).json({ error: "parent registration requires phoneNumber and studentOccupantId" });
     }
 
     const existingUser = await prisma.user.findUnique({
@@ -43,6 +47,7 @@ router.post("/register", async (req, res) => {
 
       let student = null;
       let landlord = null;
+      let parent = null;
 
       if (role === "student") {
         const corridor = await tx.corridor.findUnique({ where: { id: Number(corridorId) } });
@@ -81,7 +86,37 @@ router.post("/register", async (req, res) => {
         });
       }
 
-      return { user, student, landlord };
+      if (role === "parent") {
+        const occupant = await tx.occupant.findFirst({
+          where: {
+            publicId: String(studentOccupantId).trim(),
+            active: true,
+          },
+          select: { studentId: true },
+        });
+
+        if (!occupant) {
+          throw new Error("Active occupant record not found");
+        }
+
+        parent = await tx.parent.create({
+          data: {
+            userId: user.id,
+            phoneNumber: String(phoneNumber).trim(),
+          },
+        });
+
+        await tx.parentStudent.create({
+          data: {
+            parentId: parent.id,
+            studentId: occupant.studentId,
+            verified: true,
+            active: true,
+          },
+        });
+      }
+
+      return { user, student, landlord, parent };
     });
 
     const token = jwt.sign(
@@ -102,6 +137,7 @@ router.post("/register", async (req, res) => {
       },
       studentId: result.student?.id || null,
       landlordId: result.landlord?.id || null,
+      parentId: result.parent?.id || null,
       token,
     });
   } catch (error) {
@@ -113,6 +149,9 @@ router.post("/register", async (req, res) => {
     }
     if (error.message === "Institution does not belong to corridor") {
       return res.status(400).json({ error: "Institution does not belong to corridor" });
+    }
+    if (error.message === "Active occupant record not found") {
+      return res.status(404).json({ error: "Active occupant record not found" });
     }
     console.error(error);
     return res.status(500).json({ error: "Something went wrong" });
@@ -150,6 +189,7 @@ router.post("/login", async (req, res) => {
 
     let studentId = null;
     let landlordId = null;
+    let parentId = null;
     if (user.role === "student") {
       const student = await prisma.student.findFirst({ where: { userId: user.id } });
       studentId = student?.id || null;
@@ -157,6 +197,10 @@ router.post("/login", async (req, res) => {
     if (user.role === "landlord") {
       const landlord = await prisma.landlord.findFirst({ where: { userId: user.id } });
       landlordId = landlord?.id || null;
+    }
+    if (user.role === "parent") {
+      const parent = await prisma.parent.findFirst({ where: { userId: user.id } });
+      parentId = parent?.id || null;
     }
 
     return res.json({
@@ -168,6 +212,7 @@ router.post("/login", async (req, res) => {
       },
       studentId,
       landlordId,
+      parentId,
       token,
     });
   } catch (error) {

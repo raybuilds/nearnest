@@ -1,0 +1,158 @@
+.page {
+  display: grid;
+  gap: 20px;
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 0 24px 40px;
+}
+
+.backLink {
+  color: var(--text-muted);
+  font-size: 13px;
+  transition: color 0.2s ease;
+}
+
+.backLink:hover {
+  color: var(--text-main);
+}
+
+.hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 28px;
+  align-items: center;
+}
+
+.heroTitle {
+  font-family: var(--font-display);
+  font-size: clamp(2rem, 4vw, 2.8rem);
+  margin: 6px 0 0;
+}
+
+.heroMeta,
+.heroActions,
+.heroStats,
+.chipRow,
+.buttonRow,
+.mediaHeader,
+.timelineHeader,
+.sectionRow,
+.inlineForm {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.heroActions,
+.heroStats {
+  justify-content: flex-end;
+}
+
+.heroDistance,
+.muted,
+.mediaText {
+  color: var(--text-muted);
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.metricGrid,
+.infoGrid,
+.uploadGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 12px;
+}
+
+.score {
+  font-size: 2rem;
+  font-family: var(--font-display);
+  margin: 12px 0;
+}
+
+.mediaGrid,
+.timeline {
+  display: grid;
+  gap: 12px;
+}
+
+.trustExplain {
+  display: grid;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.explainHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.checklist,
+.field {
+  display: grid;
+  gap: 12px;
+}
+
+.checkRow {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--text-main);
+}
+
+.tabBar {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.tab,
+.tabActive {
+  border-radius: 999px;
+  padding: 9px 14px;
+  border: 1px solid var(--border-mid);
+  background: transparent;
+  color: var(--text-muted);
+  text-transform: capitalize;
+  transition: all 0.2s ease;
+}
+
+.tabActive {
+  background: rgba(108, 142, 245, 0.12);
+  color: var(--accent-primary);
+  border-color: rgba(108, 142, 245, 0.28);
+}
+
+.skeleton,
+.skeletonTall {
+  border-radius: var(--radius-lg);
+  background: var(--bg-surface);
+  animation: pulse 1.8s ease-in-out infinite;
+}
+
+.skeleton {
+  height: 120px;
+}
+
+.skeletonTall {
+  height: 320px;
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 0 16px 32px;
+  }
+
+  .hero {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+}
