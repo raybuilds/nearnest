@@ -63,14 +63,25 @@ export default function DawnAnalyticsViewer({ analytics }) {
             <p className="text-xs text-slate-500">No operational facts registered yet.</p>
           ) : (
             <div className="p-4 border border-white/5 rounded-2xl bg-white/5 space-y-3">
-              {facts.map((fact, index) => (
-                <div key={index} className="flex justify-between items-center text-xs border-b border-white/5 pb-2 last:border-0 last:pb-0">
-                  <span className="text-slate-400 font-medium">{fact.type}</span>
-                  <span className="text-white font-semibold font-mono">
-                    {typeof fact.value === "object" ? JSON.stringify(fact.value) : String(fact.value)} {fact.unit}
-                  </span>
-                </div>
-              ))}
+              {facts.map((fact, index) => {
+                const formatValue = (val) => {
+                  if (val === null || val === undefined) return "—";
+                  if (typeof val === "object") {
+                    return Object.entries(val)
+                      .map(([k, v]) => `${k}: ${v}`)
+                      .join(", ");
+                  }
+                  return String(val);
+                };
+                return (
+                  <div key={index} className="flex justify-between items-center text-xs border-b border-white/5 pb-2 last:border-0 last:pb-0 gap-3">
+                    <span className="text-slate-400 font-medium shrink-0">{fact.type}</span>
+                    <span className="text-white font-semibold font-mono text-right whitespace-normal break-words max-w-[70%]">
+                      {formatValue(fact.value)} {fact.unit}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>
@@ -82,14 +93,28 @@ export default function DawnAnalyticsViewer({ analytics }) {
             <p className="text-xs text-slate-500">No derived signals generated yet.</p>
           ) : (
             <div className="p-4 border border-white/5 rounded-2xl bg-white/5 space-y-3">
-              {signals.map((sig, index) => (
-                <div key={index} className="flex justify-between items-center text-xs border-b border-white/5 pb-2 last:border-0 last:pb-0">
-                  <span className="text-slate-400 font-medium">{sig.type}</span>
-                  <span className="text-white font-semibold font-mono">
-                    {typeof sig.value === "object" ? JSON.stringify(sig.value) : (typeof sig.value === "number" && sig.value % 1 !== 0 ? sig.value.toFixed(2) : String(sig.value))} {sig.unit}
-                  </span>
-                </div>
-              ))}
+              {signals.map((sig, index) => {
+                const formatValue = (val) => {
+                  if (val === null || val === undefined) return "—";
+                  if (typeof val === "object") {
+                    return Object.entries(val)
+                      .map(([k, v]) => `${k}: ${v}`)
+                      .join(", ");
+                  }
+                  if (typeof val === "number" && val % 1 !== 0) {
+                    return val.toFixed(2);
+                  }
+                  return String(val);
+                };
+                return (
+                  <div key={index} className="flex justify-between items-center text-xs border-b border-white/5 pb-2 last:border-0 last:pb-0 gap-3">
+                    <span className="text-slate-400 font-medium shrink-0">{sig.type}</span>
+                    <span className="text-white font-semibold font-mono text-right whitespace-normal break-words max-w-[70%]">
+                      {formatValue(sig.value)} {sig.unit}
+                    </span>
+                  </div>
+                );
+              })}
             </div>
           )}
         </div>

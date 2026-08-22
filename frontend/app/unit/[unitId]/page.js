@@ -38,6 +38,7 @@ import { formatDateTime, getStatusTone, getTrustBand } from "@/lib/governance";
 import { getStoredRole } from "@/lib/session";
 import DawnAnalyticsViewer from "@/components/DawnAnalyticsViewer";
 import { FadeIn, Reveal, Expand } from "@/components/ui/Motion";
+import { AnimatePresence } from "framer-motion";
 
 const structuralFields = ["fireExit", "wiringSafe", "plumbingSafe", "occupancyCompliant"];
 const operationalFields = ["bedAvailable", "waterAvailable", "toiletsAvailable", "ventilationGood"];

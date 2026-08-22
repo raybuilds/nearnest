@@ -21,7 +21,17 @@ async function forward(request: Request, { params }: { params: { path: string[] 
     });
   }
 
-  const body = method === "GET" || method === "HEAD" ? undefined : isJson ? await request.json() : undefined;
+  let body = undefined;
+  if (method !== "GET" && method !== "HEAD" && isJson) {
+    try {
+      const text = await request.text();
+      if (text) {
+        body = JSON.parse(text);
+      }
+    } catch {
+      // fallback to undefined for empty or invalid bodies
+    }
+  }
 
   return fetchBackend(`${path}${query}`, {
     method,
