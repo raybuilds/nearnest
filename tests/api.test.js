@@ -1987,3 +1987,1254 @@ test("dawn negative: complaint without active occupancy is rejected and cross-la
     }
   }
 });
+
+test("occupancy lifecycle: same student check, capacity limit, and checkout-re-entry", async () => {
+  const tag = createTag("lifecycle");
+  const password = "pass123";
+
+  let corridorId = null;
+  let unitId = null;
+  let landlordAccount = null;
+  let student1 = null;
+  let student2 = null;
+  let student3 = null;
+  let occupancyId1 = null;
+
+  try {
+    const corridor = await prisma.corridor.create({
+      data: { name: `${tag}-corridor`, cityCode: 12 },
+    });
+    corridorId = corridor.id;
+
+    landlordAccount = await createLandlord({
+      name: `${tag}-landlord`,
+      email: `${tag}-landlord@example.test`,
+      password,
+    });
+
+    unitId = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 85,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    student1 = await createStudent({
+      name: `${tag}-student-1`,
+      email: `${tag}-student1@example.test`,
+      password,
+      corridorId,
+    });
+    student2 = await createStudent({
+      name: `${tag}-student-2`,
+      email: `${tag}-student2@example.test`,
+      password,
+      corridorId,
+    });
+    student3 = await createStudent({
+      name: `${tag}-student-3`,
+      email: `${tag}-student3@example.test`,
+      password,
+      corridorId,
+    });
+
+    const login = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-landlord@example.test`,
+        password,
+      },
+    });
+    assert.equal(login.status, 200);
+    const landlordToken = login.data.token;
+
+    // 1. Student 1 checks in successfully
+    const checkin1 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId, studentId: student1.student.id },
+    });
+    assert.equal(checkin1.status, 201);
+    occupancyId1 = checkin1.data.id;
+
+    // 2. Student 1 attempts checking in again -> should fail
+    const checkin1Repeat = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId, studentId: student1.student.id },
+    });
+    assert.equal(checkin1Repeat.status, 400);
+
+    // 3. Student 2 checks in successfully
+    const checkin2 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId, studentId: student2.student.id },
+    });
+    assert.equal(checkin2.status, 201);
+
+    // 4. Unit capacity is 2. Student 3 attempts check-in -> should fail
+    const checkin3Fail = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId, studentId: student3.student.id },
+    });
+    assert.equal(checkin3Fail.status, 400);
+
+    // 5. Student 1 checks out
+    const checkout1 = await api(`/occupancy/${occupancyId1}/check-out`, {
+      method: "PATCH",
+      token: landlordToken,
+    });
+    assert.equal(checkout1.status, 200);
+
+    // 6. Student 3 attempts check-in again -> should now succeed
+    const checkin3Succeed = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId, studentId: student3.student.id },
+    });
+    assert.equal(checkin3Succeed.status, 201);
+  } finally {
+    if (unitId) {
+      await prisma.complaint.deleteMany({ where: { unitId } });
+      await prisma.occupancy.deleteMany({ where: { unitId } });
+      await prisma.occupant.deleteMany({ where: { unitId } });
+      await prisma.shortlist.deleteMany({ where: { unitId } });
+      await prisma.auditLog.deleteMany({ where: { unitId } });
+      await prisma.structuralChecklist.deleteMany({ where: { unitId } });
+      await prisma.operationalChecklist.deleteMany({ where: { unitId } });
+      await prisma.unitMedia.deleteMany({ where: { unitId } });
+      await prisma.unit.deleteMany({ where: { id: unitId } });
+    }
+    for (const account of [student1, student2, student3]) {
+      if (!account) continue;
+      await prisma.vDPEntry.deleteMany({ where: { studentId: account.student.id } });
+      await prisma.student.deleteMany({ where: { id: account.student.id } });
+      await prisma.user.deleteMany({ where: { id: account.user.id } });
+    }
+    if (landlordAccount) {
+      await prisma.landlord.deleteMany({ where: { id: landlordAccount.landlord.id } });
+      await prisma.user.deleteMany({ where: { id: landlordAccount.user.id } });
+    }
+    if (corridorId) {
+      await prisma.corridor.deleteMany({ where: { id: corridorId } });
+    }
+  }
+});
+
+test("parent system: registration, authorization, and occupancy boundaries", async () => {
+  const tag = createTag("parent");
+  const password = "pass123";
+
+  let corridorId = null;
+  let unitIdA = null;
+  let unitIdB = null;
+  let landlordAccount = null;
+  let studentA = null;
+  let studentB = null;
+  let occupantPublicIdA1 = null;
+  let parentAUserId = null;
+  let parentBUserId = null;
+
+  try {
+    const corridor = await prisma.corridor.create({
+      data: { name: `${tag}-corridor`, cityCode: 12 },
+    });
+    corridorId = corridor.id;
+
+    landlordAccount = await createLandlord({
+      name: `${tag}-landlord`,
+      email: `${tag}-landlord@example.test`,
+      password,
+    });
+
+    unitIdA = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 85,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    unitIdB = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 85,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    studentA = await createStudent({
+      name: `${tag}-student-A`,
+      email: `${tag}-student-A@example.test`,
+      password,
+      corridorId,
+    });
+
+    studentB = await createStudent({
+      name: `${tag}-student-B`,
+      email: `${tag}-student-B@example.test`,
+      password,
+      corridorId,
+    });
+
+    const landlordLogin = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-landlord@example.test`,
+        password,
+      },
+    });
+    const landlordToken = landlordLogin.data.token;
+
+    // Check Student A in to Unit A
+    const checkinA1 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId: unitIdA, studentId: studentA.student.id },
+    });
+    assert.equal(checkinA1.status, 201);
+    occupantPublicIdA1 = checkinA1.data.occupant.publicId;
+
+    // 1. Invalid registration: nonexistent occupant ID
+    const regFail1 = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-1`,
+        email: `${tag}-parent1@example.test`,
+        password,
+        role: "parent",
+        phoneNumber: "1234567890",
+        studentOccupantId: "12-000-000-000-1",
+      },
+    });
+    assert.equal(regFail1.status, 404);
+
+    // 2. Invalid registration: missing fields
+    const regFail2 = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-1`,
+        email: `${tag}-parent1@example.test`,
+        password,
+        role: "parent",
+        studentOccupantId: occupantPublicIdA1,
+      },
+    });
+    assert.equal(regFail2.status, 400);
+
+    // 3. Valid Parent A registration linked to Student A
+    const regSuccess = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-A`,
+        email: `${tag}-parentA@example.test`,
+        password,
+        role: "parent",
+        phoneNumber: "9876543210",
+        studentOccupantId: occupantPublicIdA1,
+      },
+    });
+    assert.equal(regSuccess.status, 201);
+    parentAUserId = regSuccess.data.user.id;
+
+    // 4. Invalid registration: duplicate parent email
+    const regDup = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-A-dup`,
+        email: `${tag}-parentA@example.test`,
+        password,
+        role: "parent",
+        phoneNumber: "9876543210",
+        studentOccupantId: occupantPublicIdA1,
+      },
+    });
+    assert.equal(regDup.status, 409);
+
+    const parentALogin = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-parentA@example.test`,
+        password,
+      },
+    });
+    assert.equal(parentALogin.status, 200);
+    const parentAToken = parentALogin.data.token;
+
+    // 5. Parent A retrieves dashboard for Student A successfully
+    const dashboardA = await api("/parent/dashboard", {
+      token: parentAToken,
+    });
+    assert.equal(dashboardA.status, 200);
+    assert.equal(dashboardA.data.child.name, studentA.student.name);
+    assert.equal(dashboardA.data.occupancy.unit.id, unitIdA);
+
+    // 6. Register Parent B linked to Student B (Occupying Unit B)
+    const checkinB1 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId: unitIdB, studentId: studentB.student.id },
+    });
+    assert.equal(checkinB1.status, 201);
+    const occupantPublicIdB1 = checkinB1.data.occupant.publicId;
+
+    const regParentB = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-B`,
+        email: `${tag}-parentB@example.test`,
+        password,
+        role: "parent",
+        phoneNumber: "5555555555",
+        studentOccupantId: occupantPublicIdB1,
+      },
+    });
+    assert.equal(regParentB.status, 201);
+    parentBUserId = regParentB.data.user.id;
+
+    const parentBLogin = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-parentB@example.test`,
+        password,
+      },
+    });
+    const parentBToken = parentBLogin.data.token;
+
+    // 7. Security: Parent A cannot access Parent B's student dashboard details
+    // Since dashboard route does not take parameter and is contextual, Parent A dashboard returns Student A data, not Student B.
+    const dashboardAQuery = await api("/parent/dashboard", {
+      token: parentAToken,
+    });
+    assert.equal(dashboardAQuery.data.child.name, studentA.student.name);
+
+    // 8. Security: Parent B cannot access landlord check-in or admin unit review endpoints
+    const landlordAction = await api("/occupancy/check-in", {
+      method: "POST",
+      token: parentBToken,
+      body: { unitId: unitIdA, studentId: studentA.student.id },
+    });
+    assert.equal(landlordAction.status, 403);
+
+    const adminAction = await api(`/admin/unit/${unitIdA}/review`, {
+      method: "PATCH",
+      token: parentBToken,
+      body: { status: "approved" },
+    });
+    assert.equal(adminAction.status, 403);
+
+    // 9. Occupancy transition: Student A checks out of Unit A, checks into Unit B
+    const checkoutA = await api(`/occupancy/${checkinA1.data.id}/check-out`, {
+      method: "PATCH",
+      token: landlordToken,
+    });
+    assert.equal(checkoutA.status, 200);
+
+    const checkinA2 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId: unitIdB, studentId: studentA.student.id },
+    });
+    assert.equal(checkinA2.status, 201);
+
+    // Parent A should now see Unit B in dashboard automatically
+    const dashboardATransition = await api("/parent/dashboard", {
+      token: parentAToken,
+    });
+    assert.equal(dashboardATransition.status, 200);
+    assert.equal(dashboardATransition.data.occupancy.unit.id, unitIdB);
+
+    // 10. Registration: Historical ID rejection
+    const regFailHist = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-A-hist`,
+        email: `${tag}-parentAHist@example.test`,
+        password,
+        role: "parent",
+        phoneNumber: "9876543210",
+        studentOccupantId: occupantPublicIdA1, // Now historical
+      },
+    });
+    assert.equal(regFailHist.status, 404);
+
+    // 11. Same Unit !== Same Authorization Test
+    // Student B checks out of Unit B
+    const checkoutB = await api(`/occupancy/${checkinB1.data.id}/check-out`, {
+      method: "PATCH",
+      token: landlordToken,
+    });
+    assert.equal(checkoutB.status, 200);
+
+    // Student A checks out of Unit B
+    const checkoutA2 = await api(`/occupancy/${checkinA2.data.id}/check-out`, {
+      method: "PATCH",
+      token: landlordToken,
+    });
+    assert.equal(checkoutA2.status, 200);
+
+    // Now, Student B checks in to Unit A
+    const checkinB2 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId: unitIdA, studentId: studentB.student.id },
+    });
+    assert.equal(checkinB2.status, 201);
+
+    // Parent A dashboard should NOT see Student B's active occupancy at Unit A
+    const dashboardAIsolated = await api("/parent/dashboard", {
+      token: parentAToken,
+    });
+    assert.equal(dashboardAIsolated.status, 200);
+    assert.equal(dashboardAIsolated.data.occupancy, null); // Student A is not active anywhere
+  } finally {
+    for (const unitId of [unitIdA, unitIdB]) {
+      if (!unitId) continue;
+      await prisma.complaint.deleteMany({ where: { unitId } });
+      await prisma.occupancy.deleteMany({ where: { unitId } });
+      await prisma.occupant.deleteMany({ where: { unitId } });
+      await prisma.shortlist.deleteMany({ where: { unitId } });
+      await prisma.auditLog.deleteMany({ where: { unitId } });
+      await prisma.structuralChecklist.deleteMany({ where: { unitId } });
+      await prisma.operationalChecklist.deleteMany({ where: { unitId } });
+      await prisma.unitMedia.deleteMany({ where: { unitId } });
+      await prisma.unit.deleteMany({ where: { id: unitId } });
+    }
+
+    if (parentAUserId) {
+      await prisma.parentStudent.deleteMany({ where: { parent: { userId: parentAUserId } } });
+      await prisma.parent.deleteMany({ where: { userId: parentAUserId } });
+      await prisma.user.deleteMany({ where: { id: parentAUserId } });
+    }
+
+    if (parentBUserId) {
+      await prisma.parentStudent.deleteMany({ where: { parent: { userId: parentBUserId } } });
+      await prisma.parent.deleteMany({ where: { userId: parentBUserId } });
+      await prisma.user.deleteMany({ where: { id: parentBUserId } });
+    }
+
+    for (const account of [studentA, studentB]) {
+      if (!account) continue;
+      await prisma.vDPEntry.deleteMany({ where: { studentId: account.student.id } });
+      await prisma.student.deleteMany({ where: { id: account.student.id } });
+      await prisma.user.deleteMany({ where: { id: account.user.id } });
+    }
+
+    if (landlordAccount) {
+      await prisma.landlord.deleteMany({ where: { id: landlordAccount.landlord.id } });
+      await prisma.user.deleteMany({ where: { id: landlordAccount.user.id } });
+    }
+
+    if (corridorId) {
+      await prisma.corridor.deleteMany({ where: { id: corridorId } });
+    }
+  }
+});
+
+test("guest system: lifecycle, transitions, and relationship scoping", async () => {
+  const tag = createTag("guest");
+  const password = "pass123";
+
+  let corridorId = null;
+  let unitIdA = null;
+  let unitIdB = null;
+  let landlordAccount = null;
+  let studentA = null;
+  let studentB = null;
+  let parentAUserId = null;
+  let parentBUserId = null;
+
+  try {
+    const corridor = await prisma.corridor.create({
+      data: { name: `${tag}-corridor`, cityCode: 12 },
+    });
+    corridorId = corridor.id;
+
+    landlordAccount = await createLandlord({
+      name: `${tag}-landlord`,
+      email: `${tag}-landlord@example.test`,
+      password,
+    });
+
+    unitIdA = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 85,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    unitIdB = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccount.landlord.id,
+          status: "approved",
+          trustScore: 85,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+        },
+      })
+    ).id;
+
+    studentA = await createStudent({
+      name: `${tag}-student-A`,
+      email: `${tag}-student-a@example.test`,
+      password,
+      corridorId,
+    });
+
+    studentB = await createStudent({
+      name: `${tag}-student-B`,
+      email: `${tag}-student-b@example.test`,
+      password,
+      corridorId,
+    });
+
+    const landlordLogin = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-landlord@example.test`,
+        password,
+      },
+    });
+    const landlordToken = landlordLogin.data.token;
+
+    const studentALogin = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-student-a@example.test`,
+        password,
+      },
+    });
+    const studentAToken = studentALogin.data.token;
+
+    const studentBLogin = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-student-b@example.test`,
+        password,
+      },
+    });
+    const studentBToken = studentBLogin.data.token;
+
+    // 1. Guest check-in without active occupancy -> should fail (400)
+    const checkinFailNoOcc = await api("/guest/check-in", {
+      method: "POST",
+      token: studentAToken,
+      body: { guestName: "Guest X" },
+    });
+    assert.equal(checkinFailNoOcc.status, 400);
+
+    // Check Student A in to Unit A
+    const checkinA1 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId: unitIdA, studentId: studentA.student.id },
+    });
+    assert.equal(checkinA1.status, 201);
+    const occupantPublicIdA1 = checkinA1.data.occupant.publicId;
+
+    // Check Student B in to Unit B
+    const checkinB1 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId: unitIdB, studentId: studentB.student.id },
+    });
+    assert.equal(checkinB1.status, 201);
+    const occupantPublicIdB1 = checkinB1.data.occupant.publicId;
+
+    // Register parents
+    const regParentA = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-A`,
+        email: `${tag}-parentA@example.test`,
+        password,
+        role: "parent",
+        phoneNumber: "9876543210",
+        studentOccupantId: occupantPublicIdA1,
+      },
+    });
+    assert.equal(regParentA.status, 201);
+    parentAUserId = regParentA.data.user.id;
+
+    const parentALogin = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-parentA@example.test`,
+        password,
+      },
+    });
+    const parentAToken = parentALogin.data.token;
+
+    const regParentB = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-B`,
+        email: `${tag}-parentB@example.test`,
+        password,
+        role: "parent",
+        phoneNumber: "5555555555",
+        studentOccupantId: occupantPublicIdB1,
+      },
+    });
+    assert.equal(regParentB.status, 201);
+    parentBUserId = regParentB.data.user.id;
+
+    const parentBLogin = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-parentB@example.test`,
+        password,
+      },
+    });
+    const parentBToken = parentBLogin.data.token;
+
+    // 2. Valid guest creation for Student A
+    const checkinGuestA1 = await api("/guest/check-in", {
+      method: "POST",
+      token: studentAToken,
+      body: { guestName: "Guest A1" },
+    });
+    assert.equal(checkinGuestA1.status, 201);
+    const guestStayA1Id = checkinGuestA1.data.id;
+    assert.equal(checkinGuestA1.data.active, true);
+
+    // 3. Valid guest creation for Student B
+    const checkinGuestB1 = await api("/guest/check-in", {
+      method: "POST",
+      token: studentBToken,
+      body: { guestName: "Guest B1" },
+    });
+    assert.equal(checkinGuestB1.status, 201);
+    const guestStayB1Id = checkinGuestB1.data.id;
+
+    // 4. Security: Student A cannot check out Student B's guest
+    const checkoutCross = await api(`/guest/${guestStayB1Id}/check-out`, {
+      method: "PATCH",
+      token: studentAToken,
+    });
+    assert.equal(checkoutCross.status, 403);
+
+    // 5. Parent A can fetch linked Student A's active guest stays
+    const parentADashboard = await api("/parent/dashboard", {
+      token: parentAToken,
+    });
+    assert.equal(parentADashboard.status, 200);
+    assert.equal(parentADashboard.data.guestStays.length, 1);
+    assert.equal(parentADashboard.data.guestStays[0].guestName, "Guest A1");
+
+    // 6. Security: Parent B cannot access Parent A's child's guest stays
+    // The route parent/dashboard is parameterless, so Parent B querying it gets B's child data (Guest B1), not A1.
+    const parentBDashboard = await api("/parent/dashboard", {
+      token: parentBToken,
+    });
+    assert.equal(parentBDashboard.data.guestStays[0].guestName, "Guest B1");
+
+    // 7. Landlord can access guest stays for their own unit
+    const landlordGuestStays = await api(`/landlord/unit/${unitIdA}/guest-stays`, {
+      token: landlordToken,
+    });
+    assert.equal(landlordGuestStays.status, 200);
+    assert.equal(landlordGuestStays.data.length, 1);
+    assert.equal(landlordGuestStays.data[0].guestName, "Guest A1");
+
+    // 8. Security: Landlord cannot access another landlord's unit guest logs
+    // Create a dummy second landlord
+    const secondLandlordAcc = await createLandlord({
+      name: `${tag}-landlord-2`,
+      email: `${tag}-landlord2@example.test`,
+      password,
+    });
+    const landlord2Login = await api("/auth/login", {
+      method: "POST",
+      body: {
+        email: `${tag}-landlord2@example.test`,
+        password,
+      },
+    });
+    const landlord2Token = landlord2Login.data.token;
+
+    const landlord2Action = await api(`/landlord/unit/${unitIdA}/guest-stays`, {
+      token: landlord2Token,
+    });
+    assert.equal(landlord2Action.status, 403);
+
+    // Clean up second landlord
+    await prisma.landlord.deleteMany({ where: { id: secondLandlordAcc.landlord.id } });
+    await prisma.user.deleteMany({ where: { id: secondLandlordAcc.user.id } });
+
+    // 9. Guest checkout works
+    const checkoutSuccess = await api(`/guest/${guestStayA1Id}/check-out`, {
+      method: "PATCH",
+      token: studentAToken,
+    });
+    assert.equal(checkoutSuccess.status, 200);
+    assert.equal(checkoutSuccess.data.active, false);
+
+    // 10. Repeated checkout is safe (idempotent)
+    const checkoutRepeat = await api(`/guest/${guestStayA1Id}/check-out`, {
+      method: "PATCH",
+      token: studentAToken,
+    });
+    assert.equal(checkoutRepeat.status, 200);
+
+    // 11. Historical stay remains intact on student stays list
+    const studentStaysList = await api("/guest/stays", {
+      token: studentAToken,
+    });
+    assert.equal(studentStaysList.status, 200);
+    assert.equal(studentStaysList.data.length, 1);
+    assert.equal(studentStaysList.data[0].active, false);
+
+    // 12. Occupancy transition preserves historical guest stays
+    // Checkout Student A from Unit A
+    const checkoutA1 = await api(`/occupancy/${checkinA1.data.id}/check-out`, {
+      method: "PATCH",
+      token: landlordToken,
+    });
+    assert.equal(checkoutA1.status, 200);
+
+    // Check Student A into Unit B
+    const checkinA2 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId: unitIdB, studentId: studentA.student.id },
+    });
+    assert.equal(checkinA2.status, 201);
+
+    // Check in Guest A2 for Student A in Unit B
+    const checkinGuestA2 = await api("/guest/check-in", {
+      method: "POST",
+      token: studentAToken,
+      body: { guestName: "Guest A2" },
+    });
+    assert.equal(checkinGuestA2.status, 201);
+
+    // Parent A dashboard should only see A2 (active for current stay), not A1 (historical)
+    const parentADashTransition = await api("/parent/dashboard", {
+      token: parentAToken,
+    });
+    assert.equal(parentADashTransition.data.guestStays.length, 1);
+    assert.equal(parentADashTransition.data.guestStays[0].guestName, "Guest A2");
+
+    // Landlord queries Unit A to see Guest A1 (historical Unit A guest stay)
+    const landlordUnitAGuests = await api(`/landlord/unit/${unitIdA}/guest-stays`, {
+      token: landlordToken,
+    });
+    assert.equal(landlordUnitAGuests.data.length, 1);
+    assert.equal(landlordUnitAGuests.data[0].guestName, "Guest A1");
+
+    // Landlord queries Unit B to see Guest B1 and Guest A2
+    const landlordUnitBGuests = await api(`/landlord/unit/${unitIdB}/guest-stays`, {
+      token: landlordToken,
+    });
+    const names = landlordUnitBGuests.data.map((item) => item.guestName);
+    assert.ok(names.includes("Guest B1"));
+    assert.ok(names.includes("Guest A2"));
+
+    // 13. Same Unit / different student isolation
+    // Checkout Student B from Unit B
+    const checkoutB1 = await api(`/occupancy/${checkinB1.data.id}/check-out`, {
+      method: "PATCH",
+      token: landlordToken,
+    });
+    assert.equal(checkoutB1.status, 200);
+
+    // Student B checks in to Unit A
+    const checkinB2 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordToken,
+      body: { unitId: unitIdA, studentId: studentB.student.id },
+    });
+    assert.equal(checkinB2.status, 201);
+
+    // Check in Guest B2 for Student B in Unit A
+    const checkinGuestB2 = await api("/guest/check-in", {
+      method: "POST",
+      token: studentBToken,
+      body: { guestName: "Guest B2" },
+    });
+    assert.equal(checkinGuestB2.status, 201);
+
+    // Parent A (linked to Student A who is in Unit B) does not see Guest B2 (Student B's guest in Unit A)
+    const parentADashIsolated = await api("/parent/dashboard", {
+      token: parentAToken,
+    });
+    assert.equal(parentADashIsolated.data.guestStays.length, 1);
+    assert.equal(parentADashIsolated.data.guestStays[0].guestName, "Guest A2");
+
+    // 14. Unauthenticated requests are rejected
+    const unauthAction = await api("/guest/check-in", {
+      method: "POST",
+      body: { guestName: "Unauth" },
+    });
+    assert.equal(unauthAction.status, 401);
+  } finally {
+    for (const unitId of [unitIdA, unitIdB]) {
+      if (!unitId) continue;
+      await prisma.guestStay.deleteMany({ where: { occupancy: { unitId } } });
+      await prisma.complaint.deleteMany({ where: { unitId } });
+      await prisma.occupancy.deleteMany({ where: { unitId } });
+      await prisma.occupant.deleteMany({ where: { unitId } });
+      await prisma.shortlist.deleteMany({ where: { unitId } });
+      await prisma.auditLog.deleteMany({ where: { unitId } });
+      await prisma.structuralChecklist.deleteMany({ where: { unitId } });
+      await prisma.operationalChecklist.deleteMany({ where: { unitId } });
+      await prisma.unitMedia.deleteMany({ where: { unitId } });
+      await prisma.unit.deleteMany({ where: { id: unitId } });
+    }
+
+    if (parentAUserId) {
+      await prisma.parentStudent.deleteMany({ where: { parent: { userId: parentAUserId } } });
+      await prisma.parent.deleteMany({ where: { userId: parentAUserId } });
+      await prisma.user.deleteMany({ where: { id: parentAUserId } });
+    }
+
+    if (parentBUserId) {
+      await prisma.parentStudent.deleteMany({ where: { parent: { userId: parentBUserId } } });
+      await prisma.parent.deleteMany({ where: { userId: parentBUserId } });
+      await prisma.user.deleteMany({ where: { id: parentBUserId } });
+    }
+
+    for (const account of [studentA, studentB]) {
+      if (!account) continue;
+      await prisma.vDPEntry.deleteMany({ where: { studentId: account.student.id } });
+      await prisma.student.deleteMany({ where: { id: account.student.id } });
+      await prisma.user.deleteMany({ where: { id: account.user.id } });
+    }
+
+    if (landlordAccount) {
+      await prisma.landlord.deleteMany({ where: { id: landlordAccount.landlord.id } });
+      await prisma.user.deleteMany({ where: { id: landlordAccount.user.id } });
+    }
+
+    if (corridorId) {
+      await prisma.corridor.deleteMany({ where: { id: corridorId } });
+    }
+  }
+});
+
+test("payment system: lifecycles, concurrency, validations, and administrative overrides", async () => {
+  const tag = createTag("payment");
+  const password = "pass123";
+
+  let corridorId = null;
+  let unitIdA = null;
+  let unitIdB = null;
+  let landlordAccountA = null;
+  let landlordAccountB = null;
+  let studentA = null;
+  let studentB = null;
+  let parentAUserId = null;
+  let parentBUserId = null;
+  let adminAccount = null;
+
+  try {
+    const corridor = await prisma.corridor.create({
+      data: { name: `${tag}-corridor`, cityCode: 12 },
+    });
+    corridorId = corridor.id;
+
+    // Landlord A and B
+    landlordAccountA = await createLandlord({
+      name: `${tag}-landlord-A`,
+      email: `${tag}-landlorda@example.test`,
+      password,
+    });
+
+    landlordAccountB = await createLandlord({
+      name: `${tag}-landlord-B`,
+      email: `${tag}-landlordb@example.test`,
+      password,
+    });
+
+    // Units
+    unitIdA = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccountA.landlord.id,
+          status: "approved",
+          trustScore: 85,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+          rent: 8000,
+        },
+      })
+    ).id;
+
+    unitIdB = (
+      await prisma.unit.create({
+        data: {
+          corridorId,
+          landlordId: landlordAccountB.landlord.id,
+          status: "approved",
+          trustScore: 85,
+          structuralApproved: true,
+          operationalBaselineApproved: true,
+          capacity: 2,
+          rent: 9500,
+        },
+      })
+    ).id;
+
+    // Students
+    studentA = await createStudent({
+      name: `${tag}-student-A`,
+      email: `${tag}-student-a@example.test`,
+      password,
+      corridorId,
+    });
+
+    studentB = await createStudent({
+      name: `${tag}-student-B`,
+      email: `${tag}-student-b@example.test`,
+      password,
+      corridorId,
+    });
+
+    // Tokens
+    const landlordALogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-landlorda@example.test`, password },
+    });
+    const landlordAToken = landlordALogin.data.token;
+
+    const landlordBLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-landlordb@example.test`, password },
+    });
+    const landlordBToken = landlordBLogin.data.token;
+
+    const studentALogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-student-a@example.test`, password },
+    });
+    const studentAToken = studentALogin.data.token;
+
+    const studentBLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-student-b@example.test`, password },
+    });
+    const studentBToken = studentBLogin.data.token;
+
+    // Register Parent A linked to Student A
+    // Check student A in first to get an active occupant ID
+    const checkinA1 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordAToken,
+      body: { unitId: unitIdA, studentId: studentA.student.id },
+    });
+    assert.equal(checkinA1.status, 201);
+    const occupantPublicIdA1 = checkinA1.data.occupant.publicId;
+
+    const regParentA = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-A`,
+        email: `${tag}-parenta@example.test`,
+        password,
+        role: "parent",
+        phoneNumber: "9876543210",
+        studentOccupantId: occupantPublicIdA1,
+      },
+    });
+    assert.equal(regParentA.status, 201);
+    parentAUserId = regParentA.data.user.id;
+
+    const parentALogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-parenta@example.test`, password },
+    });
+    const parentAToken = parentALogin.data.token;
+
+    // Check student B in Unit B
+    const checkinB1 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordBToken,
+      body: { unitId: unitIdB, studentId: studentB.student.id },
+    });
+    assert.equal(checkinB1.status, 201);
+    const occupantPublicIdB1 = checkinB1.data.occupant.publicId;
+
+    // Register Parent B linked to Student B
+    const regParentB = await api("/auth/register", {
+      method: "POST",
+      body: {
+        name: `${tag}-parent-B`,
+        email: `${tag}-parentb@example.test`,
+        password,
+        role: "parent",
+        phoneNumber: "5555555555",
+        studentOccupantId: occupantPublicIdB1,
+      },
+    });
+    parentBUserId = regParentB.data.user.id;
+
+    const parentBLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-parentb@example.test`, password },
+    });
+    const parentBToken = parentBLogin.data.token;
+
+    // Create Admin user
+    const adminUser = await prisma.user.create({
+      data: {
+        name: `${tag}-admin`,
+        email: `${tag}-admin@example.test`,
+        password: await bcrypt.hash(password, 10),
+        role: "admin",
+      },
+    });
+    adminAccount = adminUser;
+
+    const adminLogin = await api("/auth/login", {
+      method: "POST",
+      body: { email: `${tag}-admin@example.test`, password },
+    });
+    const adminToken = adminLogin.data.token;
+
+    // 1. GET /payment/ledger - should seed obligations for active occupancy A1
+    const ledgerA = await api("/payment/ledger", { token: studentAToken });
+    assert.equal(ledgerA.status, 200);
+    assert.ok(ledgerA.data.length > 0);
+    const currentMonthStr = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}`;
+    const activePayments = ledgerA.data[0].payments;
+    const currentMonthPayment = activePayments.find((p) => p.month === currentMonthStr);
+    assert.ok(currentMonthPayment);
+    assert.equal(currentMonthPayment.status, "PENDING");
+    assert.equal(currentMonthPayment.amount, 8000); // snapshots Unit A rent
+
+    // 2. Concurrency: Concurrent GET requests does not crash or create duplicates
+    const p1 = api("/payment/ledger", { token: studentAToken });
+    const p2 = api("/payment/ledger", { token: studentAToken });
+    const [r1, r2] = await Promise.all([p1, p2]);
+    assert.equal(r1.status, 200);
+    assert.equal(r2.status, 200);
+
+    // 3. Month validation: future month check-in rejected
+    const nextYearMonthStr = `${new Date().getFullYear() + 1}-01`;
+    const submitFailFuture = await api("/payment/submit", {
+      method: "POST",
+      token: studentAToken,
+      body: { month: nextYearMonthStr, receiptRef: "REF1" },
+    });
+    assert.equal(submitFailFuture.status, 400);
+
+    // 4. Immutability: Modify Unit rent, historical generated payment amount should not change
+    await prisma.unit.update({
+      where: { id: unitIdA },
+      data: { rent: 11000 },
+    });
+    const ledgerARefresh = await api("/payment/ledger", { token: studentAToken });
+    const refreshedCurrentMonthPayment = ledgerARefresh.data[0].payments.find((p) => p.month === currentMonthStr);
+    assert.equal(refreshedCurrentMonthPayment.amount, 8000); // still 8000!
+
+    // 5. Valid Student A payment submission
+    const submitSuccess = await api("/payment/submit", {
+      method: "POST",
+      token: studentAToken,
+      body: { month: currentMonthStr, receiptRef: "RECEIPT_A1" },
+    });
+    assert.equal(submitSuccess.status, 200);
+    assert.equal(submitSuccess.data.status, "PAID");
+    assert.equal(submitSuccess.data.receiptRef, "RECEIPT_A1");
+
+    // Attempting to submit again should fail
+    const submitDup = await api("/payment/submit", {
+      method: "POST",
+      token: studentAToken,
+      body: { month: currentMonthStr, receiptRef: "RECEIPT_A2" },
+    });
+    assert.equal(submitDup.status, 400);
+
+    // 6. Parent Scoping: Parent A can submit for Student A, but not Student B
+    // Seed Student B's obligation
+    const ledgerB = await api("/payment/ledger", { token: studentBToken });
+    const currentMonthPaymentB = ledgerB.data[0].payments.find((p) => p.month === currentMonthStr);
+    assert.ok(currentMonthPaymentB);
+
+    // Parent A attempts submit for Student B -> should fail (403)
+    const parentASubmitB = await api("/payment/submit", {
+      method: "POST",
+      token: parentAToken,
+      body: { month: currentMonthStr, receiptRef: "RECEIPT_P_B", studentId: studentB.student.id },
+    });
+    assert.equal(parentASubmitB.status, 403);
+
+    // Parent B submits for Student B -> should succeed (200)
+    const parentBSubmitB = await api("/payment/submit", {
+      method: "POST",
+      token: parentBToken,
+      body: { month: currentMonthStr, receiptRef: "RECEIPT_P_B_OK", studentId: studentB.student.id },
+    });
+    assert.equal(parentBSubmitB.status, 200);
+
+    // 7. Landlord Scoping: Landlord A can read and verify Student A's payment (Unit A)
+    const paymentIdA1 = submitSuccess.data.id;
+    const paymentIdB1 = parentBSubmitB.data.id;
+
+    // Landlord B attempts to verify Landlord A's unit payment -> should fail (403)
+    const landlordBVerifyA = await api(`/payment/${paymentIdA1}/verify`, {
+      method: "PATCH",
+      token: landlordBToken,
+    });
+    assert.equal(landlordBVerifyA.status, 403);
+
+    // Landlord A verifies Student A payment -> should succeed (200)
+    const landlordAVerifyA = await api(`/payment/${paymentIdA1}/verify`, {
+      method: "PATCH",
+      token: landlordAToken,
+    });
+    assert.equal(landlordAVerifyA.status, 200);
+    assert.equal(landlordAVerifyA.data.status, "VERIFIED");
+
+    // Landlord A tries verifying again -> idempotent (200)
+    const landlordAVerifyADup = await api(`/payment/${paymentIdA1}/verify`, {
+      method: "PATCH",
+      token: landlordAToken,
+    });
+    assert.equal(landlordAVerifyADup.status, 200);
+
+    // 8. Reversal check: Landlord cannot reverse verified status
+    const landlordAReverse = await api(`/admin/payment/${paymentIdA1}/override`, {
+      method: "PATCH",
+      token: landlordAToken,
+      body: { status: "PENDING", reason: "Accidental verify" },
+    });
+    assert.equal(landlordAReverse.status, 403);
+
+    // 9. Admin Override and Audit JSON details
+    const adminOverride = await api(`/admin/payment/${paymentIdA1}/override`, {
+      method: "PATCH",
+      token: adminToken,
+      body: { status: "PAID", amount: 7500, reason: "Correction needed" },
+    });
+    assert.equal(adminOverride.status, 200);
+    assert.equal(adminOverride.data.status, "PAID");
+    assert.equal(adminOverride.data.amount, 7500);
+
+    const audits = await prisma.paymentAudit.findMany({
+      where: { paymentId: paymentIdA1 },
+      orderBy: { createdAt: "desc" },
+    });
+    const overrideAudit = audits.find((a) => a.action === "ADMIN_OVERRIDE");
+    assert.ok(overrideAudit);
+    assert.equal(overrideAudit.reason, "Correction needed");
+    assert.equal(overrideAudit.changes.status.old, "VERIFIED");
+    assert.equal(overrideAudit.changes.status.new, "PAID");
+    assert.equal(overrideAudit.changes.amount.old, 8000);
+    assert.equal(overrideAudit.changes.amount.new, 7500);
+
+    // 10. Historical Occupancy isolation across stays
+    // Student A checkout of Unit A
+    const checkoutA1 = await api(`/occupancy/${checkinA1.data.id}/check-out`, {
+      method: "PATCH",
+      token: landlordAToken,
+    });
+    assert.equal(checkoutA1.status, 200);
+
+    // Check Student A in to Unit B (Active Occupancy 2)
+    const checkinA2 = await api("/occupancy/check-in", {
+      method: "POST",
+      token: landlordBToken,
+      body: { unitId: unitIdB, studentId: studentA.student.id },
+    });
+    assert.equal(checkinA2.status, 201);
+
+    // Fetch ledger again
+    const ledgerATrans = await api("/payment/ledger", { token: studentAToken });
+    assert.equal(ledgerATrans.status, 200);
+    // Student A now has 2 occupancies in ledger
+    assert.equal(ledgerATrans.data.length, 2);
+
+    // Find the historical occupancy payments in response
+    const histOccRecord = ledgerATrans.data.find((o) => o.occupancy.id === checkinA1.data.id);
+    const newOccRecord = ledgerATrans.data.find((o) => o.occupancy.id === checkinA2.data.id);
+
+    assert.ok(histOccRecord.payments.find((p) => p.month === currentMonthStr));
+    assert.ok(newOccRecord.payments.find((p) => p.month === currentMonthStr));
+
+  } finally {
+    if (adminAccount) {
+      await prisma.paymentAudit.deleteMany({ where: { actorId: adminAccount.id } });
+      await prisma.user.deleteMany({ where: { id: adminAccount.id } });
+    }
+
+    for (const unitId of [unitIdA, unitIdB]) {
+      if (!unitId) continue;
+      await prisma.paymentAudit.deleteMany({ where: { payment: { occupancy: { unitId } } } });
+      await prisma.payment.deleteMany({ where: { occupancy: { unitId } } });
+      await prisma.guestStay.deleteMany({ where: { occupancy: { unitId } } });
+      await prisma.complaint.deleteMany({ where: { unitId } });
+      await prisma.occupancy.deleteMany({ where: { unitId } });
+      await prisma.occupant.deleteMany({ where: { unitId } });
+      await prisma.shortlist.deleteMany({ where: { unitId } });
+      await prisma.auditLog.deleteMany({ where: { unitId } });
+      await prisma.structuralChecklist.deleteMany({ where: { unitId } });
+      await prisma.operationalChecklist.deleteMany({ where: { unitId } });
+      await prisma.unitMedia.deleteMany({ where: { unitId } });
+      await prisma.unit.deleteMany({ where: { id: unitId } });
+    }
+
+    if (parentAUserId) {
+      await prisma.parentStudent.deleteMany({ where: { parent: { userId: parentAUserId } } });
+      await prisma.parent.deleteMany({ where: { userId: parentAUserId } });
+      await prisma.user.deleteMany({ where: { id: parentAUserId } });
+    }
+
+    if (parentBUserId) {
+      await prisma.parentStudent.deleteMany({ where: { parent: { userId: parentBUserId } } });
+      await prisma.parent.deleteMany({ where: { userId: parentBUserId } });
+      await prisma.user.deleteMany({ where: { id: parentBUserId } });
+    }
+
+    for (const account of [studentA, studentB]) {
+      if (!account) continue;
+      await prisma.vDPEntry.deleteMany({ where: { studentId: account.student.id } });
+      await prisma.student.deleteMany({ where: { id: account.student.id } });
+      await prisma.user.deleteMany({ where: { id: account.user.id } });
+    }
+
+    for (const landlordAccount of [landlordAccountA, landlordAccountB]) {
+      if (!landlordAccount) continue;
+      await prisma.landlord.deleteMany({ where: { id: landlordAccount.landlord.id } });
+      await prisma.user.deleteMany({ where: { id: landlordAccount.user.id } });
+    }
+
+    if (corridorId) {
+      await prisma.corridor.deleteMany({ where: { id: corridorId } });
+    }
+  }
+});

@@ -106,17 +106,16 @@ router.post("/occupancy/check-in", verifyToken, requireRole("landlord"), async (
           where: {
             unitId: parsedUnitId,
             roomNumber,
-            active: true,
           },
           select: { occupantIndex: true },
         });
 
         const usedIndices = new Set(existing.map((item) => item.occupantIndex));
         let occupantIndex = 1;
-        while (usedIndices.has(occupantIndex) && occupantIndex <= maxAllowedCapacity) {
+        while (usedIndices.has(occupantIndex) && occupantIndex <= maxEncodableSlots) {
           occupantIndex += 1;
         }
-        if (occupantIndex > maxAllowedCapacity || occupantIndex > maxEncodableSlots) {
+        if (occupantIndex > maxEncodableSlots) {
           throw createCheckInError("NO_SLOT_AVAILABLE", "No occupant slot available for this room mapping");
         }
 

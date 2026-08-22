@@ -35,6 +35,27 @@
   --accent-cyan: #82caff;
   --accent-sand: #f2c67d;
   --accent-coral: #f68d96;
+
+  /* Architectural minimal design system tokens (Phase 1) */
+  --color-alabaster: #f7f5f0;
+  --color-greige: #eae6df;
+  --color-sand: #e6dfd5;
+  --color-beige: #dfd8cb;
+  --color-terracotta: #c2410c;
+  --color-rust: #991b1b;
+  --color-olive: #65a30d;
+  --color-sage: #86efac;
+  --color-gold: #d97706;
+  --color-charcoal: #121212;
+  --color-espresso: #44403c;
+  --color-slate: #1a1d20;
+
+  /* Typography Scales */
+  --font-size-hero: 4rem;
+  --font-size-display: 2.75rem;
+  --font-size-h1: 2.25rem;
+  --font-size-h2: 1.75rem;
+  --font-size-h3: 1.25rem;
 }
 
 :root[data-theme="light"] {

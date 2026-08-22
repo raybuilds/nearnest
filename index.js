@@ -17,6 +17,12 @@ const landlordRoutes = require("./routes/landlord");
 const dawnRoutes = require("./routes/dawn");
 const profileRoutes = require("./routes/profile");
 const mediaRoutes = require("./routes/media");
+const parentRoutes = require("./routes/parent");
+const guestRoutes = require("./routes/guest");
+const paymentRoutes = require("./routes/payment");
+const agreementRoutes = require("./routes/agreement");
+const analyticsRoutes = require("./routes/analytics");
+const alertRoutes = require("./routes/alerts");
 
 const app = express();
 const PORT = Number(process.env.PORT || 5000);
@@ -82,6 +88,12 @@ app.use(landlordRoutes);
 app.use(dawnRoutes);
 app.use(profileRoutes);
 app.use(mediaRoutes);
+app.use(parentRoutes);
+app.use(guestRoutes);
+app.use(paymentRoutes);
+app.use(agreementRoutes);
+app.use(analyticsRoutes);
+app.use(alertRoutes);
 
 app.use((err, req, res, next) => {
   if (err?.message === "CORS origin not allowed") {

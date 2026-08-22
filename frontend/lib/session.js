@@ -7,7 +7,7 @@ function emitSessionChange() {
 
 function normalizeRole(value) {
   const role = String(value || "").trim().toLowerCase();
-  return ["student", "landlord", "admin"].includes(role) ? role : "";
+  return ["student", "landlord", "parent", "admin"].includes(role) ? role : "";
 }
 
 export function getStoredRole() {
@@ -57,6 +57,12 @@ export function setSessionFromPayload(payload) {
     localStorage.setItem("landlordId", String(payload.landlordId));
   } else {
     localStorage.removeItem("landlordId");
+  }
+
+  if (payload?.parentId !== null && payload?.parentId !== undefined) {
+    localStorage.setItem("parentId", String(payload.parentId));
+  } else {
+    localStorage.removeItem("parentId");
   }
 
   emitSessionChange();

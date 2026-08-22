@@ -25,7 +25,9 @@ model User {
   createdAt DateTime  @default(now())
   student   Student?
   landlord  Landlord?
+  parent    Parent?
   uploadedMedia UnitMedia[]
+  alerts    Alert[]
 }
 
 model Student {
@@ -43,6 +45,7 @@ model Student {
   occupancies Occupancy[]
   occupants  Occupant[]
   shortlists Shortlist[]
+  guardians  ParentStudent[]
 }
 
 model Landlord {
@@ -50,6 +53,28 @@ model Landlord {
   userId Int    @unique
   user   User   @relation(fields: [userId], references: [id])
   units  Unit[]
+}
+
+model Parent {
+  id          Int             @id @default(autoincrement())
+  userId      Int             @unique
+  user        User            @relation(fields: [userId], references: [id])
+  phoneNumber String
+  students    ParentStudent[]
+}
+
+model ParentStudent {
+  id        Int      @id @default(autoincrement())
+  parentId  Int
+  studentId Int
+  verified  Boolean  @default(false)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  parent    Parent   @relation(fields: [parentId], references: [id])
+  student   Student  @relation(fields: [studentId], references: [id])
+
+  @@unique([parentId, studentId])
 }
 
 model Unit {
@@ -82,6 +107,7 @@ model Unit {
   operationalChecklist        OperationalChecklist?
   media                       UnitMedia[]
   auditLogs                   AuditLog[]
+  compliances                 UnitCompliance[]
 }
 
 enum UnitStatus {
@@ -142,13 +168,69 @@ model Institution {
 }
 
 model Occupancy {
+  id         Int         @id @default(autoincrement())
+  unitId     Int
+  studentId  Int
+  startDate  DateTime    @default(now())
+  endDate    DateTime?
+  unit       Unit        @relation(fields: [unitId], references: [id])
+  student    Student     @relation(fields: [studentId], references: [id])
+  guestStays GuestStay[]
+  payments   Payment[]
+  agreements Agreement[]
+}
+
+model Payment {
+  id          Int            @id @default(autoincrement())
+  occupancyId Int
+  amount      Int
+  month       String         // Format: YYYY-MM
+  status      PaymentStatus  @default(PENDING)
+  receiptRef  String?
+  createdAt   DateTime       @default(now())
+  updatedAt   DateTime       @updatedAt
+  occupancy   Occupancy      @relation(fields: [occupancyId], references: [id])
+  audits      PaymentAudit[]
+
+  @@unique([occupancyId, month])
+  @@index([status])
+  @@index([occupancyId])
+}
+
+model PaymentAudit {
   id        Int      @id @default(autoincrement())
-  unitId    Int
-  studentId Int
-  startDate DateTime @default(now())
-  endDate   DateTime?
-  unit      Unit     @relation(fields: [unitId], references: [id])
-  student   Student  @relation(fields: [studentId], references: [id])
+  paymentId Int
+  actorId   Int      // User.id of the person making the change
+  action    String   // e.g. "STATUS_CHANGE", "CORRECTION"
+  changes   Json?    // e.g. {"status": {"old": "PAID", "new": "VERIFIED"}}
+  reason    String?
+  requestId String?
+  createdAt DateTime @default(now())
+  payment   Payment  @relation(fields: [paymentId], references: [id])
+
+  @@index([paymentId])
+  @@index([actorId])
+}
+
+enum PaymentStatus {
+  PENDING
+  PAID
+  VERIFIED
+}
+
+model GuestStay {
+  id           Int       @id @default(autoincrement())
+  guestName    String
+  occupancyId  Int
+  startDate    DateTime  @default(now())
+  endDate      DateTime?
+  active       Boolean   @default(true)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+  occupancy    Occupancy @relation(fields: [occupancyId], references: [id])
+
+  @@index([occupancyId])
+  @@index([active])
 }
 
 model Occupant {
@@ -230,4 +312,121 @@ model AuditLog {
   resolved  Boolean  @default(false)
   resolvedAt DateTime?
   unit      Unit     @relation(fields: [unitId], references: [id])
+}
+
+model Agreement {
+  id               Int             @id @default(autoincrement())
+  occupancyId      Int
+  version          Int             @default(1)
+  status           AgreementStatus @default(DRAFT)
+  rentAmount       Int
+  securityDeposit  Int
+  noticePeriodDays Int             @default(30)
+  startDate        DateTime
+  endDate          DateTime
+  documentPath     String?
+  tenantSigned     Boolean         @default(false)
+  tenantSignedAt   DateTime?
+  landlordSigned   Boolean         @default(false)
+  landlordSignedAt DateTime?
+  createdAt        DateTime        @default(now())
+  updatedAt        DateTime        @updatedAt
+
+  occupancy        Occupancy       @relation(fields: [occupancyId], references: [id])
+
+  @@unique([occupancyId, version])
+  @@index([occupancyId])
+  @@index([status])
+}
+
+model UnitCompliance {
+  id         Int              @id @default(autoincrement())
+  unitId     Int
+  docType    String
+  storageKey String
+  fileName   String
+  expiryDate DateTime?
+  status     ComplianceStatus @default(PENDING)
+  createdAt  DateTime         @default(now())
+
+  unit       Unit             @relation(fields: [unitId], references: [id])
+  audits     ComplianceAudit[]
+
+  @@index([unitId])
+  @@index([status])
+}
+
+model ComplianceAudit {
+  id             Int              @id @default(autoincrement())
+  complianceId   Int
+  actorId        Int
+  action         String
+  previousStatus ComplianceStatus
+  newStatus      ComplianceStatus
+  reason         String?
+  requestId      String?
+  createdAt      DateTime         @default(now())
+
+  compliance     UnitCompliance   @relation(fields: [complianceId], references: [id])
+
+  @@index([complianceId])
+  @@index([actorId])
+}
+
+enum AgreementStatus {
+  DRAFT
+  PENDING_TENANT
+  PENDING_LANDLORD
+  ACTIVE
+  EXPIRED
+  TERMINATED
+  SUPERSEDED
+}
+
+enum ComplianceStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum AlertStatus {
+  OPEN
+  READ
+  ACKNOWLEDGED
+  RESOLVED
+  DISMISSED
+  EXPIRED
+}
+
+model Alert {
+  id             Int          @id @default(autoincrement())
+  recipientId    Int
+  eventKey       String       // Non-null deterministic identity key
+  type           String       // e.g. "COMPLIANCE_EXPIRING", "PAYMENT_OVERDUE"
+  severity       String       // INFO, LOW, MEDIUM, HIGH, CRITICAL
+  status         AlertStatus  @default(OPEN)
+  
+  // Relations to existing entities (NULL if not applicable)
+  unitId         Int?
+  occupancyId    Int?
+  paymentId      Int?
+  agreementId    Int?
+  guestStayId    Int?
+  complaintId    Int?
+
+  title          String
+  message        String
+  metadata       Json?        // Optional key-value context
+  
+  createdAt      DateTime     @default(now())
+  readAt         DateTime?
+  resolvedAt     DateTime?
+  expiresAt      DateTime?
+
+  recipient      User         @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@index([recipientId, status])
+  @@index([createdAt])
+  @@unique([recipientId, eventKey]) // Guarantees robust idempotency
 }

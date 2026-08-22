@@ -179,4 +179,42 @@ export async function speakDawn(body) {
   }
 }
 
+export const getParentDashboard = () => apiRequest("/parent/dashboard");
+export const checkInGuest = (body) => apiRequest("/guest/check-in", { method: "POST", body });
+export const checkOutGuest = (id) => apiRequest(`/guest/${id}/check-out`, { method: "PATCH" });
+export const getGuestStays = () => apiRequest("/guest/stays");
+export const getLandlordGuestStays = (unitId) => apiRequest(`/landlord/unit/${unitId}/guest-stays`);
+export const getPaymentLedger = () => apiRequest("/payment/ledger");
+export const submitPayment = (body) => apiRequest("/payment/submit", { method: "POST", body });
+export const verifyPayment = (id) => apiRequest(`/payment/${id}/verify`, { method: "PATCH" });
+export const overridePayment = (id, body) => apiRequest(`/admin/payment/${id}/override`, { method: "PATCH", body });
+export const getStudentAgreements = () => apiRequest("/api/student/agreements");
+export const signTenantAgreement = (id) => apiRequest(`/api/agreement/${id}/sign-tenant`, { method: "PATCH" });
+export const signLandlordAgreement = (id) => apiRequest(`/api/agreement/${id}/sign-landlord`, { method: "PATCH" });
+export const submitAgreement = (id) => apiRequest(`/api/agreement/${id}/submit`, { method: "PATCH" });
+export const createAgreement = (body) => apiRequest("/api/agreement", { method: "POST", body });
+export const createAgreementVersion = (id, body) => apiRequest(`/api/agreement/${id}/version`, { method: "POST", body });
+export const getParentChildAgreements = () => apiRequest("/api/parent/child-agreements");
+export const getLandlordCompliance = (unitId) => apiRequest(`/api/landlord/unit/${unitId}/compliance`);
+export const uploadCompliance = (unitId, formData) => apiRequest(`/api/landlord/unit/${unitId}/compliance`, { method: "POST", body: formData, isFormData: true });
+export const verifyCompliance = (id, body) => apiRequest(`/api/compliance/${id}/verify`, { method: "PATCH", body });
+export const getAdminCompliance = () => apiRequest("/api/compliance");
+export const terminateAgreement = (id, body) => apiRequest(`/api/agreement/${id}/terminate`, { method: "PATCH", body });
+export const getAdminAgreements = () => apiRequest("/api/agreements");
+
+export const getLandlordPayments = (unitId) => apiRequest(`/landlord/unit/${unitId}/payments`);
+export const getAdminPayments = () => apiRequest("/admin/payments");
+export const getLandlordAgreements = (unitId) => apiRequest(`/api/landlord/unit/${unitId}/agreements`);
+
+export const getStudentAnalytics = () => apiRequest("/api/student/analytics");
+export const getParentAnalytics = () => apiRequest("/api/parent/analytics");
+export const getLandlordUnitAnalytics = (unitId) => apiRequest(`/api/landlord/unit/${unitId}/analytics`);
+export const getAdminAnalytics = () => apiRequest("/api/admin/analytics");
+
+export const getAlerts = (status = "", page = 1) => apiRequest(`/api/alerts?status=${status}&page=${page}`);
+export const readAlert = (id) => apiRequest(`/api/alerts/${id}/read`, { method: "PATCH" });
+export const acknowledgeAlert = (id) => apiRequest(`/api/alerts/${id}/acknowledge`, { method: "PATCH" });
+export const resolveAlert = (id) => apiRequest(`/api/alerts/${id}/resolve`, { method: "PATCH" });
+export const dismissAlert = (id) => apiRequest(`/api/alerts/${id}/dismiss`, { method: "PATCH" });
+
 export { BASE };

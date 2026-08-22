@@ -7,7 +7,7 @@ import { login } from "@/lib/api";
 import { clearSession, setSessionFromPayload } from "@/lib/session";
 import styles from "./page.module.css";
 
-const roleTabs = ["student", "landlord", "admin"];
+const roleTabs = ["student", "landlord", "parent", "admin"];
 
 export default function LoginPage() {
   const router = useRouter();
@@ -56,7 +56,11 @@ export default function LoginPage() {
 
       setSessionFromPayload(payload);
 
-      router.push("/dashboard");
+      if (actualRole === "parent") {
+        router.push("/parent/dashboard");
+      } else {
+        router.push("/dashboard");
+      }
     } catch (submitError) {
       setError(submitError.message || "Sign in failed");
     } finally {

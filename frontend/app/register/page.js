@@ -6,7 +6,7 @@ import { useRouter } from "next/navigation";
 import { getCorridors, getInstitutions, joinVDP, register } from "@/lib/api";
 import { setSessionFromPayload } from "@/lib/session";
 
-const roles = ["student", "landlord"];
+const roles = ["student", "landlord", "parent"];
 
 export default function RegisterPage() {
   const router = useRouter();
@@ -23,6 +23,7 @@ export default function RegisterPage() {
     corridorId: "",
     institutionId: "",
     intake: "",
+    studentOccupantId: "",
   });
 
   useEffect(() => {
@@ -90,6 +91,12 @@ export default function RegisterPage() {
               corridorId: Number(form.corridorId),
               intake: form.intake,
               ...(form.institutionId ? { institutionId: Number(form.institutionId) } : {}),
+            }
+          : {}),
+        ...(form.role === "parent"
+          ? {
+              phoneNumber: form.phone,
+              studentOccupantId: form.studentOccupantId,
             }
           : {}),
       });
@@ -189,12 +196,23 @@ export default function RegisterPage() {
                 <input className="input-shell" onChange={(event) => update("intake", event.target.value)} placeholder="2026" value={form.intake} />
               </label>
             </>
-          ) : (
+          ) : form.role === "parent" ? (
+            <>
+              <label className="grid gap-2">
+                <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Phone</span>
+                <input className="input-shell" onChange={(event) => update("phone", event.target.value)} value={form.phone} />
+              </label>
+              <label className="grid gap-2">
+                <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Student Occupant ID</span>
+                <input className="input-shell" onChange={(event) => update("studentOccupantId", event.target.value)} placeholder="00-000-000-000-0" value={form.studentOccupantId} />
+              </label>
+            </>
+          ) : form.role === "landlord" ? (
             <label className="grid gap-2">
               <span className="text-xs uppercase tracking-[0.22em] text-slate-500">Phone</span>
               <input className="input-shell" onChange={(event) => update("phone", event.target.value)} value={form.phone} />
             </label>
-          )}
+          ) : null}
         </div>
 
         <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
